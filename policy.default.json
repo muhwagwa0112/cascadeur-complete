@@ -1,0 +1,7 @@
+{
+  "developer_execute_python": false,
+  "allow_unc_paths": false,
+  "allow_device_paths": false,
+  "require_snapshot_for_destructive_changes": true,
+  "require_confirmation_for_overwrite": true
+}

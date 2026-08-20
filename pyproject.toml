@@ -1,0 +1,40 @@
+[project]
+name = "cascadeur-complete"
+version = "0.1.0"
+description = "Clean-room, capability-adaptive MCP server for Cascadeur 2026.1.x"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "mcp>=2.0.0,<3",
+  "pydantic>=2.12,<3",
+  "pywinauto==0.6.9",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9,<10",
+  "pytest-asyncio>=1.3,<2",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+cascadeur-complete = "cascadeur_complete.server:main"
+cascadeur-complete-inventory = "cascadeur_complete.discovery:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cascadeur_complete"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
