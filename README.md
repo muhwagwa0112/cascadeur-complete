@@ -71,3 +71,20 @@ Install or refresh with `scripts\install.ps1`, then restart Cascadeur. The comma
 must appear at `Commands > Cascadeur Complete > Process Pending`. Validate the
 host, registration, feature manifest, and Poppet preservation with
 `scripts\verify.ps1`.
+
+## Codex workflow skill
+
+`skills/cascadeur-mcp-workflows` is the companion Codex skill for planning,
+executing, verifying, and rolling back complete Cascadeur production workflows.
+It covers scene/object/file operations, animation and generation, physics,
+rigging, rendering, and DCC integrations while routing UI-, license-, version-,
+and dependency-gated features accurately.
+
+Install it for the current user by copying the skill folder to:
+
+```text
+%USERPROFILE%\.codex\skills\cascadeur-mcp-workflows
+```
+
+Run `skills/cascadeur-mcp-workflows/scripts/validate_tool_coverage.py` after
+changing the MCP public tool contract; the catalog must match all public tools.
