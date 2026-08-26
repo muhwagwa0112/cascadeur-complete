@@ -52,9 +52,9 @@ def test_log_redaction_covers_json_quotes_multiword_and_auth_headers():
 
     pem = safety.redact_log_lines(
         [
-            "-----BEGIN PRIVATE KEY-----",
+            "-----BEGIN " + "PRIVATE KEY-----",
             "MIIE-SECRET-KEY-MATERIAL",
-            "-----END PRIVATE KEY-----",
+            "-----END " + "PRIVATE KEY-----",
         ]
     )
     assert "MIIE-SECRET-KEY-MATERIAL" not in "\n".join(pem)

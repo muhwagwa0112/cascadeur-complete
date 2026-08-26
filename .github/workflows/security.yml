@@ -27,7 +27,10 @@ jobs:
       - name: Reject committed secrets and release binaries
         shell: pwsh
         run: |
-          if (git grep -n -I -E '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AZURE_CLIENT_SECRET|AUTHENTICODE_PASSWORD)' -- ':!*.md') {
+          # Build the expression in pieces so this workflow does not match its
+          # own scanner rule. Test fixtures likewise construct marker strings.
+          $secretPattern = '(BEGIN (RSA |EC |OPENSSH )?PRIVATE ' + 'KEY|AZURE_CLIENT_' + 'SECRET|AUTHENTICODE_' + 'PASSWORD)'
+          if (git grep -n -I -E $secretPattern -- ':!*.md') {
             throw 'Possible secret material found'
           }
           $tracked = git ls-files '*.pfx' '*.p12' '*.pem' '*.key' 'artifacts/*'
