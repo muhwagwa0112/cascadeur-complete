@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "2.0"
 
 
 class ExecutionMode(StrEnum):
@@ -24,6 +24,8 @@ class CapabilityState(StrEnum):
     UI_ONLY = "ui_only"
     UNSUPPORTED_VERSION = "unsupported_version"
     UNHEALTHY = "unhealthy"
+    NOT_IMPLEMENTED = "not_implemented"
+    UNSUPPORTED = "unsupported"
 
 
 class VerificationState(StrEnum):
@@ -71,6 +73,9 @@ class BridgeRequest(BaseModel):
     safety_context: SafetyContext = Field(default_factory=SafetyContext)
     created_at: float
     expires_at: float
+    session_id: str = ""
+    nonce: str = ""
+    mac: str = ""
 
 
 class Evidence(BaseModel):
@@ -94,6 +99,16 @@ class ResultEnvelope(BaseModel):
     duration_ms: int = 0
     error_code: ErrorCode | None = None
     error_message: str | None = None
+    operation_id: str | None = None
+    status: str | None = None
+    scene_revision_before: str | None = None
+    scene_revision_after: str | None = None
+    postconditions: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_id: str | None = None
+    request_id: str | None = None
+    session_id: str | None = None
+    nonce: str | None = None
+    mac: str | None = None
 
 
 class FeatureRecord(BaseModel):
@@ -118,9 +133,17 @@ class FeatureRecord(BaseModel):
     dependency: str | None = None
     source: str
     since: str = "2026.1"
+    source_url: str | None = None
+    public_action: str | None = None
+    operation_id: str | None = None
+    fixture_id: str | None = None
+    mutation: bool = False
+    contract_status: Literal["bound", "gate", "not_implemented", "discovered"] = "discovered"
+    truth_layer: Literal["product", "discovered"] = "discovered"
 
 
 class ChangeToken(BaseModel):
+    schema_version: int = 2
     token: str
     feature_id: str
     scene_id: str | None
@@ -131,6 +154,7 @@ class ChangeToken(BaseModel):
     backup_path: str | None
     expires_at: float
     used: bool = False
+    used_at: float | None = None
 
 
 class JobRecord(BaseModel):

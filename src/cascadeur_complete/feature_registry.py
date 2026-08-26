@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .models import CapabilityState, ExecutionMode, FeatureRecord, VerificationState
+from .product_catalog import PRODUCT_CATALOG, ProductFeature
 
 
 @dataclass(frozen=True)
@@ -286,14 +286,20 @@ def _adapter(
     requires_live: bool = True,
     mode: ExecutionMode | None = None,
 ) -> tuple[str, AdapterSpec]:
-    slug = route.replace(".", "_")
+    contract_test = (
+        "tests/test_mcp_contract.py::test_mcp_lists_expected_tools_and_resources"
+        if route.startswith("host.")
+        else "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+    )
     return (
         route,
         AdapterSpec(
             adapter_id=f"cascadeur_2026_1.{route}",
             preconditions=preconditions,
             postconditions=postconditions,
-            test_ids=(f"contract::{slug}", f"live::{slug}"),
+            # These are resolvable pytest node IDs. Live validation is deliberately
+            # absent until a version-pinned fixture is committed and executed.
+            test_ids=(contract_test,),
             requires_live=requires_live,
             mode=mode,
         ),
@@ -309,8 +315,6 @@ ADAPTER_SPECS = dict(
         _adapter("host.inventory_refresh", postconditions=("schema_counts", "feature_registry")),
         _adapter("system.status", postconditions=("scene_identity", "runtime_tools")),
         _adapter("system.logs", postconditions=("bounded_tail",), mode=ExecutionMode.NATIVE),
-        _adapter("system.tool_inspect", postconditions=("tool_method_catalog",), mode=ExecutionMode.NATIVE),
-        _adapter("system.settings_get", postconditions=("typed_setting_value",), mode=ExecutionMode.NATIVE),
         _adapter(
             "system.view_mode",
             preconditions=("active_viewport", "known_viewport_mode"),
@@ -591,6 +595,7 @@ def _record(
     developer_enabled: bool,
 ) -> FeatureRecord:
     adapter = ADAPTER_SPECS.get(spec.route)
+    product = PRODUCT_CATALOG.by_id.get(spec.feature_id)
     tool_missing = spec.route.startswith("tool.") and spec.route.removeprefix("tool.") not in available_tools
     command_missing = (
         spec.route.startswith("command.") and spec.route.removeprefix("command.") not in available_commands
@@ -598,8 +603,11 @@ def _record(
     dependency = spec.dependency
     if spec.feature_id == "developer_execute_python" and not developer_enabled:
         dependency = "Local policy developer_execute_python=true"
-    if not version_name.startswith("2026.1.") or spec.feature_id == "export_vrm":
+    if version_name != PRODUCT_CATALOG.supported_build or spec.feature_id == "export_vrm":
         state = CapabilityState.UNSUPPORTED_VERSION
+        mode = ExecutionMode.GATED
+    elif product and product.implementation_status == "unsupported":
+        state = CapabilityState.UNSUPPORTED
         mode = ExecutionMode.GATED
     elif spec.license == "pro" and license_name.lower() != "pro":
         state = CapabilityState.LICENSE_GATED
@@ -627,7 +635,7 @@ def _record(
     verification = VerificationState.DISCOVERED
     evidence_kind = "none"
     last_verified_version = None
-    if dependency:
+    if (product and product.implementation_status == "unsupported") or dependency:
         verification = VerificationState.GATED
         evidence_kind = "gate"
     elif adapter:
@@ -648,19 +656,75 @@ def _record(
         execution_mode=mode,
         state=state,
         route=spec.route,
-        test_id=f"feature::{spec.feature_id}",
-        test_ids=list(adapter.test_ids) if adapter else [f"feature::{spec.feature_id}"],
+        test_id=(
+            product.contract_test_ids[0]
+            if product and product.contract_test_ids
+            else "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        ),
+        test_ids=(
+            list(product.contract_test_ids)
+            if product and product.contract_test_ids
+            else ["tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"]
+        ),
         adapter_id=adapter.adapter_id if adapter else None,
-        preconditions=list(adapter.preconditions) if adapter else [],
-        postconditions=list(adapter.postconditions) if adapter else [],
+        preconditions=list(product.preconditions) if product else (list(adapter.preconditions) if adapter else []),
+        postconditions=list(product.postconditions) if product else (list(adapter.postconditions) if adapter else []),
         verification=verification,
         evidence_kind=evidence_kind,
         last_verified_version=last_verified_version,
         requires_scene=spec.requires_scene,
-        destructive=spec.destructive,
+        destructive=product.mutation if product else spec.destructive,
         license=spec.license,  # type: ignore[arg-type]
         dependency=dependency,
-        source="Cascadeur 2026.1 tools and release inventory",
+        source=product.source_url if product else "https://cascadeur.com/help/tools",
+        source_url=product.source_url if product else None,
+        public_action=product.action if product else None,
+        operation_id=product.operation if product else None,
+        fixture_id=product.fixture_id if product else None,
+        mutation=product.mutation if product else spec.destructive,
+        contract_status=(
+            "bound"
+            if adapter
+            else (
+                "gate"
+                if dependency or (product and product.implementation_status == "unsupported")
+                else "not_implemented"
+            )
+        ),
+        truth_layer="product",
+    )
+
+
+def _official_gap_record(feature: ProductFeature) -> FeatureRecord:
+    test_ids = list(feature.contract_test_ids)
+    return FeatureRecord(
+        id=feature.id,
+        family=feature.family,
+        name=feature.name,
+        description=f"Official Cascadeur 2026.1.2 feature without a postcondition-safe MCP adapter: {feature.name}",
+        execution_mode=ExecutionMode.GATED,
+        state=CapabilityState.NOT_IMPLEMENTED,
+        route=f"not_implemented:{feature.id}",
+        test_id=test_ids[0],
+        test_ids=test_ids,
+        adapter_id=None,
+        preconditions=list(feature.preconditions),
+        postconditions=list(feature.postconditions),
+        verification=VerificationState.DISCOVERED,
+        evidence_kind="none",
+        requires_scene=feature.requires_scene,
+        destructive=feature.mutation,
+        license=feature.license,  # type: ignore[arg-type]
+        dependency=feature.dependency,
+        source=feature.source_url,
+        since=feature.since,
+        source_url=feature.source_url,
+        public_action=feature.action,
+        operation_id=feature.operation,
+        fixture_id=feature.fixture_id,
+        mutation=feature.mutation,
+        contract_status="not_implemented",
+        truth_layer="product",
     )
 
 
@@ -691,8 +755,8 @@ def schema_records(schema: dict) -> list[FeatureRecord]:
                 execution_mode=ExecutionMode.NATIVE,
                 state=CapabilityState.AVAILABLE if len(path) < 3 else CapabilityState.NEEDS_SCENE,
                 route=f"csc_query:{dotted}",
-                test_id=f"schema::{hashlib.sha1(dotted.encode()).hexdigest()[:12]}",
-                test_ids=[f"schema::{hashlib.sha1(dotted.encode()).hexdigest()[:12]}"],
+                test_id="tests/test_inventory.py::test_discovered_inventory_is_separate_from_product_catalog",
+                test_ids=["tests/test_inventory.py::test_discovered_inventory_is_separate_from_product_catalog"],
                 adapter_id="cascadeur_2026_1.system.csc_query",
                 preconditions=["installed_symbol"],
                 postconditions=["schema_presence"],
@@ -718,8 +782,8 @@ def command_records(commands: Iterable[dict[str, str]]) -> list[FeatureRecord]:
                 execution_mode=ExecutionMode.ACTION,
                 state=CapabilityState.NEEDS_SCENE,
                 route=f"action_invoke:{name}",
-                test_id=f"command::{hashlib.sha1(name.encode()).hexdigest()[:12]}",
-                test_ids=[f"command::{hashlib.sha1(name.encode()).hexdigest()[:12]}"],
+                test_id="tests/test_inventory.py::test_discovered_inventory_is_separate_from_product_catalog",
+                test_ids=["tests/test_inventory.py::test_discovered_inventory_is_separate_from_product_catalog"],
                 verification=VerificationState.DISCOVERED,
                 evidence_kind="none",
                 source=command.get("path", "installed Python command"),
@@ -739,8 +803,8 @@ def tool_records(tools: Iterable[str]) -> list[FeatureRecord]:
             execution_mode=ExecutionMode.ACTION,
             state=CapabilityState.UI_ONLY,
             route=f"tool:{name}",
-            test_id=f"tool::{hashlib.sha1(name.encode()).hexdigest()[:12]}",
-            test_ids=[f"tool::{hashlib.sha1(name.encode()).hexdigest()[:12]}"],
+            test_id="tests/test_inventory.py::test_discovered_inventory_is_separate_from_product_catalog",
+            test_ids=["tests/test_inventory.py::test_discovered_inventory_is_separate_from_product_catalog"],
             verification=VerificationState.DISCOVERED,
             evidence_kind="none",
             source="runtime ToolsManager",
@@ -777,9 +841,18 @@ def build_registry(
         )
         for spec in CORE_FEATURES
     ]
+    records.extend(_official_gap_record(feature) for feature in PRODUCT_CATALOG.official_gaps)
     records.extend(schema_records(schema))
     records.extend(command_records(command_list))
     records.extend(tool_records(tool_set))
+    if version_name != PRODUCT_CATALOG.supported_build:
+        # Discovered API/command/tool rows are inventory, not an alternate way
+        # around the build pin. Fail closed across every truth layer.
+        for record in records:
+            record.state = CapabilityState.UNSUPPORTED_VERSION
+            record.execution_mode = ExecutionMode.GATED
+            record.verification = VerificationState.GATED
+            record.evidence_kind = "gate"
     unique: dict[str, FeatureRecord] = {}
     for record in records:
         unique[record.id] = record
@@ -787,11 +860,21 @@ def build_registry(
 
 
 def registry_json(records: list[FeatureRecord]) -> str:
+    product_ids = set(PRODUCT_CATALOG.by_id)
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "product_catalog": {
+            "product_version": PRODUCT_CATALOG.product_version,
+            "supported_build": PRODUCT_CATALOG.supported_build,
+            "feature_count": len(PRODUCT_CATALOG.features),
+            "core_feature_count": len(PRODUCT_CATALOG.core_features),
+            "official_gap_count": len(PRODUCT_CATALOG.official_gaps),
+        },
         "feature_count": len(records),
         "unclassified_count": sum(
-            not item.execution_mode or not item.test_ids or not item.evidence_kind for item in records
+            item.id in product_ids
+            and (not item.execution_mode or not item.test_ids or item.evidence_kind == "none")
+            for item in records
         ),
         "features": [item.model_dump(mode="json") for item in records],
     }

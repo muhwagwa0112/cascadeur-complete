@@ -1,4 +1,6 @@
+import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -69,3 +71,65 @@ def test_expired_token_is_rejected(tmp_path):
     path.write_text(__import__("json").dumps(payload), encoding="utf-8")
     with pytest.raises(SafetyError):
         manager.load(token.token)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("feature_id", "status"),
+        ("scene_id", "scene-2"),
+        ("scene_revision", "rev-2"),
+        ("selection_fingerprint", "sel-2"),
+        ("operation", {"name": "system.developer_execute_python", "arguments": {"code": "x"}}),
+        ("impact", {"count": 999}),
+        ("backup_path", "other.casc"),
+        ("expires_at", 9_999_999_999.0),
+    ],
+)
+def test_confirmation_token_rejects_any_approval_payload_tampering(tmp_path, field, replacement):
+    manager = ChangeManager(RuntimePaths.discover(tmp_path / "runtime"), secret=b"z" * 32)
+    token = manager.prepare(
+        feature_id="object_delete",
+        scene_id="scene-1",
+        scene_revision="rev-1",
+        selection_fingerprint="sel-1",
+        operation=Operation(name="object.delete", arguments={"ids": ["1"]}),
+        impact={"count": 1},
+        backup_path="snapshot.casc",
+    )
+    nonce = token.token.split(".", 1)[0]
+    path = manager.paths.tokens / f"{nonce}.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload[field] = replacement
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(SafetyError):
+        manager.load(token.token)
+
+
+def test_confirmation_token_can_be_consumed_exactly_once_concurrently(tmp_path):
+    manager = ChangeManager(RuntimePaths.discover(tmp_path / "runtime"), secret=b"r" * 32)
+    token = manager.prepare(
+        feature_id="object_delete",
+        scene_id="scene-1",
+        scene_revision="rev-1",
+        selection_fingerprint="sel-1",
+        operation=Operation(name="object.delete", arguments={"ids": ["1"]}),
+        impact={"count": 1},
+        backup_path="snapshot.casc",
+    )
+
+    def consume():
+        try:
+            manager.consume(
+                token.token,
+                scene_id="scene-1",
+                scene_revision="rev-1",
+                selection_fingerprint="sel-1",
+            )
+            return True
+        except SafetyError:
+            return False
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(lambda _index: consume(), range(2)))
+    assert sorted(outcomes) == [False, True]

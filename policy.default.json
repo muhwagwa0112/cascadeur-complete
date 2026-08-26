@@ -1,5 +1,7 @@
 {
   "developer_execute_python": false,
+  "developer_mode": false,
+  "generic_api": false,
   "allow_unc_paths": false,
   "allow_device_paths": false,
   "require_snapshot_for_destructive_changes": true,

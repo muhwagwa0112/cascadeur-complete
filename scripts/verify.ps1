@@ -7,28 +7,33 @@ $BridgeRoot = Join-Path $env:LOCALAPPDATA 'Nekki Limited\Cascadeur\user_scripts\
 $Executable = Join-Path $RuntimeRoot '.venv\Scripts\cascadeur-complete.exe'
 $Registry = Join-Path $RuntimeRoot 'state\feature_registry.json'
 
-$Checks = [ordered]@{
+$checks = [ordered]@{
     RuntimeExists = Test-Path -LiteralPath $RuntimeRoot
     ExecutableExists = Test-Path -LiteralPath $Executable
     BridgeRuntimeExists = Test-Path -LiteralPath (Join-Path $BridgeRoot 'runtime.py')
     BridgeCommandExists = Test-Path -LiteralPath (Join-Path $BridgeRoot 'process_pending.py')
     RegistryExists = Test-Path -LiteralPath $Registry
-    CodexRegistered = [bool](codex mcp list | Select-String -SimpleMatch 'cascadeur-complete')
-    PoppetPreserved = [bool](codex mcp list | Select-String -Pattern '^poppet\s')
+    CodexAvailable = [bool](Get-Command codex -ErrorAction SilentlyContinue)
+    CodexRegistered = $false
+    McpSmoke = $false
 }
-
-if ($Checks.Values -contains $false) {
-    $Checks | ConvertTo-Json
-    exit 1
+if ($checks.CodexAvailable) {
+    $checks.CodexRegistered = [bool](& codex mcp list 2>$null | Select-String -SimpleMatch 'cascadeur-complete')
 }
-
-$Manifest = Get-Content -LiteralPath $Registry -Raw | ConvertFrom-Json
-$Checks.FeatureCount = $Manifest.feature_count
-$Checks.UnclassifiedCount = $Manifest.unclassified_count
-if ($Manifest.schema_version -ne 2) {
-    throw "Unexpected feature registry schema version: $($Manifest.schema_version)"
+$required = @('RuntimeExists', 'ExecutableExists', 'BridgeRuntimeExists', 'BridgeCommandExists')
+if ($checks.CodexAvailable) { $required += 'CodexRegistered' }
+if (-not ($required | Where-Object { -not $checks[$_] })) {
+    $output = & (Join-Path $RuntimeRoot '.venv\Scripts\python.exe') (Join-Path $PSScriptRoot 'mcp-smoke.py') --server $Executable --timeout 30 2>&1
+    $checks.McpSmoke = $LASTEXITCODE -eq 0
+    $checks.McpSmokeResult = ($output -join "`n")
+    $checks.RegistryExists = Test-Path -LiteralPath $Registry
 }
-if ($Manifest.unclassified_count -ne 0) {
-    throw "Feature registry contains $($Manifest.unclassified_count) unclassified or untested rows"
+$required += @('McpSmoke', 'RegistryExists')
+if ($checks.RegistryExists) {
+    $manifest = Get-Content -LiteralPath $Registry -Raw | ConvertFrom-Json
+    $checks.FeatureCount = $manifest.feature_count
+    $checks.UnclassifiedCount = $manifest.unclassified_count
+    $checks.SchemaVersion = $manifest.schema_version
 }
-$Checks | ConvertTo-Json
+$checks | ConvertTo-Json -Depth 10
+if ($required | Where-Object { -not $checks[$_] }) { exit 1 }

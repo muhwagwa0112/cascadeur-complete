@@ -8,6 +8,7 @@ from threading import Event, RLock, Thread
 from .atomic_queue import AtomicQueue
 from .models import BridgeRequest, ErrorCode, ExecutionMode, Operation, ResultEnvelope, SafetyContext
 from .paths import RuntimePaths
+from .queue_auth import QueueAuthenticationError
 from .uia import UIAutomationError, invoke_process_pending
 
 
@@ -83,7 +84,7 @@ class BridgeClient:
                     # the atomic cancellation point.
                     remaining = timeout - (time.monotonic() - started)
                     if remaining > 0.01:
-                        response = self.queue.wait_response(request.request_id, remaining)
+                        response = self._wait_response(request, remaining)
                         if response is not None:
                             response.warnings.append(f"UI trigger exceeded its dispatch budget: {exc}")
                             response.duration_ms = int((time.monotonic() - started) * 1000)
@@ -94,7 +95,7 @@ class BridgeClient:
                 except FileNotFoundError:
                     canceled = False
                 if not canceled:
-                    response = self.queue.wait_response(request.request_id, min(timeout, 5.0))
+                    response = self._wait_response(request, min(timeout, 5.0))
                     if response is not None:
                         response.warnings.append(f"UI trigger reported an error after dispatch: {exc}")
                         response.duration_ms = int((time.monotonic() - started) * 1000)
@@ -126,7 +127,7 @@ class BridgeClient:
                 remaining = timeout - (time.monotonic() - started)
                 if remaining <= 0.01:
                     break
-                response = self.queue.wait_response(request.request_id, min(0.35, remaining))
+                response = self._wait_response(request, min(0.35, remaining))
                 if response is not None:
                     if dispatch_attempts > 1:
                         response.warnings.append(f"UI dispatch succeeded after {dispatch_attempts} attempts")
@@ -142,7 +143,7 @@ class BridgeClient:
                 if retry_error is not None:
                     break
         remaining = max(0.01, timeout - (time.monotonic() - started))
-        response = self.queue.wait_response(request.request_id, remaining)
+        response = self._wait_response(request, remaining)
         if response is None:
             # A timed-out request must never remain queued and execute during a
             # later, unrelated Process Pending invocation. If the bridge has
@@ -168,6 +169,22 @@ class BridgeClient:
         if dispatch_attempts > 1:
             response.warnings.append(f"UI dispatch succeeded after {dispatch_attempts} attempts")
         return response
+
+    def _wait_response(self, request: BridgeRequest, timeout: float) -> ResultEnvelope | None:
+        try:
+            return self.queue.wait_response(request.request_id, timeout)
+        except QueueAuthenticationError as exc:
+            self.queue.response_path(request.request_id).unlink(missing_ok=True)
+            return ResultEnvelope(
+                ok=False,
+                feature_id=request.feature_id,
+                execution_mode=ExecutionMode.NATIVE,
+                request_id=request.request_id,
+                session_id=request.session_id,
+                nonce=request.nonce,
+                error_code=ErrorCode.INVALID_REQUEST,
+                error_message=f"Bridge response authentication failed: {exc}",
+            )
 
     def _trigger_error(self, timeout: float) -> UIAutomationError | None:
         completed = Event()

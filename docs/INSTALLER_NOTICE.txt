@@ -1,0 +1,10 @@
+Cascadeur MCP is pre-1.0 software for a verified subset of Cascadeur
+2026.1.2.0.15343. It is not affiliated with Nekki.
+
+The installer creates a recoverable pre-upgrade backup under:
+%LOCALAPPDATA%\CascadeurMCP\backups
+
+It installs only for the current user, registers the Cascadeur command/event
+packages, and registers a Codex stdio server when Codex is installed. It does
+not require or modify Poppet. User-created state and backups are retained after
+uninstall.

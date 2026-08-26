@@ -3,8 +3,10 @@ from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
 
+import pytest
+
 import cascadeur_complete.service as service_module
-from cascadeur_complete.models import ExecutionMode, ResultEnvelope
+from cascadeur_complete.models import ErrorCode, ExecutionMode, ResultEnvelope
 from cascadeur_complete.paths import RuntimePaths
 from cascadeur_complete.service import CascadeurService
 
@@ -55,7 +57,7 @@ class FakeBridge:
                     "working_path": str(working_path),
                 },
             )
-        if name == "safety.rollback":
+        if name in {"safety.rollback", "safety.rollback_internal"}:
             working_id = operations[0].arguments["working_id"]
             working_path = self.snapshot_dir / f"{working_id}.working.casc"
             working_path.write_bytes(Path(operations[0].arguments["path"]).read_bytes())
@@ -97,7 +99,7 @@ def test_destructive_feature_requires_prepare_and_commit(tmp_path):
     assert committed.ok and committed.snapshot_id
     assert svc._live_scene_id == committed.scene_id
     assert svc._live_scene_revision == committed.scene_revision
-    assert "scene_new" in svc.evidence_store.verified_features(svc._version_name)
+    assert "scene_new" not in svc.evidence_store.verified_features(svc._version_name)
 
 
 def test_refresh_live_binds_status_to_cached_scene_identity(tmp_path):
@@ -116,6 +118,19 @@ def test_refresh_live_binds_status_to_cached_scene_identity(tmp_path):
     assert kwargs["expected_revision"] == "rev-cached"
     assert svc._live_scene_id == "scene-1"
     assert svc._live_scene_revision == "rev-1"
+
+
+def test_product_coverage_does_not_count_discovery_or_contract_only_rows(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+
+    status = svc.capabilities(live=False)
+    searched = svc.feature_search("", limit=500)
+
+    assert status["product_coverage"]["catalog_count"] == 223
+    assert status["product_coverage"]["supported"] == 0
+    assert status["product_coverage"]["support_percent"] == 0
+    assert searched and all(item["truth_layer"] == "product" for item in searched)
 
 
 def test_ui_only_feature_returns_exact_gate_without_bridge_dispatch(tmp_path):
@@ -145,14 +160,12 @@ def test_viewport_capture_waits_for_nonempty_stable_output(tmp_path):
     bridge.execute = execute
     svc = CascadeurService(paths, client=bridge)
 
-    result = svc.execute(
+    prepared = svc.prepare_change(
         "viewport_capture",
         "render.viewport_capture",
         {"path": str(destination), "width": 64, "height": 64, "samples": 1},
-        scene_id="scene-1",
-        expected_revision="rev-1",
-        timeout=2,
     )
+    result = svc.commit_change(prepared["confirmation_token"], timeout=2)
 
     assert result.ok
     assert result.result["path"] == str(destination)
@@ -214,7 +227,7 @@ def test_failed_destructive_commit_automatically_restores_snapshot(tmp_path, mon
         scene_revision="restored-revision",
     )
     rollback_calls = []
-    monkeypatch.setattr(svc, "rollback", lambda value: rollback_calls.append(value) or restored)
+    monkeypatch.setattr(svc, "_rollback_internal", lambda value: rollback_calls.append(value) or restored)
 
     result = svc.commit_change(prepared["confirmation_token"])
 
@@ -242,7 +255,7 @@ def test_host_postcondition_exception_also_restores_snapshot(tmp_path, monkeypat
         scene_revision="restored-revision",
     )
     rollback_calls = []
-    monkeypatch.setattr(svc, "rollback", lambda value: rollback_calls.append(value) or restored)
+    monkeypatch.setattr(svc, "_rollback_internal", lambda value: rollback_calls.append(value) or restored)
 
     result = svc.commit_change(prepared["confirmation_token"])
 
@@ -495,6 +508,42 @@ def test_arbitrary_action_cannot_hide_behind_unrelated_feature(tmp_path):
     assert result.error_code.value == "INVALID_REQUEST"
 
 
+@pytest.mark.parametrize(
+    "operation_name",
+    [
+        "animation.key_reduce",
+        "editing.mirror",
+        "physics.collision_delete",
+        "physics.auto_enable",
+        "rig.joint_create",
+        "rig.rig_info_create",
+        "rig.ik_chain_create",
+        "rig.rig_elements_create",
+        "rig.additional_point_create",
+        "rig.additional_box_create",
+        "rig.spline_ik_create",
+        "rig.twist",
+        "layer.folder",
+    ],
+)
+def test_every_known_mutation_requires_a_prepared_change(tmp_path, operation_name):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+    assert svc._operation_is_mutating(operation_name)
+
+
+def test_prepare_rejects_feature_operation_privilege_substitution(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    bridge = FakeBridge(paths.snapshots)
+    svc = CascadeurService(paths, client=bridge)
+
+    result = svc.prepare_change("status", "object.delete", {"ids": ["obj-1"]})
+
+    assert result["ok"] is False
+    assert result["error_code"] == "INVALID_REQUEST"
+    assert bridge.calls == []
+
+
 def test_action_cannot_disable_verification_without_postcondition(tmp_path):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
@@ -510,8 +559,7 @@ def test_scene_mutation_requires_expected_revision(tmp_path):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
     result = svc.execute("timeline_set_frame", "timeline.set_frame", {"frame": 10})
-    assert result.error_code.value == "INVALID_REQUEST"
-    assert "expected_revision" in result.error_message
+    assert result.error_code.value == "CONFIRMATION_REQUIRED"
 
 
 def test_transform_read_caches_identity_for_followup_write(tmp_path):
@@ -525,13 +573,20 @@ def test_transform_read_caches_identity_for_followup_write(tmp_path):
         "animation.transform_set",
         {"ids": ["obj-1"], "position": [1, 2, 3]},
     )
+    assert written.error_code == ErrorCode.CONFIRMATION_REQUIRED
+    prepared = svc.prepare_change(
+        "transform_set",
+        "animation.transform_set",
+        {"ids": ["obj-1"], "position": [1, 2, 3]},
+    )
+    written = svc.commit_change(prepared["confirmation_token"])
     assert written.ok
     _, _, kwargs = bridge.calls[-1]
     assert kwargs["scene_id"] == "scene-1"
-    assert kwargs["expected_revision"] == "rev-2"
+    assert kwargs["expected_revision"] == prepared["scene_revision"]
 
 
-def test_selection_remove_is_not_classified_as_destructive(tmp_path):
+def test_selection_remove_is_a_protected_mutation(tmp_path):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
     result = svc.batch(
@@ -540,7 +595,7 @@ def test_selection_remove_is_not_classified_as_destructive(tmp_path):
         scene_id="scene-1",
         expected_revision="rev-1",
     )
-    assert result.ok
+    assert result.error_code == ErrorCode.CONFIRMATION_REQUIRED
 
 
 def test_mutation_allowlist_comes_from_installed_schema(tmp_path):
@@ -550,11 +605,29 @@ def test_mutation_allowlist_comes_from_installed_schema(tmp_path):
     assert not svc.csc_mutate_allowed([{"attr": "__subclasses__", "call": True}])
 
 
+@pytest.mark.parametrize(
+    ("feature_id", "operation_name"),
+    [
+        ("csc_query", "system.csc_query"),
+        ("csc_mutate", "system.csc_mutate"),
+        ("developer_execute_python", "system.developer_execute_python"),
+    ],
+)
+def test_production_policy_rejects_generic_runtime_apis(tmp_path, feature_id, operation_name):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+
+    result = svc.execute(feature_id, operation_name, {})
+
+    assert result.error_code == ErrorCode.INVALID_REQUEST
+    assert "disabled in production" in result.error_message
+
+
 def test_unknown_snapshot_is_rejected_before_bridge_call(tmp_path):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     bridge = FakeBridge(paths.snapshots)
-    result = CascadeurService(paths, client=bridge).rollback("missing")
-    assert result.error_code.value == "INVALID_REQUEST"
+    result = CascadeurService(paths, client=bridge).prepare_rollback("missing")
+    assert result["error_code"] == "INVALID_REQUEST"
     assert not bridge.calls
 
 
@@ -566,7 +639,9 @@ def test_rollback_opens_a_working_clone_and_preserves_immutable_snapshot(tmp_pat
     snapshot = Path(prepared["backup_path"])
     before = snapshot.read_bytes()
 
-    result = svc.rollback(prepared["snapshot_id"])
+    rollback_prepared = svc.prepare_rollback(prepared["snapshot_id"])
+    assert rollback_prepared["ok"]
+    result = svc.rollback(rollback_prepared["confirmation_token"], timeout=2)
 
     assert result.ok
     assert Path(result.result["path"]).name.endswith(".working.casc")
@@ -588,6 +663,30 @@ def test_background_job_persists_result(tmp_path):
         time.sleep(0.01)
     assert record is not None and record.status == "succeeded"
     assert record.result is not None and record.result.ok
+
+
+def test_job_id_cannot_escape_job_store_or_echo_external_json(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    external = tmp_path / "sensitive.json"
+    external.write_text('{"token":"must-not-be-read"}', encoding="utf-8")
+    svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+
+    with pytest.raises(ValueError, match="Invalid job id"):
+        svc.jobs.get(str(external.with_suffix("")))
+
+
+def test_wrong_build_gates_every_discovered_route(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    bridge = FakeBridge(paths.snapshots)
+    svc = CascadeurService(paths, client=bridge)
+    svc.installation["version"] = "2026.1.3.0.99999"
+    svc.installation["compatible"] = False
+    svc._rebuild_features()
+
+    assert all(item.state.value == "unsupported_version" for item in svc.features)
+    result = svc.execute("scene_summary", "scene.summary")
+    assert result.error_code == ErrorCode.UNSUPPORTED_VERSION
+    assert bridge.calls == []
 
 
 def test_failed_job_can_retry_from_persisted_contract(tmp_path):

@@ -1,6 +1,6 @@
 ---
 name: cascadeur-mcp-workflows
-description: Plan and execute Cascadeur 2026.1.x scene, animation, rigging, physics, rendering, import/export, and DCC-integration work through the cascadeur-complete MCP. Use for inspecting or changing a live Cascadeur project; do not use for generic animation theory or direct work inside another DCC.
+description: Plan and execute Cascadeur 2026.1.2.0.15343 scene, animation, rigging, physics, rendering, import/export, and DCC-integration work through the cascadeur-complete MCP. Use for inspecting or changing a live Cascadeur project; do not use for generic animation theory or direct work inside another DCC.
 ---
 
 # Cascadeur MCP Workflows
@@ -18,7 +18,7 @@ Read only the references needed for the current task:
 | Quick/manual rigging, controllers, joints, rigid bodies, IK/Spline IK, twist, mass, constraints, collision, ballistics, AutoPhysics, Ragdoll | [physics-rigging.md](references/physics-rigging.md) |
 | Cameras, viewports, Filament lights/materials, still/video output, Unreal Live Link, Blender/Unity/Daz/Roblox | [render-external.md](references/render-external.md) |
 | Capability states, protected changes, jobs, errors, low-level calls, rollback, diagnosis | [safety-diagnostics.md](references/safety-diagnostics.md) |
-| Exact catalog of all 75 public MCP tools | [tool-routing.md](references/tool-routing.md) |
+| Exact catalog of all 70 production MCP tools | [tool-routing.md](references/tool-routing.md) |
 | Version facts and source links | [official-sources.md](references/official-sources.md) |
 
 For a multi-stage production workflow, read every domain reference that participates in the requested output. Do not load unrelated references merely because they exist.

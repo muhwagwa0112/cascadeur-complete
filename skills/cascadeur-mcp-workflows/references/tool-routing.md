@@ -1,15 +1,15 @@
 # Public MCP Tool Routing
 
-This catalog mirrors the 75 public tools in the `cascadeur-complete` MCP contract. Prefer the most specific tool in the relevant row. Capability and scene state still determine whether a listed tool can execute.
+This catalog mirrors the 70 production tools in the `cascadeur-complete` MCP contract. Prefer the most specific tool in the relevant row. Capability and scene state still determine whether a listed tool can execute. Generic csc/tool/Python execution, runtime tool introspection, and arbitrary settings reads are compiled out of release builds.
 
 <!-- MCP-TOOLS-START -->
 
 | Group | Purpose | Tools |
 |---|---|---|
-| Health and discovery | Connection/version/license, logs, runtime tools, settings, view modes, feature registry, inventory | `cascadeur_status`, `cascadeur_logs`, `cascadeur_tool_inspect`, `setting_get`, `viewport_mode`, `feature_search`, `feature_describe`, `inventory_refresh` |
+| Health and discovery | Connection/version/license, level-only logs, view modes, feature registry, inventory | `cascadeur_status`, `cascadeur_logs`, `viewport_mode`, `feature_search`, `feature_describe`, `inventory_refresh` |
 | Persistent jobs | Submit, inspect, cancel, or retry retained non-destructive work | `job_submit`, `job_status`, `job_cancel`, `job_retry` |
 | Scene and object context | Scene summary, paginated objects, selection, object reads/writes, one-entry batching | `scene_summary`, `scene_objects`, `selection_edit`, `object_delete_prepare`, `object_read`, `object_write`, `operation_batch` |
-| Protection and recovery | Snapshot/dry-run, commit/cancel/rollback, exact UI file-flow preparation | `change_prepare`, `change_commit`, `change_cancel`, `change_rollback`, `scene_exchange_prepare`, `ui_flow_prepare` |
+| Protection and recovery | Snapshot/dry-run, commit/cancel/two-step rollback, exact UI file-flow preparation | `change_prepare`, `change_commit`, `change_cancel`, `change_rollback_prepare`, `change_rollback`, `scene_exchange_prepare`, `ui_flow_prepare` |
 | Scene files and interchange | CASC lifecycle and registered import/export routes | `scene_file`, `io_transfer` |
 | Timeline and animation | Playhead, transforms, layers, keys, curves, and interval selection | `timeline_set_frame`, `timeline_get`, `transform_edit`, `layer_list`, `layer_write`, `key_edit`, `animation_curve`, `timeline_select_interval` |
 | Camera and render | Camera/view state, protected camera/light creation, file output | `viewport_camera`, `render_object_create_prepare`, `render_output` |
@@ -17,7 +17,7 @@ This catalog mirrors the 75 public tools in the `cascadeur-complete` MCP contrac
 | Physics and rig inspection | AutoPhysics readiness, physics/rig inventory, valid constraint drivers | `auto_physics_state`, `physics_state`, `rig_state`, `constraint_driver_catalog` |
 | Rig construction | Mass, Joint/RigInfo, IK, manual rig elements, extra controllers, Spline IK, twist | `rigid_body_mass_prepare`, `joint_create_prepare`, `rig_info_create_prepare`, `ik_chain_create_prepare`, `rig_elements_create_prepare`, `additional_point_controller_prepare`, `additional_box_controller_prepare`, `spline_ik_create_prepare`, `twist_prepare` |
 | Physics construction | CoM, collisions, constraints, ballistics, AutoPhysics enable/snap | `center_of_mass_prepare`, `collision_create_prepare`, `collision_delete_prepare`, `transform_constraint_prepare`, `point_constraint_prepare`, `ballistic_create_prepare`, `auto_physics_enable`, `auto_physics_snap` |
-| Low-level and external | Exact actions/tools/csc, DCC workflow, history, restricted Python | `action_invoke`, `tool_call`, `csc_query`, `csc_mutate`, `external_workflow`, `undo`, `redo`, `developer_execute_python` |
+| Low-level and external | Exact registered actions, gated DCC workflow, and history | `action_invoke`, `external_workflow`, `undo`, `redo` |
 
 <!-- MCP-TOOLS-END -->
 
@@ -25,7 +25,7 @@ This catalog mirrors the 75 public tools in the `cascadeur-complete` MCP contrac
 
 ### Diagnose or discover
 
-Start with `cascadeur_status`, then `feature_search` and `feature_describe`. Use `cascadeur_tool_inspect` and `csc_query` only when the task-focused contract does not expose the required read.
+Start with `cascadeur_status`, then `feature_search` and `feature_describe`. Release builds do not expose runtime tool introspection, arbitrary setting reads, or generic call chains.
 
 ### Read a scene
 
@@ -49,7 +49,7 @@ Use `job_submit` only for non-destructive operations. Poll `job_status`; cancel 
 
 ### Escalate below the task API
 
-Use `action_invoke`, `tool_call`, `csc_query`, and `csc_mutate` in that order only when an exact registered feature requires it. Keep `developer_execute_python` disabled unless the request is explicitly about MCP/Cascadeur development or debugging.
+Use `action_invoke` only when an exact registered feature requires it. Generic tool/csc/Python execution is absent from production builds and belongs in a separately compiled developer build.
 
 ## Common feature/operation pairs
 
@@ -64,7 +64,6 @@ These pairs are useful with `change_prepare` when a direct tool returns `CONFIRM
 | AutoPosing | `auto_posing` | `generation.auto_posing` |
 | Viewport capture/still render | `viewport_capture`, `render_image` | `render.viewport_capture`, `render.image` |
 | AutoPhysics snap | `auto_physics` | `physics.auto_snap` |
-| Registered csc mutation | `csc_mutate` | `system.csc_mutate` |
 
 Confirm exact arguments with the tool schema and `feature_describe`; this table is routing guidance, not permission or a substitute for live capability state.
 

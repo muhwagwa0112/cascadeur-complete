@@ -1,90 +1,76 @@
-# cascadeur-complete
+# Cascadeur MCP
 
-`cascadeur-complete` is a clean-room MCP server and in-process Cascadeur bridge for
-Cascadeur 2026.1.x on Windows. It does not import or depend on Poppet.
+`cascadeur-complete` is the compatibility package name for a clean-room MCP
+server and in-process bridge targeting Cascadeur `2026.1.2.0.15343` on Windows.
+The project is pre-1.0 and provides a **verified subset** of Cascadeur automation;
+it does not claim that every user-facing Cascadeur feature is implemented.
 
-The host runs on Python 3.12 over stdio. A Python 3.11-compatible command package
-runs inside Cascadeur and drains an atomic Local AppData request queue on the UI
-thread. Every capability is represented in a generated registry as a native API,
-known action, UI Automation flow, external integration, or an explicit gate.
+The host uses MCP over stdio. A Python 3.11-compatible command package runs in
+Cascadeur and drains the Local AppData request queue on the UI thread. Capability
+discovery is not counted as feature support: a feature is supported only when a
+dedicated adapter, exact postcondition, and version-matched live evidence exist.
 
-Destructive changes use `change_prepare` / `change_commit`, scene revision checks,
-and CASC snapshots. Developer Python execution is disabled unless explicitly
-enabled in the runtime policy file.
+## Support status
 
-## Verified baseline
+- Exact application baseline: Cascadeur `2026.1.2.0.15343`
+- Host runtime: bundled Python 3.12 on Windows x64
+- Primary client: Codex stdio registration
+- License/dependency/UI gates are reported as gates, not successful execution
+- Arbitrary developer Python is disabled by the production policy
 
-- Installed executable: `2026.1.2.0.15343` with the `2026.1` adapter
-- Embedded bridge: Python 3.11; host: Python 3.12
-- Live inventory: 372 symbols, 223 classes, 42 functions, 1,344 callable/property
-  members, and 118 enum/value members (1,462 total class members)
-- Runtime GUI tools: 56; bundled Python commands: 104
-- Generated feature rows: over 2,100, each with an execution mode, verification state, and test ID
+See [the support matrix](docs/SUPPORT_MATRIX.md) for the current evidence rules
+and limitations. The generated feature registry remains the runtime source of
+truth; neither tool count nor discovered Python symbols imply support.
 
-Discovery is not treated as implementation. A product feature is reported as
-`available` only after its versioned adapter has produced live evidence on the
-installed Cascadeur version. Inventoried features without a dedicated adapter are
-reported as `unhealthy`; absent integrations are `missing_dependency`; and
-unverified action-only paths are `ui_only`.
+## Install an official release
 
-The current dedicated native adapters cover health/inventory, scene summaries and
-objects, scene new/open/save, FBX import/export, verified timeline positioning,
-selection read/set/add/remove/filter, object hierarchy/properties/behaviors/create/
-duplicate/rename/parenting, current-frame local/global transform reads and verified
-position/rotation/local-scale writes, structured graph interpolation/tangents,
-layer/folder editing, camera state/editing, protected Filament still/video rendering,
-AutoPosing session calls, postcondition-checked AutoPhysics snap (which requires a
-working AutoPhysics state), typed settings/log reads,
-snapshots/rollback, and persistent cancelable/retryable background jobs. The
-complete feature matrix remains the source of truth for routes that still require
-a dedicated adapter and real-scene evidence.
+1. Download the signed installer, SHA-256 manifest, SBOM, and provenance from the
+   same GitHub release.
+2. Verify the installer signature and checksum as described in
+   [release verification](docs/RELEASE.md).
+3. Run the per-user installer. It installs the isolated host and Cascadeur bridge,
+   updates Cascadeur's user command registration, and registers the MCP with Codex
+   when the `codex` command is available.
+4. Restart Cascadeur and invoke
+   `Commands > Cascadeur Complete > Process Pending` once if event-driven draining
+   is not active.
+5. Run `scripts\verify-install.ps1` or the installed Start Menu verification link.
 
-## Safety model
-
-`change_prepare` validates local paths, rejects UNC/device paths, creates a CASC
-snapshot, and binds an HMAC confirmation token to scene identity, revision, and
-selection. Cascadeur 2026.1 exposes save-as but no non-mutating live-scene
-serialization, so the saved snapshot becomes a copy-on-write working scene; the
-original file is left untouched. `change_commit` revalidates the token, and scene
-open/rollback only succeed after two stable path/revision observations.
-
-UI Automation is isolated behind a bounded daemon trigger. Failed or timed-out
-triggers cancel unclaimed queue files so a request cannot execute during a later,
-unrelated invocation. A request already claimed by Cascadeur is reported as
-`UI_LOCKED` with an unknown outcome unless a response is recovered.
+The installer does not require Python, `uv`, or Poppet. Poppet is neither modified
+nor required.
 
 ## Development
 
 ```powershell
 uv sync --extra dev
 uv run pytest
-uv run cascadeur-complete-inventory
+./scripts/install.ps1
+./scripts/verify.ps1
 ```
+
+The source install script is for contributors. Public releases use the signed
+Inno Setup installer and bundled runtime.
+
+## Build an unsigned local package
+
+```powershell
+./scripts/build-release.ps1
+```
+
+This creates a PyInstaller onedir application, installer when Inno Setup is
+available, SBOM, and SHA-256 manifest under `artifacts/`. Unsigned output is
+explicitly marked development-only. Tag releases use OIDC signing and provenance
+gates defined in `.github/workflows/release.yml`.
 
 ## Runtime locations
 
 - Host: `%LOCALAPPDATA%\CascadeurMCP\cascadeur-complete`
 - Bridge: `%LOCALAPPDATA%\Nekki Limited\Cascadeur\user_scripts\cascadeur_complete`
-- Queue and snapshots: `%LOCALAPPDATA%\CascadeurMCP\cascadeur-complete\state`
+- Queue/snapshots: `%LOCALAPPDATA%\CascadeurMCP\cascadeur-complete\state`
+- Backups: `%LOCALAPPDATA%\CascadeurMCP\backups`
 
-Install or refresh with `scripts\install.ps1`, then restart Cascadeur. The command
-must appear at `Commands > Cascadeur Complete > Process Pending`. Validate the
-host, registration, feature manifest, and Poppet preservation with
-`scripts\verify.ps1`.
+## Security and license
 
-## Codex workflow skill
-
-`skills/cascadeur-mcp-workflows` is the companion Codex skill for planning,
-executing, verifying, and rolling back complete Cascadeur production workflows.
-It covers scene/object/file operations, animation and generation, physics,
-rigging, rendering, and DCC integrations while routing UI-, license-, version-,
-and dependency-gated features accurately.
-
-Install it for the current user by copying the skill folder to:
-
-```text
-%USERPROFILE%\.codex\skills\cascadeur-mcp-workflows
-```
-
-Run `skills/cascadeur-mcp-workflows/scripts/validate_tool_coverage.py` after
-changing the MCP public tool contract; the catalog must match all public tools.
+Report vulnerabilities using [SECURITY.md](SECURITY.md). The project is available
+under the [MIT License](LICENSE); bundled dependencies retain their own licenses as
+described in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

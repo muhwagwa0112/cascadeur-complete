@@ -22,7 +22,7 @@ def test_skill_catalog_covers_every_public_mcp_tool():
     contract = module.public_mcp_tools(ROOT / "src" / "cascadeur_complete" / "server.py")
     catalog = module.catalog_tools(SKILL / "references" / "tool-routing.md")
 
-    assert len(contract) == 75
+    assert len(contract) == 70
     assert catalog == contract
 
 

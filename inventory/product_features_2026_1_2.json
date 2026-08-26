@@ -1,0 +1,5963 @@
+{
+  "schema_version": 1,
+  "product": "Cascadeur",
+  "product_version": "2026.1.2",
+  "supported_build": "2026.1.2.0.15343",
+  "generated_from": "Official Cascadeur 2026.1/2026.1.2 documentation; product inventory is distinct from installed csc discovery.",
+  "sources": [
+    "https://cascadeur.com/help/category/215",
+    "https://cascadeur.com/help/interface/main_menu/file_menu",
+    "https://cascadeur.com/help/tools",
+    "https://cascadeur.com/help/tools/physics_tools/autophysics",
+    "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+    "https://cascadeur.com/help/category/311",
+    "https://cascadeur.com/help/interface",
+    "https://cascadeur.com/help/category/312",
+    "https://cascadeur.com/help/category/314"
+  ],
+  "features": [
+    {
+      "id": "status",
+      "family": "diagnostics",
+      "name": "Status",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "system.status",
+      "action": "status",
+      "operation": "system.status",
+      "mutation": false,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_identity",
+        "runtime_tools"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.status",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "feature_search",
+      "family": "diagnostics",
+      "name": "Feature search",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "host.feature_search",
+      "action": "feature_search",
+      "operation": "host.feature_search",
+      "mutation": false,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "bridge_response"
+      ],
+      "adapter_id": "cascadeur_2026_1.host.feature_search",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "feature_describe",
+      "family": "diagnostics",
+      "name": "Feature describe",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "host.feature_describe",
+      "action": "feature_describe",
+      "operation": "host.feature_describe",
+      "mutation": false,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "bridge_response"
+      ],
+      "adapter_id": "cascadeur_2026_1.host.feature_describe",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "logs",
+      "family": "diagnostics",
+      "name": "Logs",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "system.logs",
+      "action": "logs",
+      "operation": "system.logs",
+      "mutation": false,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "bounded_tail"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.logs",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_validate",
+      "family": "diagnostics",
+      "name": "Scene validation",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.validate",
+      "action": "scene_validate",
+      "operation": "scene.validate",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "validation_report"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.validate",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "inventory_refresh",
+      "family": "diagnostics",
+      "name": "Inventory refresh",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "host.inventory_refresh",
+      "action": "inventory_refresh",
+      "operation": "host.inventory_refresh",
+      "mutation": false,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "schema_counts",
+        "feature_registry"
+      ],
+      "adapter_id": "cascadeur_2026_1.host.inventory_refresh",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "tool_inspect",
+      "family": "diagnostics",
+      "name": "Tool inspect",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "unsupported",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_new",
+      "family": "scene",
+      "name": "New scene",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.new",
+      "action": "scene_new",
+      "operation": "scene.new",
+      "mutation": true,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "new_scene_identity"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.new",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_open",
+      "family": "scene",
+      "name": "Open CASC",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.open",
+      "action": "scene_open",
+      "operation": "scene.open",
+      "mutation": true,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "stable_scene_path"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.open",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_save",
+      "family": "scene",
+      "name": "Save",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.save",
+      "action": "scene_save",
+      "operation": "scene.save",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "save_completed"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.save",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_save_as",
+      "family": "scene",
+      "name": "Save as",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.save_as",
+      "action": "scene_save_as",
+      "operation": "scene.save_as",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.save_as",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_close",
+      "family": "scene",
+      "name": "Close",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.close",
+      "action": "scene_close",
+      "operation": "scene.close",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "tab_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.close",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_list",
+      "family": "scene",
+      "name": "List tabs",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.list",
+      "action": "scene_list",
+      "operation": "scene.list",
+      "mutation": false,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "tab_catalog"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.list",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_activate",
+      "family": "scene",
+      "name": "Activate tab",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.activate",
+      "action": "scene_activate",
+      "operation": "scene.activate",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "tab_active"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.activate",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_summary",
+      "family": "scene",
+      "name": "Scene summary",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.summary",
+      "action": "scene_summary",
+      "operation": "scene.summary",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_revision"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.summary",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_fbx",
+      "family": "io",
+      "name": "Import FBX",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.import_fbx",
+      "action": "import_fbx",
+      "operation": "io.import_fbx",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.import_fbx",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "export_fbx",
+      "family": "io",
+      "name": "Export FBX",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.export_fbx",
+      "action": "export_fbx",
+      "operation": "io.export_fbx",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.export_fbx",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_dae",
+      "family": "io",
+      "name": "Import DAE",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.import_dae",
+      "action": "import_dae",
+      "operation": "io.import_dae",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_changed",
+        "new_objects"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.import_dae",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "export_dae",
+      "family": "io",
+      "name": "Export DAE",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.export_dae",
+      "action": "export_dae",
+      "operation": "io.export_dae",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.export_dae",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_usd",
+      "family": "io",
+      "name": "Import USD",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.import_usd",
+      "action": "import_usd",
+      "operation": "system.ui_file_flow",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "exact_file_dialog",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.import_usd",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "export_usd",
+      "family": "io",
+      "name": "Export USD",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.export_usd",
+      "action": "export_usd",
+      "operation": "system.ui_file_flow",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "exact_file_dialog",
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.export_usd",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_gltf",
+      "family": "io",
+      "name": "Import GLTF",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.import_gltf",
+      "action": "import_gltf",
+      "operation": "system.ui_file_flow",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "exact_options_window",
+        "exact_file_dialog",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.import_gltf",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "export_gltf",
+      "family": "io",
+      "name": "Export GLTF",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.export_gltf",
+      "action": "export_gltf",
+      "operation": "system.ui_file_flow",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "exact_options_window",
+        "exact_file_dialog",
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.export_gltf",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_glb",
+      "family": "io",
+      "name": "Import GLB",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.import_glb",
+      "action": "import_glb",
+      "operation": "system.ui_file_flow",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "exact_options_window",
+        "exact_file_dialog",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.import_glb",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "export_glb",
+      "family": "io",
+      "name": "Export GLB",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.export_glb",
+      "action": "export_glb",
+      "operation": "system.ui_file_flow",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "exact_options_window",
+        "exact_file_dialog",
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.export_glb",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_vrm",
+      "family": "io",
+      "name": "Import VRM",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.import_vrm",
+      "action": "import_vrm",
+      "operation": "system.ui_file_flow",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "exact_options_window",
+        "exact_file_dialog",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.import_vrm",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "export_vrm",
+      "family": "io",
+      "name": "Export VRM",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.export_vrm",
+      "action": "export_vrm",
+      "operation": "io.export_vrm",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "unsupported",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_image",
+      "family": "io",
+      "name": "Import image",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "action.File.Import.Image",
+      "action": "import_image",
+      "operation": "action.File.Import.Image",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_video",
+      "family": "io",
+      "name": "Import video",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "action.File.Import.Video",
+      "action": "import_video",
+      "operation": "action.File.Import.Video",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "import_audio",
+      "family": "io",
+      "name": "Import audio",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.import_audio",
+      "action": "import_audio",
+      "operation": "io.import_audio",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "audio_behaviour_count_increased"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.import_audio",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "export_image",
+      "family": "io",
+      "name": "Export image",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "io.export_image",
+      "action": "export_image",
+      "operation": "io.export_image",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.export_image",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "export_video",
+      "family": "io",
+      "name": "Export video",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.RenderToFile",
+      "action": "export_video",
+      "operation": "tool.RenderToFile",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_search",
+      "family": "objects",
+      "name": "Search objects",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.objects",
+      "action": "object_search",
+      "operation": "scene.objects",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "pagination_contract"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.objects",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "selection_get",
+      "family": "objects",
+      "name": "Get selection",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "selection.get",
+      "action": "selection_get",
+      "operation": "selection.get",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "selection_payload"
+      ],
+      "adapter_id": "cascadeur_2026_1.selection.get",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "selection_set",
+      "family": "objects",
+      "name": "Set selection",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "selection.set",
+      "action": "selection_set",
+      "operation": "selection.set",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "selection_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.selection.set",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "selection_add",
+      "family": "objects",
+      "name": "Add selection",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "selection.add",
+      "action": "selection_add",
+      "operation": "selection.add",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "selection_contains_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.selection.add",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "selection_remove",
+      "family": "objects",
+      "name": "Remove selection",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "selection.remove",
+      "action": "selection_remove",
+      "operation": "selection.remove",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "selection_excludes_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.selection.remove",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "selection_filter",
+      "family": "objects",
+      "name": "Filter selection",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "selection.filter",
+      "action": "selection_filter",
+      "operation": "selection.filter",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "filter_matches"
+      ],
+      "adapter_id": "cascadeur_2026_1.selection.filter",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_create",
+      "family": "objects",
+      "name": "Create object",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "object.create",
+      "action": "object_create",
+      "operation": "object.create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "object_present"
+      ],
+      "adapter_id": "cascadeur_2026_1.object.create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_duplicate",
+      "family": "objects",
+      "name": "Duplicate",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.CopierTool",
+      "action": "object_duplicate",
+      "operation": "tool.CopierTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_delete",
+      "family": "objects",
+      "name": "Delete",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "action.Delete_objects",
+      "action": "object_delete",
+      "operation": "action.Delete_objects",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_rename",
+      "family": "objects",
+      "name": "Rename",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "object.rename",
+      "action": "object_rename",
+      "operation": "object.rename",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "name_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.object.rename",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_parent",
+      "family": "objects",
+      "name": "Set parent",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "object.parent",
+      "action": "object_parent",
+      "operation": "object.parent",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "parent_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.object.parent",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_unparent",
+      "family": "objects",
+      "name": "Remove parent",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "object.unparent",
+      "action": "object_unparent",
+      "operation": "object.unparent",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "parent_is_null"
+      ],
+      "adapter_id": "cascadeur_2026_1.object.unparent",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_hierarchy",
+      "family": "objects",
+      "name": "Hierarchy",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "object.hierarchy",
+      "action": "object_hierarchy",
+      "operation": "object.hierarchy",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "acyclic_parent_graph"
+      ],
+      "adapter_id": "cascadeur_2026_1.object.hierarchy",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_properties",
+      "family": "objects",
+      "name": "Properties",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "object.properties",
+      "action": "object_properties",
+      "operation": "object.properties",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "object_metadata"
+      ],
+      "adapter_id": "cascadeur_2026_1.object.properties",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "object_behaviors",
+      "family": "objects",
+      "name": "Behaviors",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "object.behaviors",
+      "action": "object_behaviors",
+      "operation": "object.behaviors",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behavior_schema"
+      ],
+      "adapter_id": "cascadeur_2026_1.object.behaviors",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "transform_get",
+      "family": "animation",
+      "name": "Get transform",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.transform_get",
+      "action": "transform_get",
+      "operation": "animation.transform_get",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "transform_payload"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.transform_get",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "transform_set",
+      "family": "animation",
+      "name": "Set transform",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.transform_set",
+      "action": "transform_set",
+      "operation": "animation.transform_set",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "transform_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.transform_set",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "key_list",
+      "family": "animation",
+      "name": "List keys",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.key_list",
+      "action": "key_list",
+      "operation": "animation.key_list",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "key_payload"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.key_list",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "key_add",
+      "family": "animation",
+      "name": "Add key",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.key_add",
+      "action": "key_add",
+      "operation": "animation.key_add",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "key_present"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.key_add",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "key_delete",
+      "family": "animation",
+      "name": "Delete key",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.key_delete",
+      "action": "key_delete",
+      "operation": "animation.key_delete",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "key_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.key_delete",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "interpolation_set",
+      "family": "animation",
+      "name": "Set interpolation",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.interpolation_set",
+      "action": "interpolation_set",
+      "operation": "animation.interpolation_set",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "interpolation_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.interpolation_set",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "tangent_set",
+      "family": "animation",
+      "name": "Set tangent",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.tangent_set",
+      "action": "tangent_set",
+      "operation": "animation.tangent_set",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "tangent_mode_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.tangent_set",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "graph_query",
+      "family": "animation",
+      "name": "Graph query",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.graph_query",
+      "action": "graph_query",
+      "operation": "animation.graph_query",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "section_payload"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.graph_query",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "graph_edit",
+      "family": "animation",
+      "name": "Graph edit",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Timeline",
+      "action": "graph_edit",
+      "operation": "tool.Timeline",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "timeline_get",
+      "family": "animation",
+      "name": "Timeline state",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "timeline.get",
+      "action": "timeline_get",
+      "operation": "timeline.get",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "unclamped_frame"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.get",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "timeline_set_frame",
+      "family": "animation",
+      "name": "Set frame",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "timeline.set_frame",
+      "action": "timeline_set_frame",
+      "operation": "timeline.set_frame",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "frame_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.set_frame",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "timeline_range",
+      "family": "animation",
+      "name": "Timeline range",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "timeline.range",
+      "action": "timeline_range",
+      "operation": "timeline.range",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "valid_frame_interval",
+        "existing_layers"
+      ],
+      "postconditions": [
+        "selected_interval_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.range",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "timeline_play",
+      "family": "animation",
+      "name": "Play",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Timeline",
+      "action": "timeline_play",
+      "operation": "tool.Timeline",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "timeline_stop",
+      "family": "animation",
+      "name": "Stop",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Timeline",
+      "action": "timeline_stop",
+      "operation": "tool.Timeline",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "layer_list",
+      "family": "animation",
+      "name": "List layers",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "layer.list",
+      "action": "layer_list",
+      "operation": "layer.list",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "layer_payload"
+      ],
+      "adapter_id": "cascadeur_2026_1.layer.list",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "layer_create",
+      "family": "animation",
+      "name": "Create layer",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "layer.create",
+      "action": "layer_create",
+      "operation": "layer.create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "layer_present"
+      ],
+      "adapter_id": "cascadeur_2026_1.layer.create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "layer_delete",
+      "family": "animation",
+      "name": "Delete layer",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "layer.delete",
+      "action": "layer_delete",
+      "operation": "layer.delete",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "layer_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.layer.delete",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "layer_activate",
+      "family": "animation",
+      "name": "Activate layer",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Timeline",
+      "action": "layer_activate",
+      "operation": "tool.Timeline",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "layer_visibility",
+      "family": "animation",
+      "name": "Layer visibility",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "layer.visibility",
+      "action": "layer_visibility",
+      "operation": "layer.visibility",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "visibility_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.layer.visibility",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "layer_lock",
+      "family": "animation",
+      "name": "Layer lock",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "layer.lock",
+      "action": "layer_lock",
+      "operation": "layer.lock",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "lock_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.layer.lock",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "layer_folder",
+      "family": "animation",
+      "name": "Layer folder",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "layer.folder",
+      "action": "layer_folder",
+      "operation": "layer.folder",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "folder_structure_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.layer.folder",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "cycle_query",
+      "family": "animation",
+      "name": "Cycle query",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.cycle_query",
+      "action": "cycle_query",
+      "operation": "animation.cycle_query",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "existing_layers",
+        "valid_frame_interval"
+      ],
+      "postconditions": [
+        "normalized_cycle_catalog"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.cycle_query",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "cycle",
+      "family": "animation",
+      "name": "Cycle",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Timeline",
+      "action": "cycle",
+      "operation": "tool.Timeline",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "stretch",
+      "family": "animation",
+      "name": "Stretch",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Timeline",
+      "action": "stretch",
+      "operation": "tool.Timeline",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "bake",
+      "family": "animation",
+      "name": "Bake",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Timeline",
+      "action": "bake",
+      "operation": "tool.Timeline",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "tween",
+      "family": "editing",
+      "name": "Tween",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Tween",
+      "action": "tween",
+      "operation": "tool.Tween",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "mirror",
+      "family": "editing",
+      "name": "Mirror",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "editing.mirror",
+      "action": "mirror",
+      "operation": "editing.mirror",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "box_controller_ids",
+        "valid_mirror_plane",
+        "valid_frame_or_interval"
+      ],
+      "postconditions": [
+        "target_transform_fingerprint_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.editing.mirror",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "copy_animation",
+      "family": "editing",
+      "name": "Copy",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Copier",
+      "action": "copy_animation",
+      "operation": "tool.Copier",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "interval_edit",
+      "family": "editing",
+      "name": "Interval edit",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.Timeline",
+      "action": "interval_edit",
+      "operation": "tool.Timeline",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "trajectory",
+      "family": "editing",
+      "name": "Trajectory",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.TrajectoryTool",
+      "action": "trajectory",
+      "operation": "tool.TrajectoryTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "ghost",
+      "family": "editing",
+      "name": "Ghost",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.GhostTool",
+      "action": "ghost",
+      "operation": "tool.GhostTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "fixing",
+      "family": "editing",
+      "name": "Fixing",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.FixFootTool",
+      "action": "fixing",
+      "operation": "tool.FixFootTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "hiding",
+      "family": "editing",
+      "name": "Hiding",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "action.hiding",
+      "action": "hiding",
+      "operation": "action.hiding",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "generation_state",
+      "family": "generation",
+      "name": "Generation state",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "generation.state",
+      "action": "generation_state",
+      "operation": "generation.state",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "generation_precondition_report"
+      ],
+      "adapter_id": "cascadeur_2026_1.generation.state",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "auto_posing",
+      "family": "generation",
+      "name": "AutoPosing",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.AutoPosingTool",
+      "action": "auto_posing",
+      "operation": "generation.auto_posing",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "selected_character_controllers"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.tool.AutoPosingTool",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "finger_auto_posing",
+      "family": "generation",
+      "name": "Finger AutoPosing",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "action.finger_auto_posing",
+      "action": "finger_auto_posing",
+      "operation": "action.finger_auto_posing",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "inbetweening",
+      "family": "generation",
+      "name": "Inbetweening",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "pro",
+      "dependency": null,
+      "route": "generation.inbetweening",
+      "action": "inbetweening",
+      "operation": "generation.inbetweening",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "pro_license",
+        "selected_timeline_interval",
+        "two_keyframes",
+        "standard_humanoid_rig"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.generation.inbetweening",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "root_motion",
+      "family": "generation",
+      "name": "Root Motion",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "generation.root_motion",
+      "action": "root_motion",
+      "operation": "generation.root_motion",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "selected_timeline_interval",
+        "two_keyframes",
+        "standard_humanoid_rig"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.generation.root_motion",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "mocap",
+      "family": "generation",
+      "name": "Mocap",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "pro",
+      "dependency": null,
+      "route": "tool.MocapTool",
+      "action": "mocap",
+      "operation": "tool.MocapTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "retargeting",
+      "family": "generation",
+      "name": "Retargeting",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "pro",
+      "dependency": null,
+      "route": "tool.Retargeting",
+      "action": "retargeting",
+      "operation": "tool.Retargeting",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "unbaking",
+      "family": "generation",
+      "name": "Animation Unbaking",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "generation.unbaking",
+      "action": "unbaking",
+      "operation": "generation.unbaking",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "selected_character_layers",
+        "selected_timeline_interval"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.generation.unbaking",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "fulcrum_cleaning",
+      "family": "generation",
+      "name": "Fulcrum cleaning",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "action.fulcrum_cleaning",
+      "action": "fulcrum_cleaning",
+      "operation": "action.fulcrum_cleaning",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "key_reduction",
+      "family": "generation",
+      "name": "Key reduction",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.key_reduce",
+      "action": "key_reduction",
+      "operation": "animation.key_reduce",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "layer_ids",
+        "valid_frame_interval",
+        "positive_every_n"
+      ],
+      "postconditions": [
+        "observed_keys_equal_reduction_plan"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.key_reduce",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "physics_state",
+      "family": "physics",
+      "name": "Physics state",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.state",
+      "action": "physics_state",
+      "operation": "physics.state",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "physics_inventory"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.state",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "center_of_mass",
+      "family": "physics",
+      "name": "Center of Mass",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.center_of_mass",
+      "action": "center_of_mass",
+      "operation": "physics.center_of_mass",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "selected_rigid_bodies"
+      ],
+      "postconditions": [
+        "center_of_mass_count_increased"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.center_of_mass",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "ballistic",
+      "family": "physics",
+      "name": "Ballistic",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.ballistic",
+      "action": "ballistic",
+      "operation": "physics.ballistic",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "center_of_mass",
+        "selected_timeline_interval"
+      ],
+      "postconditions": [
+        "persisted_ballistic_count_increased"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.ballistic",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "fulcrum",
+      "family": "physics",
+      "name": "Fulcrum",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "action.fulcrum",
+      "action": "fulcrum",
+      "operation": "action.fulcrum",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "auto_physics_state",
+      "family": "physics",
+      "name": "AutoPhysics state",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.auto_state",
+      "action": "auto_physics_state",
+      "operation": "physics.auto_state",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "scene"
+      ],
+      "postconditions": [
+        "autophysics_prerequisite_report"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.auto_state",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "auto_physics_enable",
+      "family": "physics",
+      "name": "Enable AutoPhysics",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.auto_enable",
+      "action": "auto_physics_enable",
+      "operation": "physics.auto_enable",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "center_of_mass",
+        "animation_at_least_three_frames"
+      ],
+      "postconditions": [
+        "physics_assistant_action_dispatched"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.auto_enable",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "auto_physics",
+      "family": "physics",
+      "name": "AutoPhysics",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.AutoPhysicsTool",
+      "action": "auto_physics",
+      "operation": "physics.auto_snap",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "working_auto_physics",
+        "selected_center_of_mass"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.tool.AutoPhysicsTool",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "ragdoll",
+      "family": "physics",
+      "name": "Ragdoll",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "action.ragdoll",
+      "action": "ragdoll",
+      "operation": "action.ragdoll",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "constraint_point",
+      "family": "physics",
+      "name": "Point constraint",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.constraint_point",
+      "action": "constraint_point",
+      "operation": "physics.constraint_point",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "driver_transform",
+        "point_controllers"
+      ],
+      "postconditions": [
+        "constraint_count_increased"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.constraint_point",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "constraint_transform",
+      "family": "physics",
+      "name": "Transform constraint",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.constraint_transform",
+      "action": "constraint_transform",
+      "operation": "physics.constraint_transform",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "driver_and_constrained_transform"
+      ],
+      "postconditions": [
+        "constraint_count_increased"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.constraint_transform",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "collision_create",
+      "family": "physics",
+      "name": "Collision create",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.collision_create",
+      "action": "collision_create",
+      "operation": "physics.collision_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "target_objects"
+      ],
+      "postconditions": [
+        "collision_count_increased"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.collision_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "collision_delete",
+      "family": "physics",
+      "name": "Collision delete",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "physics.collision_delete",
+      "action": "collision_delete",
+      "operation": "physics.collision_delete",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "target_objects_with_collision_behaviours"
+      ],
+      "postconditions": [
+        "target_collision_behaviours_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.collision_delete",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "collision_clean",
+      "family": "physics",
+      "name": "Collision clean",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.FixCollisionsTool",
+      "action": "collision_clean",
+      "operation": "tool.FixCollisionsTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "penetration_clean",
+      "family": "physics",
+      "name": "Penetration cleaning",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": "action.penetration_clean",
+      "action": "penetration_clean",
+      "operation": "action.penetration_clean",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "rig_state",
+      "family": "rigging",
+      "name": "Rig state",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.state",
+      "action": "rig_state",
+      "operation": "rig.state",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "rig_inventory"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.state",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "constraint_drivers",
+      "family": "rigging",
+      "name": "Constraint drivers",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.constraint_drivers",
+      "action": "constraint_drivers",
+      "operation": "rig.constraint_drivers",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "constraint_driver_catalog",
+        "scene_unchanged"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.constraint_drivers",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "quick_rig",
+      "family": "rigging",
+      "name": "Quick Rig",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "action.quick_rig",
+      "action": "quick_rig",
+      "operation": "action.quick_rig",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "manual_rig",
+      "family": "rigging",
+      "name": "Manual Rig",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.rig_elements_create",
+      "action": "manual_rig",
+      "operation": "rig.rig_elements_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "explicit_joint_pairs",
+        "joint_behaviours",
+        "valid_rig_options"
+      ],
+      "postconditions": [
+        "one_technical_links_owner_per_pair",
+        "linked_joints_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.rig_elements_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "rig_create",
+      "family": "rigging",
+      "name": "Rig create",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.rig_elements_create",
+      "action": "rig_create",
+      "operation": "rig.rig_elements_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "explicit_joint_pairs",
+        "joint_behaviours",
+        "valid_rig_options"
+      ],
+      "postconditions": [
+        "one_technical_links_owner_per_pair",
+        "linked_joints_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.rig_elements_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "rig_regenerate",
+      "family": "rigging",
+      "name": "Rig regenerate",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "action.rig_regenerate",
+      "action": "rig_regenerate",
+      "operation": "action.rig_regenerate",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "controller_point",
+      "family": "rigging",
+      "name": "Point controller",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.additional_point_create",
+      "action": "controller_point",
+      "operation": "rig.additional_point_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "rig_element_with_technical_links"
+      ],
+      "postconditions": [
+        "one_manual_point_link_added"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.additional_point_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "controller_box",
+      "family": "rigging",
+      "name": "Box controller",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.additional_box_create",
+      "action": "controller_box",
+      "operation": "rig.additional_box_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "rig_element_with_technical_links"
+      ],
+      "postconditions": [
+        "one_additional_box_link_added"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.additional_box_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "joint",
+      "family": "rigging",
+      "name": "Joint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.joint_create",
+      "action": "joint",
+      "operation": "rig.joint_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "joint_count_increased_by_one",
+        "created_joint_selected"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.joint_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "rigid_body",
+      "family": "rigging",
+      "name": "Rigid body",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.rig_elements_create",
+      "action": "rigid_body",
+      "operation": "rig.rig_elements_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "explicit_joint_pairs",
+        "joint_behaviours",
+        "valid_rig_options"
+      ],
+      "postconditions": [
+        "one_technical_links_owner_per_pair",
+        "linked_joints_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.rig_elements_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "ik",
+      "family": "rigging",
+      "name": "IK",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.ik_chain_create",
+      "action": "ik",
+      "operation": "rig.ik_chain_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "ordered_ends_with_attraction_points",
+        "middle_connection_points"
+      ],
+      "postconditions": [
+        "chain_ik_created_on_main_end"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.ik_chain_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "spline_ik",
+      "family": "rigging",
+      "name": "Spline IK",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.spline_ik_create",
+      "action": "spline_ik",
+      "operation": "rig.spline_ik_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "two_joint_endpoints",
+        "same_hierarchy_branch",
+        "full_rig_elements"
+      ],
+      "postconditions": [
+        "one_proto_spline_ik_created",
+        "resolved_hierarchy_references_equal"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.spline_ik_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "twist",
+      "family": "rigging",
+      "name": "Twist",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.twist",
+      "action": "twist",
+      "operation": "rig.twist",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "proto_box",
+        "related_twist_joint",
+        "no_rigid_body_on_rig_element"
+      ],
+      "postconditions": [
+        "proto_box_twist_reference_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.twist",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "mass",
+      "family": "rigging",
+      "name": "Mass",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.mass_set",
+      "action": "mass",
+      "operation": "rig.mass_set",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "rigid_bodies",
+        "positive_total_mass"
+      ],
+      "postconditions": [
+        "total_mass_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.mass_set",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "rig_info",
+      "family": "rigging",
+      "name": "Rig Info",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.rig_info_create",
+      "action": "rig_info",
+      "operation": "rig.rig_info_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "unlinked_joint_ids"
+      ],
+      "postconditions": [
+        "rig_info_count_increased_by_one",
+        "related_joints_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.rig_info_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "blend_shape",
+      "family": "rigging",
+      "name": "Blend Shape",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "action.blend_shape",
+      "action": "blend_shape",
+      "operation": "action.blend_shape",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "camera_create",
+      "family": "render",
+      "name": "Camera",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.camera_create",
+      "action": "camera_create",
+      "operation": "render.camera_create",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "new_camera_objects"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.camera_create",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "camera_aim",
+      "family": "render",
+      "name": "Camera with aim",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.camera_aim",
+      "action": "camera_aim",
+      "operation": "render.camera_aim",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "new_camera_rig_objects"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.camera_aim",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "viewport",
+      "family": "render",
+      "name": "Viewport",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.ViewportsTool",
+      "action": "viewport",
+      "operation": "tool.ViewportsTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "material",
+      "family": "render",
+      "name": "Filament Material",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "action.material",
+      "action": "material",
+      "operation": "action.material",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "viewport_state",
+      "family": "render",
+      "name": "Viewport state",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.viewport_state",
+      "action": "viewport_state",
+      "operation": "render.viewport_state",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "viewport_payload"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.viewport_state",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "camera_catalog",
+      "family": "render",
+      "name": "Camera catalog",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.camera_catalog",
+      "action": "camera_catalog",
+      "operation": "render.camera_catalog",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "camera_payload"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.camera_catalog",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "camera_view",
+      "family": "render",
+      "name": "Camera view",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.camera_view",
+      "action": "camera_view",
+      "operation": "render.camera_view",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "camera_equals_requested"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.camera_view",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "camera_activate",
+      "family": "render",
+      "name": "Camera activate",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.camera_activate",
+      "action": "camera_activate",
+      "operation": "render.camera_activate",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "camera_active"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.camera_activate",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "light_point",
+      "family": "render",
+      "name": "Point Light",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.light_point",
+      "action": "light_point",
+      "operation": "render.light_point",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "point_light_count_increased"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.light_point",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "light_spot",
+      "family": "render",
+      "name": "Spot Light",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.light_spot",
+      "action": "light_spot",
+      "operation": "render.light_spot",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "spot_light_count_increased"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.light_spot",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "grid",
+      "family": "render",
+      "name": "Grid",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.ViewGridTool",
+      "action": "grid",
+      "operation": "tool.ViewGridTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "composition",
+      "family": "render",
+      "name": "Composition",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.CompositionTool",
+      "action": "composition",
+      "operation": "tool.CompositionTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "viewport_capture",
+      "family": "render",
+      "name": "Viewport capture",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.viewport_capture",
+      "action": "viewport_capture",
+      "operation": "render.viewport_capture",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.viewport_capture",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "render_image",
+      "family": "render",
+      "name": "Render image",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "render.image",
+      "action": "render_image",
+      "operation": "render.image",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.image",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "render_video",
+      "family": "render",
+      "name": "Render video",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.RenderToFile",
+      "action": "render_video",
+      "operation": "tool.RenderToFile",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "unreal_livelink",
+      "family": "external",
+      "name": "Unreal LiveLink",
+      "source_url": "https://cascadeur.com/help/interface",
+      "license": "any",
+      "dependency": "Unreal Engine LiveLink plugin and running Unreal Editor",
+      "route": "tool.LiveLinkTool",
+      "action": "unreal_livelink",
+      "operation": "tool.LiveLinkTool",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "unreal_export",
+      "family": "external",
+      "name": "Unreal export",
+      "source_url": "https://cascadeur.com/help/interface",
+      "license": "any",
+      "dependency": "Unreal Engine integration",
+      "route": "external.unreal",
+      "action": "unreal_export",
+      "operation": "external.unreal",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "unity_export",
+      "family": "external",
+      "name": "Unity export",
+      "source_url": "https://cascadeur.com/help/interface",
+      "license": "any",
+      "dependency": "Unity integration",
+      "route": "external.unity",
+      "action": "unity_export",
+      "operation": "external.unity",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "daz_export",
+      "family": "external",
+      "name": "Daz export",
+      "source_url": "https://cascadeur.com/help/interface",
+      "license": "any",
+      "dependency": "Daz Studio integration",
+      "route": "command.Export_to_Daz",
+      "action": "daz_export",
+      "operation": "command.Export_to_Daz",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "roblox_export",
+      "family": "external",
+      "name": "Roblox export",
+      "source_url": "https://cascadeur.com/help/interface",
+      "license": "any",
+      "dependency": "Roblox export target",
+      "route": "command.Export_to_Roblox",
+      "action": "roblox_export",
+      "operation": "command.Export_to_Roblox",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "blender_export",
+      "family": "external",
+      "name": "Blender export",
+      "source_url": "https://cascadeur.com/help/interface",
+      "license": "any",
+      "dependency": "Blender integration",
+      "route": "external.blender",
+      "action": "blender_export",
+      "operation": "external.blender",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "control_picker",
+      "family": "external",
+      "name": "Control Picker",
+      "source_url": "https://cascadeur.com/help/interface",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.ControlPicker",
+      "action": "control_picker",
+      "operation": "tool.ControlPicker",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "scene_linking",
+      "family": "external",
+      "name": "Scene Linking",
+      "source_url": "https://cascadeur.com/help/interface",
+      "license": "any",
+      "dependency": null,
+      "route": "tool.LinkedScenes",
+      "action": "scene_linking",
+      "operation": "tool.LinkedScenes",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "settings_get",
+      "family": "system",
+      "name": "Settings get",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": false,
+      "execution_mode": "Gated",
+      "implementation_status": "unsupported",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "settings_set",
+      "family": "system",
+      "name": "Settings set",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "action.Settings",
+      "action": "settings_set",
+      "operation": "action.Settings",
+      "mutation": true,
+      "requires_scene": false,
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "view_mode",
+      "family": "system",
+      "name": "View mode",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "system.view_mode",
+      "action": "view_mode",
+      "operation": "system.view_mode",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "active_viewport",
+        "known_viewport_mode"
+      ],
+      "postconditions": [
+        "viewport_mode_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.view_mode",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "undo",
+      "family": "system",
+      "name": "Undo",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "system.undo",
+      "action": "undo",
+      "operation": "system.undo",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.undo",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "redo",
+      "family": "system",
+      "name": "Redo",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "system.redo",
+      "action": "redo",
+      "operation": "system.redo",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.redo",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "action_invoke",
+      "family": "system",
+      "name": "Action invoke",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "host.action_dispatcher",
+      "action": "action_invoke",
+      "operation": "system.action_invoke",
+      "mutation": true,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "registered_action_binding"
+      ],
+      "adapter_id": "cascadeur_2026_1.host.action_dispatcher",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "ui_flow_run",
+      "family": "system",
+      "name": "UI flow",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "host.ui_flow_prepare",
+      "action": "ui_flow_run",
+      "operation": "system.ui_file_flow",
+      "mutation": true,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "registered_uia_flow_token"
+      ],
+      "adapter_id": "cascadeur_2026_1.host.ui_flow_prepare",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "csc_query",
+      "family": "system",
+      "name": "CSC query",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "system.csc_query",
+      "action": "csc_query",
+      "operation": "system.csc_query",
+      "mutation": false,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "json_safe_result"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.csc_query",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "csc_mutate",
+      "family": "system",
+      "name": "CSC mutate",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "system.csc_mutate",
+      "action": "csc_mutate",
+      "operation": "system.csc_mutate",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "registered_mutation",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.csc_mutate",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "developer_execute_python",
+      "family": "system",
+      "name": "Developer Python",
+      "source_url": "https://cascadeur.com/help/category/215",
+      "license": "any",
+      "dependency": null,
+      "route": "system.developer_execute_python",
+      "action": "developer_execute_python",
+      "operation": "system.developer_execute_python",
+      "mutation": true,
+      "requires_scene": false,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "policy_enabled"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.developer_execute_python",
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
+        "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.silhouette",
+      "family": "animation",
+      "name": "Silhouette mode",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.trajectory_translation",
+      "family": "animation",
+      "name": "Translation trajectory",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.trajectory_rotation",
+      "family": "animation",
+      "name": "Rotation trajectory",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.trajectory_direction",
+      "family": "animation",
+      "name": "Direction trajectory",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.trajectory_tangents",
+      "family": "animation",
+      "name": "Trajectory tangents",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.node_editor",
+      "family": "animation",
+      "name": "Node Editor",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.ballistic_ghosts",
+      "family": "animation",
+      "name": "Ballistic Ghosts",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.root_constraint",
+      "family": "generation",
+      "name": "Root Constraint",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autoposing_props",
+      "family": "generation",
+      "name": "AutoPosing props",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_freeze",
+      "family": "physics",
+      "name": "AutoPhysics Freeze Physics",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_priority_frames",
+      "family": "physics",
+      "name": "AutoPhysics Priority Frames",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_corrector",
+      "family": "physics",
+      "name": "AutoPhysics Physics Corrector",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_smooth_trajectory",
+      "family": "physics",
+      "name": "AutoPhysics Smooth Trajectory",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_smooth_rotation",
+      "family": "physics",
+      "name": "AutoPhysics Smooth Rotation",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_compensation_motion",
+      "family": "physics",
+      "name": "AutoPhysics Compensation Motion",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_separation_motion",
+      "family": "physics",
+      "name": "AutoPhysics Separation of Motion",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_secondary_motion",
+      "family": "physics",
+      "name": "AutoPhysics Secondary Motion",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_restore_unbound",
+      "family": "physics",
+      "name": "AutoPhysics Restore Unbound",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.autophysics_point_settings",
+      "family": "physics",
+      "name": "AutoPhysics per-point settings",
+      "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.rig_element_delete",
+      "family": "rigging",
+      "name": "Delete rig element",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.joint_delete",
+      "family": "rigging",
+      "name": "Delete standard joint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.virtual_joint_create",
+      "family": "rigging",
+      "name": "Create virtual joint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.virtual_joint_delete",
+      "family": "rigging",
+      "name": "Delete virtual joint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.snap_rig",
+      "family": "rigging",
+      "name": "Snap Rig",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.snap_joint",
+      "family": "rigging",
+      "name": "Snap Joint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.prototype_mirror",
+      "family": "rigging",
+      "name": "Mirror prototype",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.hinge_union",
+      "family": "rigging",
+      "name": "Union hinges",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.hinge_orthogonalize",
+      "family": "rigging",
+      "name": "Orthogonalize hinges",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.hinge_straighten",
+      "family": "rigging",
+      "name": "Straighten hinges",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.clear_animation_data",
+      "family": "rigging",
+      "name": "Clear animation data",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.prototype_com_remove",
+      "family": "rigging",
+      "name": "Remove prototype CoM",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.untwist",
+      "family": "rigging",
+      "name": "Untwist",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.prototype_fulcrum_groups",
+      "family": "rigging",
+      "name": "Prototype fulcrum groups",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.root_constraint_add",
+      "family": "rigging",
+      "name": "Add Root Constraint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.root_constraint_remove",
+      "family": "rigging",
+      "name": "Remove Root Constraint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.additional_controller_remove",
+      "family": "rigging",
+      "name": "Remove additional controller",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.custom_additional_point_set",
+      "family": "rigging",
+      "name": "Set custom additional point",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.custom_additional_point_remove",
+      "family": "rigging",
+      "name": "Remove custom additional point",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.additional_joint_attach",
+      "family": "rigging",
+      "name": "Attach additional joint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.additional_joint_detach",
+      "family": "rigging",
+      "name": "Detach additional joint",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.additional_parent",
+      "family": "rigging",
+      "name": "Set additional parent",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.custom_rotation",
+      "family": "rigging",
+      "name": "Custom rotation",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.rig_json_import",
+      "family": "rigging",
+      "name": "Import rig JSON",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.rig_json_export",
+      "family": "rigging",
+      "name": "Export rig JSON",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.character_mirror_plane",
+      "family": "rigging",
+      "name": "Character mirror plane",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.generate_rig",
+      "family": "rigging",
+      "name": "Generate rig",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.open_autosave",
+      "family": "io",
+      "name": "Open Autosave",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.save_as_new_version",
+      "family": "io",
+      "name": "Save As New Version",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.save_as_without_assets",
+      "family": "io",
+      "name": "Save As without assets",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.import_scene_to_current",
+      "family": "io",
+      "name": "Import Scene To Current",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.selection_groups_import",
+      "family": "io",
+      "name": "Import Selection Groups",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.selection_groups_export",
+      "family": "io",
+      "name": "Export Selection Groups",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.scene_parts_import",
+      "family": "io",
+      "name": "Import Scene Parts",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.scene_parts_export",
+      "family": "io",
+      "name": "Export Scene Parts",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.fix_scene",
+      "family": "io",
+      "name": "Fix Scene",
+      "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_environment_map",
+      "family": "render",
+      "name": "Filament environment HDR/map",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_environment_rotation",
+      "family": "render",
+      "name": "Filament environment rotation",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_environment_color",
+      "family": "render",
+      "name": "Filament environment color",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_environment_intensity",
+      "family": "render",
+      "name": "Filament environment intensity",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_environment_direction",
+      "family": "render",
+      "name": "Filament environment direction",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_shadows",
+      "family": "render",
+      "name": "Filament shadows",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_dynamic_lights",
+      "family": "render",
+      "name": "Filament dynamic lights",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_ambient_occlusion",
+      "family": "render",
+      "name": "Filament ambient occlusion",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.filament_bloom",
+      "family": "render",
+      "name": "Filament bloom",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.point_light_properties",
+      "family": "render",
+      "name": "Point light properties",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.spot_light_properties",
+      "family": "render",
+      "name": "Spot light properties",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.material_textures",
+      "family": "render",
+      "name": "Material textures",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.viewport_layout",
+      "family": "render",
+      "name": "Viewport layout and visibility",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.camera_textures",
+      "family": "render",
+      "name": "Camera textures",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    },
+    {
+      "id": "official_gap.camera_settings",
+      "family": "render",
+      "name": "Camera settings",
+      "source_url": "https://cascadeur.com/help/category/311",
+      "license": "any",
+      "dependency": null,
+      "route": null,
+      "action": null,
+      "operation": null,
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Gated",
+      "implementation_status": "not_implemented",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
+      "contract_test_ids": [
+        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      ],
+      "live_test_id": null,
+      "fixture_id": null,
+      "since": "2026.1"
+    }
+  ]
+}

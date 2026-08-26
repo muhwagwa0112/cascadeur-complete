@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from functools import lru_cache
 from typing import Any, Literal
 
@@ -12,7 +13,7 @@ from .service import CascadeurService
 mcp = MCPServer(
     "cascadeur-complete",
     instructions=(
-        "Cascadeur 2026.1.x automation. Read capabilities first. Destructive operations require "
+        "Cascadeur 2026.1.2.0.15343 automation only. Read capabilities first. Destructive operations require "
         "change_prepare followed by change_commit. Never assume a gated feature ran."
     ),
 )
@@ -79,14 +80,23 @@ def scene_objects_resource() -> str:
 @mcp.resource("cascadeur://jobs/{job_id}")
 def job_resource(job_id: str) -> str:
     """Long-running job progress, logs, and result."""
-    record = service().jobs.get(job_id)
+    try:
+        record = service().jobs.get(job_id)
+    except ValueError:
+        record = None
     return _dump(record or {"ok": False, "error": "job not found", "job_id": job_id})
 
 
 @mcp.resource("cascadeur://snapshots/{snapshot_id}")
 def snapshot_resource(snapshot_id: str) -> str:
     """Snapshot metadata without exposing file contents."""
-    path = service().paths.snapshots / f"{snapshot_id}.casc"
+    try:
+        canonical = str(uuid.UUID(snapshot_id))
+    except ValueError:
+        return _dump({"snapshot_id": snapshot_id, "exists": False, "error": "invalid snapshot id"})
+    path = (service().paths.snapshots / f"{canonical}.casc").resolve()
+    if path.parent != service().paths.snapshots.resolve():
+        return _dump({"snapshot_id": snapshot_id, "exists": False, "error": "invalid snapshot id"})
     return _dump(
         {
             "snapshot_id": snapshot_id,
@@ -106,32 +116,8 @@ def cascadeur_status(refresh: bool = True) -> dict[str, Any]:
 
 @mcp.tool()
 def cascadeur_logs(lines: int = 200, pattern: str | None = None) -> dict[str, Any]:
-    """Read a bounded tail of Cascadeur's current log, optionally filtered by a regular expression."""
+    """Return bounded level-only diagnostics; pattern may be a log level, never arbitrary text."""
     return service().execute("logs", "system.logs", {"lines": lines, "pattern": pattern or ""}).model_dump(mode="json")
-
-
-@mcp.tool()
-def cascadeur_tool_inspect(tool_name: str) -> dict[str, Any]:
-    """List public runtime/editor members of one registered Cascadeur tool without invoking them."""
-    return service().execute("tool_inspect", "system.tool_inspect", {"tool_name": tool_name}).model_dump(mode="json")
-
-
-@mcp.tool()
-def setting_get(
-    key: str,
-    value_type: Literal["bool", "float", "int", "string"] = "string",
-    section: str | None = None,
-) -> dict[str, Any]:
-    """Read SECTION/KEY (or an explicit section and key) through Cascadeur's SettingsHandler."""
-    return (
-        service()
-        .execute(
-            "settings_get",
-            "system.settings_get",
-            {"key": key, "type": value_type, "section": section or ""},
-        )
-        .model_dump(mode="json")
-    )
 
 
 @mcp.tool()
@@ -166,10 +152,14 @@ def viewport_mode(
 
 @mcp.tool()
 def feature_search(
-    query: str = "", family: str | None = None, state: str | None = None, limit: int = 100
+    query: str = "",
+    family: str | None = None,
+    state: str | None = None,
+    limit: int = 100,
+    layer: Literal["product", "discovered", "all"] = "product",
 ) -> list[dict[str, Any]]:
-    """Search every product, csc API, GUI tool and bundled command capability."""
-    return service().feature_search(query, family, state, limit)
+    """Search product support by default, or explicitly query discovered inventory."""
+    return service().feature_search(query, family, state, limit, layer)
 
 
 @mcp.tool()
@@ -210,7 +200,10 @@ def job_submit(
 @mcp.tool()
 def job_status(job_id: str) -> dict[str, Any]:
     """Read current progress, logs and retained result for a job."""
-    record = service().jobs.get(job_id)
+    try:
+        record = service().jobs.get(job_id)
+    except ValueError:
+        record = None
     return (
         record.model_dump(mode="json")
         if record
@@ -223,7 +216,7 @@ def job_cancel(job_id: str) -> dict[str, Any]:
     """Cancel a queued job or request cancellation of an already claimed operation."""
     try:
         return service().jobs.cancel(job_id).model_dump(mode="json")
-    except KeyError:
+    except (KeyError, ValueError):
         return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "Unknown job id"}
 
 
@@ -422,9 +415,15 @@ def change_cancel(confirmation_token: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def change_rollback(snapshot_id: str, expected_revision: str | None = None) -> dict[str, Any]:
-    """Open a Cascadeur snapshot created before a protected change."""
-    return service().rollback(snapshot_id, expected_revision).model_dump(mode="json")
+def change_rollback_prepare(snapshot_id: str, ttl_seconds: float = 300) -> dict[str, Any]:
+    """Bind a snapshot rollback to the current scene/revision/selection and return a one-use token."""
+    return service().prepare_rollback(snapshot_id, ttl_seconds)
+
+
+@mcp.tool()
+def change_rollback(confirmation_token: str, timeout: float = 120) -> dict[str, Any]:
+    """Execute exactly the prepared snapshot rollback once."""
+    return service().rollback(confirmation_token, timeout).model_dump(mode="json")
 
 
 @mcp.tool()
@@ -1413,80 +1412,6 @@ def action_invoke(
 
 
 @mcp.tool()
-def tool_call(
-    feature_id: str,
-    tool_name: str,
-    chain: list[dict[str, Any]],
-    mutate: bool = False,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-    confirmation_token: str | None = None,
-    timeout: float = 60,
-) -> dict[str, Any]:
-    """Call a runtime-registered Cascadeur tool through an explicit attribute/call chain."""
-    return (
-        service()
-        .execute(
-            feature_id,
-            "system.tool_call",
-            {
-                "tool_name": tool_name,
-                "chain": chain,
-                "mutate": mutate,
-            },
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-            timeout=timeout,
-            confirmation_token=confirmation_token,
-        )
-        .model_dump(mode="json")
-    )
-
-
-@mcp.tool()
-def csc_query(root: str, chain: list[dict[str, Any]], timeout: float = 30) -> dict[str, Any]:
-    """Call an allowlisted read-only csc path with typed JSON arguments and safe serialization."""
-    return (
-        service()
-        .execute("csc_query", "system.csc_query", {"root": root, "chain": chain}, timeout=timeout)
-        .model_dump(mode="json")
-    )
-
-
-@mcp.tool()
-def csc_mutate(
-    root: str,
-    chain: list[dict[str, Any]],
-    scene_id: str,
-    expected_revision: str,
-    confirmation_token: str | None = None,
-    timeout: float = 60,
-) -> dict[str, Any]:
-    """Call a mutation only when its final installed csc method is registered and revision matches."""
-    if not service().csc_mutate_allowed(chain):
-        return ResultEnvelope(
-            ok=False,
-            feature_id="csc_mutate",
-            execution_mode=ExecutionMode.NATIVE,
-            error_code=ErrorCode.INVALID_REQUEST,
-            error_message="Final method is not in the installed mutation allowlist",
-        ).model_dump(mode="json")
-    return (
-        service()
-        .execute(
-            "csc_mutate",
-            "system.csc_mutate",
-            {"root": root, "chain": chain},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-            confirmation_token=confirmation_token,
-            timeout=timeout,
-        )
-        .model_dump(mode="json")
-    )
-
-
-@mcp.tool()
 def external_workflow(feature_id: str, configuration: dict[str, Any]) -> dict[str, Any]:
     """Describe or run a registered DCC/LiveLink workflow; returns an exact dependency gate when absent."""
     feature = service().feature(feature_id)
@@ -1503,7 +1428,14 @@ def external_workflow(feature_id: str, configuration: dict[str, Any]) -> dict[st
                 "Refresh cascadeur://capabilities before retrying",
             ],
         }
-    return service().execute(feature_id, "system.tool_call", configuration).model_dump(mode="json")
+    return {
+        "ok": False,
+        "feature_id": feature_id,
+        "execution_mode": feature.execution_mode,
+        "error_code": ErrorCode.INVALID_REQUEST,
+        "error_message": "No dedicated postcondition-safe external adapter is released for this feature",
+        "configuration_received": bool(configuration),
+    }
 
 
 @mcp.tool()
@@ -1531,31 +1463,6 @@ def redo(expected_revision: str, scene_id: str | None = None, expect_change: boo
             "redo",
             "system.redo",
             {"expect_change": expect_change},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
-
-
-@mcp.tool()
-def developer_execute_python(
-    code: str, scene_id: str | None = None, expected_revision: str | None = None
-) -> dict[str, Any]:
-    """Execute restricted Python only when the local developer policy explicitly enables it."""
-    if not service()._developer_policy():
-        return {
-            "ok": False,
-            "feature_id": "developer_execute_python",
-            "error_code": ErrorCode.LICENSE_GATED,
-            "error_message": "Disabled by policy. Set developer_execute_python=true locally to opt in.",
-        }
-    return (
-        service()
-        .execute(
-            "developer_execute_python",
-            "system.developer_execute_python",
-            {"code": code},
             scene_id=scene_id,
             expected_revision=expected_revision,
         )

@@ -12,20 +12,16 @@ async def test_mcp_lists_expected_tools_and_resources():
         assert {
             "cascadeur_status",
             "cascadeur_logs",
-            "cascadeur_tool_inspect",
-            "setting_get",
             "viewport_mode",
             "feature_search",
             "scene_summary",
             "operation_batch",
             "change_prepare",
             "change_commit",
+            "change_rollback_prepare",
             "change_rollback",
-            "csc_query",
-            "csc_mutate",
             "action_invoke",
             "ui_flow_prepare",
-            "tool_call",
             "external_workflow",
             "job_submit",
             "job_status",
@@ -64,6 +60,14 @@ async def test_mcp_lists_expected_tools_and_resources():
             "selection_edit",
             "object_delete_prepare",
         } <= names
+        assert {
+            "tool_call",
+            "csc_query",
+            "csc_mutate",
+            "developer_execute_python",
+            "cascadeur_tool_inspect",
+            "setting_get",
+        }.isdisjoint(names)
         resources = await client.list_resources()
         uris = {str(item.uri) for item in resources.resources}
         assert {

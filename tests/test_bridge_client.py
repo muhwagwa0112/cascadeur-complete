@@ -2,7 +2,7 @@ from threading import Event
 
 from cascadeur_complete.atomic_queue import atomic_write_json, read_json
 from cascadeur_complete.bridge_client import BridgeClient
-from cascadeur_complete.models import ErrorCode, ExecutionMode, Operation, ResultEnvelope
+from cascadeur_complete.models import BridgeRequest, ErrorCode, ExecutionMode, Operation, ResultEnvelope
 from cascadeur_complete.paths import RuntimePaths
 from cascadeur_complete.uia import UIAutomationError
 
@@ -61,6 +61,7 @@ def test_timeout_cancels_unclaimed_request(tmp_path):
 def test_silent_unclaimed_dispatch_is_retried_without_duplicate_execution(tmp_path):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     calls = []
+    client = BridgeClient(paths, trigger=None)
 
     def process_on_second_attempt():
         calls.append(1)
@@ -74,11 +75,11 @@ def test_silent_unclaimed_dispatch_is_retried_without_duplicate_execution(tmp_pa
             feature_id=request["feature_id"],
             execution_mode=ExecutionMode.NATIVE,
         )
+        client.queue.authenticate_response(BridgeRequest.model_validate(request), response)
         atomic_write_json(paths.responses / f"{request['request_id']}.json", response.model_dump(mode="json"))
 
-    result = BridgeClient(paths, trigger=process_on_second_attempt).execute(
-        "status", [Operation(name="system.status")], timeout=5
-    )
+    client.trigger = process_on_second_attempt
+    result = client.execute("status", [Operation(name="system.status")], timeout=5)
 
     assert result.ok
     assert calls == [1, 1]

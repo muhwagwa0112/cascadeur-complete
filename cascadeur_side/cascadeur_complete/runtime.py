@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import inspect
 import json
 import os
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import time
 import traceback
+import uuid
 from contextlib import suppress
 from pathlib import Path
 
@@ -17,39 +19,40 @@ import csc
 from . import handlers as _handlers  # noqa: F401
 from .handler_registry import dispatch as dispatch_registered
 
-PROTOCOL_VERSION = "1.0"
-MUTATING_PREFIXES = (
-    "add",
-    "apply",
-    "bake",
-    "bind",
-    "change",
-    "clear",
-    "close",
-    "copy",
-    "create",
-    "delete",
-    "erase",
-    "export",
-    "generate",
-    "hide",
-    "import",
-    "load",
-    "modify",
-    "move",
-    "open",
-    "remove",
-    "reset",
-    "run",
-    "save",
-    "select",
-    "set",
-    "switch",
-    "unbind",
-    "unset",
-    "update",
-)
-BLOCKED_ATTRIBUTES = {"__class__", "__dict__", "__globals__", "__subclasses__", "__import__"}
+PROTOCOL_VERSION = "2.0"
+READ_ONLY_OPERATIONS = {
+    "system.status",
+    "system.logs",
+    "system.tools",
+    "system.introspect",
+    "scene.summary",
+    "scene.objects",
+    "scene.list",
+    "scene.validate",
+    "selection.get",
+    "selection.filter",
+    "object.hierarchy",
+    "object.properties",
+    "object.behaviors",
+    "timeline.get",
+    "timeline.range",
+    "animation.transform_get",
+    "animation.key_list",
+    "animation.graph_query",
+    "animation.cycle_query",
+    "layer.list",
+    "render.viewport_state",
+    "render.camera_catalog",
+    "generation.state",
+    "physics.state",
+    "physics.auto_state",
+    "rig.state",
+    "rig.constraint_drivers",
+}
+
+
+class BridgeAuthenticationError(PermissionError):
+    pass
 
 
 def runtime_root():
@@ -60,9 +63,162 @@ def runtime_root():
 
 def ensure_dirs():
     root = runtime_root()
-    for relative in ("state/requests", "state/responses", "state/jobs", "snapshots", "logs"):
+    for relative in (
+        "state/requests",
+        "state/responses",
+        "state/jobs",
+        "state/tokens",
+        "state/seen",
+        "snapshots",
+        "logs",
+    ):
         (root / relative).mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _canonical_payload(payload):
+    unsigned = {key: value for key, value in payload.items() if key != "mac"}
+    return json.dumps(
+        unsigned,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _bridge_key(root):
+    path = root / "state" / "bridge.key"
+    value = path.read_bytes()
+    if len(value) < 32:
+        raise BridgeAuthenticationError("Bridge authentication key is invalid")
+    return value
+
+
+def _session_id(secret):
+    return hashlib.sha256(b"cascadeur-complete-bridge-session\0" + secret).hexdigest()[:32]
+
+
+def _sign_message(payload, secret):
+    return hmac.new(secret, _canonical_payload(payload), hashlib.sha256).hexdigest()
+
+
+def _verify_message(payload, secret):
+    supplied = payload.get("mac")
+    if not isinstance(supplied, str) or len(supplied) != 64:
+        raise BridgeAuthenticationError("Queue message is unsigned")
+    if not hmac.compare_digest(supplied, _sign_message(payload, secret)):
+        raise BridgeAuthenticationError("Queue message authentication failed")
+    if payload.get("session_id") != _session_id(secret):
+        raise BridgeAuthenticationError("Queue session does not match this installation")
+    nonce = payload.get("nonce")
+    if not isinstance(nonce, str) or not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", nonce):
+        raise BridgeAuthenticationError("Queue nonce is invalid")
+    request_id = str(payload.get("request_id", ""))
+    try:
+        if str(uuid.UUID(request_id)) != request_id.casefold():
+            raise ValueError
+    except ValueError as exc:
+        raise BridgeAuthenticationError("Queue request id is invalid") from exc
+
+
+def _claim_request_nonce(root, request):
+    marker = root / "state" / "seen" / ("request-" + request["nonce"])
+    try:
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise BridgeAuthenticationError("Queue request was already processed") from exc
+    with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+        stream.write(str(request["request_id"]) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _operation_is_mutating(operation):
+    name = str(operation.get("name", ""))
+    args = operation.get("arguments") or {}
+    if name in READ_ONLY_OPERATIONS:
+        return False
+    if name == "system.view_mode":
+        return str(args.get("action", "get")) not in {"get", "list"}
+    return name not in {"safety.snapshot", "safety.rollback_internal"}
+
+
+def _confirmation_signature(nonce, record, secret):
+    approval = {
+        "schema_version": record.get("schema_version"),
+        "feature_id": record.get("feature_id"),
+        "scene_id": record.get("scene_id"),
+        "scene_revision": record.get("scene_revision"),
+        "selection_fingerprint": record.get("selection_fingerprint"),
+        "operation": record.get("operation"),
+        "impact": record.get("impact"),
+        "backup_path": record.get("backup_path"),
+        "expires_at": record.get("expires_at"),
+    }
+    canonical = json.dumps(
+        approval,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    message = ("cascadeur-complete-change-v2:" + nonce + ":").encode() + canonical.encode("utf-8")
+    return hmac.new(secret, message, hashlib.sha256).hexdigest()
+
+
+def _verify_confirmation(root, request, before):
+    operations = request.get("operations") or []
+    if not any(_operation_is_mutating(item) for item in operations):
+        return
+    safety = request.get("safety_context") or {}
+    token = safety.get("confirmation_token")
+    if not isinstance(token, str):
+        raise BridgeAuthenticationError("Mutating operations require a consumed confirmation token")
+    try:
+        nonce, signature = token.split(".", 1)
+    except ValueError as exc:
+        raise BridgeAuthenticationError("Malformed confirmation token") from exc
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", nonce) or not re.fullmatch(r"[0-9a-f]{64}", signature):
+        raise BridgeAuthenticationError("Malformed confirmation token")
+    token_path = root / "state" / "tokens" / (nonce + ".used")
+    try:
+        record = json.loads(token_path.read_text(encoding="utf-8"))
+        secret = (root / "state" / "confirmation.key").read_bytes()
+    except (OSError, ValueError) as exc:
+        raise BridgeAuthenticationError("Consumed confirmation token is unavailable") from exc
+    expected = _confirmation_signature(nonce, record, secret)
+    if not hmac.compare_digest(signature, expected) or record.get("token") != token or not record.get("used"):
+        raise BridgeAuthenticationError("Confirmation token authentication failed")
+    if float(record.get("expires_at", 0)) < time.time():
+        raise BridgeAuthenticationError("Confirmation token expired")
+    if record.get("feature_id") != request.get("feature_id"):
+        raise BridgeAuthenticationError("Confirmation token feature binding differs")
+    if record.get("scene_id") != before.get("scene_id") or record.get("scene_revision") != before.get("revision"):
+        raise BridgeAuthenticationError("Confirmation token scene binding differs")
+    if record.get("selection_fingerprint") != before.get("selection_fingerprint"):
+        raise BridgeAuthenticationError("Confirmation token selection binding differs")
+    approved = record.get("operation") or {}
+    requested = operations[0] if len(operations) == 1 else None
+    if approved != requested:
+        ui_alias = (
+            approved.get("name") == "system.ui_file_flow"
+            and requested
+            and requested.get("name") == "system.action_dispatch"
+            and (approved.get("arguments") or {}).get("action_id")
+            == (requested.get("arguments") or {}).get("action_id")
+        )
+        if not ui_alias:
+            raise BridgeAuthenticationError("Confirmation token operation or arguments differ")
+    marker = root / "state" / "seen" / ("confirmation-" + nonce)
+    try:
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise BridgeAuthenticationError("Confirmation token was already executed by Cascadeur") from exc
+    with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+        stream.write(str(request["request_id"]) + ":" + str(request["nonce"]) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def atomic_json(path, payload):
@@ -664,69 +820,6 @@ def inspect_runtime_object(value):
     return {"type": type(value).__name__, "repr": repr(value)[:1000], "members": members}
 
 
-def _decode(value, roots):
-    if isinstance(value, list):
-        return [_decode(item, roots) for item in value]
-    if not isinstance(value, dict):
-        return value
-    if "$ref" in value:
-        name = value["$ref"]
-        if name not in roots:
-            raise ValueError("Unknown object reference: " + str(name))
-        return roots[name]
-    if "$set" in value:
-        return set(_decode(item, roots) for item in value["$set"])
-    if "$tuple" in value:
-        return tuple(_decode(item, roots) for item in value["$tuple"])
-    if "$enum" in value:
-        target = csc
-        for segment in str(value["$enum"]).split("."):
-            if segment == "csc":
-                continue
-            target = getattr(target, segment)
-        return target
-    if "$guid" in value:
-        text = value["$guid"]
-        for class_path in ("model.ObjectId", "Guid"):
-            target = csc
-            try:
-                for segment in class_path.split("."):
-                    target = getattr(target, segment)
-                converter = target.from_string
-                return converter(text)
-            except Exception:
-                continue
-        raise ValueError("Installed API cannot convert GUID")
-    return {key: _decode(item, roots) for key, item in value.items()}
-
-
-def call_chain(scene, spec, mutate=False):
-    app = csc.app.get_application()
-    roots = {
-        "csc": csc,
-        "app": app,
-        "scene_view": _scene_view(),
-        "scene": _domain_scene(scene),
-        "tools": app.get_tools_manager() if app else None,
-    }
-    root_name = spec.get("root", "csc")
-    if root_name not in roots:
-        raise ValueError("Unsupported root: " + str(root_name))
-    value = roots[root_name]
-    for step in spec.get("chain", []):
-        name = step.get("attr")
-        if not name or name.startswith("_") or name in BLOCKED_ATTRIBUTES:
-            raise ValueError("Blocked attribute")
-        if not mutate and name.lower().startswith(MUTATING_PREFIXES):
-            raise PermissionError("Mutating method is not allowed in csc_query: " + name)
-        value = getattr(value, name)
-        if step.get("call", False):
-            args = [_decode(item, roots) for item in step.get("args", [])]
-            kwargs = {key: _decode(item, roots) for key, item in step.get("kwargs", {}).items()}
-            value = value(*args, **kwargs)
-    return json_safe(value)
-
-
 def _save_snapshot(scene, snapshot_id, working_id):
     root = ensure_dirs()
     destination = root / "snapshots" / (snapshot_id + ".casc")
@@ -839,19 +932,6 @@ def _run_operation(scene, operation, request):
         }, []
     if name == "system.tools":
         return tools_catalog(), []
-    if name == "system.tool_schema":
-        app = csc.app.get_application()
-        tool = app.get_tools_manager().get_tool(str(args["tool_name"]))
-        value = tool
-        for member_name in args.get("members", []):
-            member = getattr(value, str(member_name))
-            if callable(member):
-                # CascadeurTool.editor() is bound to an application scene, while
-                # ordinary accessors such as name() are zero-argument methods.
-                value = member(_scene_view()) if str(member_name) == "editor" else member()
-            else:
-                value = member
-        return inspect_runtime_object(value), []
     if name == "system.introspect":
         schema = introspect_csc()
         counts = {"symbols": 0, "classes": 0, "functions": 0, "methods": 0, "values": 0}
@@ -874,10 +954,6 @@ def _run_operation(scene, operation, request):
         count(schema)
         counts["class_members"] = counts["methods"] + counts["values"]
         return {"schema": schema, "counts": counts}, []
-    if name == "system.csc_query":
-        return call_chain(scene, args, mutate=False), []
-    if name == "system.csc_mutate":
-        return call_chain(scene, args, mutate=True), []
     if name == "system.action_invoke":
         action_id = str(args["action_id"])
         before = scene_state(scene)
@@ -885,10 +961,7 @@ def _run_operation(scene, operation, request):
         after = scene_state(scene)
         postcondition = args.get("postcondition")
         if postcondition:
-            observed = call_chain(scene, postcondition, mutate=False)
-            expected = postcondition.get("equals")
-            if "equals" in postcondition and observed != expected:
-                raise AssertionError("POSTCONDITION_FAILED: observed postcondition differs")
+            raise PermissionError("Generic action postcondition call chains are not available in production")
         elif args.get("expect_change", True) and before["revision"] == after["revision"]:
             raise AssertionError("POSTCONDITION_FAILED: action made no observable scene change")
         return {
@@ -905,24 +978,6 @@ def _run_operation(scene, operation, request):
         action_id = str(args["action_id"])
         result = csc.app.get_application().get_action_manager().call_action(action_id)
         return {"action_id": action_id, "return_value": json_safe(result)}, []
-    if name == "system.tool_call":
-        mutate = bool(args.get("mutate", False))
-        before = scene_state(scene) if mutate else None
-        value = call_chain(
-            scene,
-            {
-                "root": "tools",
-                "chain": [
-                    {"attr": "get_tool", "call": True, "args": [str(args["tool_name"])]},
-                    *args.get("chain", []),
-                ],
-            },
-            mutate=mutate,
-        )
-        after = scene_state(scene) if mutate else None
-        if mutate and before["revision"] == after["revision"]:
-            raise AssertionError("POSTCONDITION_FAILED: tool call made no observable scene change")
-        return value, []
     if name == "timeline.set_frame":
         frame = int(args["frame"])
         domain = _domain_scene(scene)
@@ -1161,7 +1216,7 @@ def _run_operation(scene, operation, request):
         snapshot_id = str(args["snapshot_id"])
         working_id = str(args["working_id"])
         return {"snapshot_id": snapshot_id, **_save_snapshot(scene, snapshot_id, working_id)}, []
-    if name == "safety.rollback":
+    if name in {"safety.rollback", "safety.rollback_internal"}:
         path = Path(str(args["path"]))
         if not path.is_file():
             raise FileNotFoundError(path)
@@ -1198,14 +1253,6 @@ def _run_operation(scene, operation, request):
             },
             request,
         )
-    if name == "system.developer_execute_python":
-        policy_path = runtime_root() / "policy.json"
-        policy = json.loads(policy_path.read_text(encoding="utf-8")) if policy_path.is_file() else {}
-        if not policy.get("developer_execute_python", False):
-            raise PermissionError("Developer Python execution is disabled by policy")
-        namespace = {"csc": csc, "scene": _domain_scene(scene), "result": None}
-        exec(str(args["code"]), {"__builtins__": {}}, namespace)
-        return json_safe(namespace.get("result")), ["Developer Python policy is enabled"]
     raise KeyError("Unknown operation: " + str(name))
 
 
@@ -1224,6 +1271,10 @@ def execute_request(scene, request):
         return _error(feature_id, "SCENE_CHANGED", "Scene identity changed", started, before)
     if expected_revision and expected_revision != before["revision"]:
         return _error(feature_id, "SCENE_CHANGED", "Scene revision changed", started, before)
+    try:
+        _verify_confirmation(runtime_root(), request, before)
+    except BridgeAuthenticationError as exc:
+        return _error(feature_id, "INVALID_REQUEST", str(exc), started, before)
     safety = request.get("safety_context") or {}
     snapshot_id = None
     if safety.get("snapshot_required"):
@@ -1263,6 +1314,18 @@ def execute_request(scene, request):
             "duration_ms": int((time.monotonic() - started) * 1000),
             "error_code": None,
             "error_message": None,
+            "operation_id": results[0]["operation"] if len(results) == 1 else "batch",
+            "status": "succeeded",
+            "scene_revision_before": before.get("revision"),
+            "scene_revision_after": after.get("revision"),
+            "postconditions": [
+                {
+                    "id": "bridge_execution",
+                    "ok": True,
+                    "detail": "Operation completed and live scene state was re-read",
+                }
+            ],
+            "evidence_id": None,
         }
     except PermissionError as exc:
         return _error(feature_id, "LICENSE_GATED", str(exc), started, scene_state(_scene_view() or scene), snapshot_id)
@@ -1317,6 +1380,12 @@ def _error(feature_id, code, message, started, state, snapshot_id=None):
         "duration_ms": int((time.monotonic() - started) * 1000),
         "error_code": code,
         "error_message": message[:12000],
+        "operation_id": None,
+        "status": "failed",
+        "scene_revision_before": state.get("revision"),
+        "scene_revision_after": state.get("revision"),
+        "postconditions": [],
+        "evidence_id": None,
     }
 
 
@@ -1325,6 +1394,10 @@ def process_pending(scene, *, matching_scene_only=False):
     # Queue routing must follow the document that is actually active now.
     scene = _scene_view() or scene
     root = ensure_dirs()
+    try:
+        bridge_secret = _bridge_key(root)
+    except Exception:
+        return 0
     requests = root / "state" / "requests"
     responses = root / "state" / "responses"
     processed = 0
@@ -1333,6 +1406,7 @@ def process_pending(scene, *, matching_scene_only=False):
         if matching_scene_only:
             try:
                 preview = json.loads(path.read_text(encoding="utf-8"))
+                _verify_message(preview, bridge_secret)
             except Exception:
                 preview = {}
             target_scene_id = preview.get("scene_id")
@@ -1348,18 +1422,45 @@ def process_pending(scene, *, matching_scene_only=False):
             continue
         try:
             request = json.loads(claimed.read_text(encoding="utf-8"))
-            request_id = str(request.get("request_id", claimed.stem))
-            if request.get("protocol_version") != PROTOCOL_VERSION:
+            request_id = str(request.get("request_id", ""))
+            authenticated = True
+            try:
+                _verify_message(request, bridge_secret)
+                _claim_request_nonce(root, request)
+            except BridgeAuthenticationError as exc:
+                authenticated = False
+                result = _error(
+                    "authentication",
+                    "INVALID_REQUEST",
+                    str(exc),
+                    time.monotonic(),
+                    scene_state(scene),
+                )
+            if authenticated and request.get("protocol_version") != PROTOCOL_VERSION:
                 result = _error(
                     "protocol", "UNSUPPORTED_VERSION", "Bridge protocol mismatch", time.monotonic(), scene_state(scene)
                 )
-            elif float(request.get("expires_at", 0)) < time.time():
+            elif authenticated and float(request.get("expires_at", 0)) < time.time():
                 result = _error(
                     "timeout", "TIMEOUT", "Request TTL expired before execution", time.monotonic(), scene_state(scene)
                 )
-            else:
+            elif authenticated:
                 result = execute_request(_scene_view() or scene, request)
-            atomic_json(responses / (request_id + ".json"), result)
+            try:
+                valid_request_id = str(uuid.UUID(request_id)) == request_id.casefold()
+            except ValueError:
+                valid_request_id = False
+            if valid_request_id:
+                result.update(
+                    {
+                        "request_id": request_id,
+                        "session_id": request.get("session_id"),
+                        "nonce": request.get("nonce"),
+                        "mac": "",
+                    }
+                )
+                result["mac"] = _sign_message(result, bridge_secret)
+                atomic_json(responses / (request_id + ".json"), result)
             processed += 1
         finally:
             claimed.unlink(missing_ok=True)

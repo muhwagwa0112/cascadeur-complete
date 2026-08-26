@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from pathlib import Path
 from threading import RLock
 
 from .atomic_queue import atomic_write_json, read_json
@@ -47,8 +48,17 @@ class JobStore:
         self.save(record)
         return record
 
-    def path(self, job_id: str):
-        return self.paths.jobs / f"{job_id}.json"
+    def path(self, job_id: str) -> Path:
+        try:
+            canonical = str(uuid.UUID(str(job_id)))
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("Invalid job id") from exc
+        if canonical != str(job_id).casefold():
+            raise ValueError("Invalid job id")
+        path = (self.paths.jobs / f"{canonical}.json").resolve()
+        if path.parent != self.paths.jobs.resolve():
+            raise ValueError("Invalid job id")
+        return path
 
     def save(self, record: JobRecord) -> None:
         with self._lock:
@@ -58,7 +68,13 @@ class JobStore:
     def get(self, job_id: str) -> JobRecord | None:
         with self._lock:
             path = self.path(job_id)
-            return JobRecord.model_validate(read_json(path)) if path.is_file() else None
+            if not path.is_file():
+                return None
+            try:
+                return JobRecord.model_validate(read_json(path))
+            except Exception as exc:
+                # Never echo validation input: it may contain local file data.
+                raise ValueError("Stored job record is invalid") from exc
 
     def update(
         self,

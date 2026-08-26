@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install locked tooling and project
+        shell: pwsh
+        run: |
+          python -m pip install uv==0.12.5
+          uv sync --frozen --extra dev
+      - name: Lint and test
+        shell: pwsh
+        run: |
+          uv run ruff check src tests packaging scripts/mcp-smoke.py
+          uv run pytest
+          uv run python skills/cascadeur-mcp-workflows/scripts/validate_tool_coverage.py
+      - name: Parse release PowerShell
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem scripts,packaging -Filter *.ps1 -Recurse | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { $failed = $true; $errors | Format-Table }
+          }
+          if ($failed) { throw 'PowerShell parse errors found' }
+  package:
+    runs-on: windows-2025
+    needs: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Build frozen payload and installer
+        shell: pwsh
+        run: |
+          python -m pip install uv==0.12.5
+          ./scripts/build-release.ps1
+      - name: Verify unsigned package metadata
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem artifacts/stage/app -Filter cascadeur-complete.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Frozen server missing' }
+          if (-not $exe.VersionInfo.ProductVersion) { throw 'Frozen ProductVersion missing' }
+          if (-not (Get-ChildItem artifacts/installer -Filter '*.exe')) { throw 'Installer missing' }

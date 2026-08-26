@@ -11,10 +11,12 @@ from typing import Any
 
 from .atomic_queue import atomic_write_json
 from .bridge_client import BridgeClient
+from .build_profile import DEVELOPER_BUILD
 from .discovery import BASELINE_TOOLS, discover_commands, discover_installation, load_csc_schema
-from .feature_registry import build_registry
+from .feature_registry import build_registry, registry_json
 from .jobs import JobStore
 from .models import (
+    PROTOCOL_VERSION,
     CapabilityState,
     ErrorCode,
     Evidence,
@@ -25,6 +27,7 @@ from .models import (
     SafetyContext,
 )
 from .paths import RuntimePaths
+from .product_catalog import PRODUCT_CATALOG
 from .safety import ChangeManager, SafetyError, validate_local_input_path, validate_local_path
 from .uia import (
     UIAutomationError,
@@ -102,17 +105,15 @@ class CascadeurService:
             license_name=self._license_name,
             scene_available=self._scene_available,
             version_name=self._version_name,
-            verified_features=self.evidence_store.verified_features(self._version_name),
+            verified_features=self.evidence_store.verified_features(
+                self._version_name,
+                license_name=self._license_name,
+            ),
             developer_enabled=self._developer_policy(),
         )
 
     def _write_registry(self) -> None:
-        payload = {
-            "schema_version": 2,
-            "feature_count": len(self._features),
-            "unclassified_count": sum(not feature.test_ids or not feature.evidence_kind for feature in self._features),
-            "features": [item.model_dump(mode="json") for item in self._features],
-        }
+        payload = json.loads(registry_json(self._features))
         atomic_write_json(self.paths.registry, payload)
 
     def _remember_scene_result(self, result: ResultEnvelope, *, clear_missing: bool = False) -> None:
@@ -183,14 +184,30 @@ class CascadeurService:
         for item in self._features:
             states[item.state.value] = states.get(item.state.value, 0) + 1
             modes[item.execution_mode.value] = modes.get(item.execution_mode.value, 0) + 1
+        product_features = [item for item in self._features if item.truth_layer == "product"]
+        product_states: dict[str, int] = {}
+        for item in product_features:
+            product_states[item.state.value] = product_states.get(item.state.value, 0) + 1
+        supported = sum(
+            item.verification.value == "verified_live" and item.state == CapabilityState.AVAILABLE
+            for item in product_features
+        )
         return {
             "server": "cascadeur-complete",
             "server_version": "0.1.0",
             "baseline": "2026.1.2.0.15343",
             "installation": self.installation,
-            "bridge_protocol": "1.0",
+            "bridge_protocol": PROTOCOL_VERSION,
             "transport": "stdio",
             "feature_count": len(self._features),
+            "product_coverage": {
+                "catalog_count": len(product_features),
+                "supported": supported,
+                "support_percent": round((supported / len(product_features)) * 100, 2) if product_features else 0,
+                "states": product_states,
+                "definition": "dedicated adapter + exact postconditions + live evidence on this build",
+            },
+            "discovered_inventory_count": len(self._features) - len(product_features),
             "states": states,
             "execution_modes": modes,
             "connection": status.model_dump(mode="json") if status else {"live_checked": False},
@@ -204,6 +221,19 @@ class CascadeurService:
             return bool(json.loads(self.paths.policy.read_text(encoding="utf-8")).get("developer_execute_python"))
         except (OSError, ValueError):
             return False
+
+    def _supported_build_error(self, feature_id: str) -> ResultEnvelope | None:
+        if self._version_name == PRODUCT_CATALOG.supported_build:
+            return None
+        return self._host_error(
+            feature_id,
+            ErrorCode.UNSUPPORTED_VERSION,
+            (
+                f"Cascadeur {PRODUCT_CATALOG.supported_build} is required; "
+                f"installed build is {self._version_name}"
+            ),
+            mode=ExecutionMode.GATED,
+        )
 
     @property
     def features(self) -> list[FeatureRecord]:
@@ -236,12 +266,91 @@ class CascadeurService:
             return len(matches) == 1 and action_id == matches[0]
         return False
 
+    def _generic_api_enabled(self) -> bool:
+        if not DEVELOPER_BUILD:
+            return False
+        if not self.paths.policy.is_file():
+            return False
+        try:
+            policy = json.loads(self.paths.policy.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return bool(policy.get("developer_mode")) and bool(policy.get("generic_api"))
+
+    def _path_policy(self) -> dict[str, bool]:
+        try:
+            policy = json.loads(self.paths.policy.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            policy = {}
+        return {
+            "allow_unc_paths": bool(policy.get("allow_unc_paths", False)),
+            "allow_device_paths": bool(policy.get("allow_device_paths", False)),
+            "require_confirmation_for_overwrite": bool(
+                policy.get("require_confirmation_for_overwrite", True)
+            ),
+        }
+
+    def _operation_binding_error(
+        self, feature: FeatureRecord, operation_name: str, arguments: dict[str, Any] | None = None
+    ) -> str | None:
+        arguments = arguments or {}
+        generic_operations = {
+            "system.csc_query",
+            "system.csc_mutate",
+            "system.tool_call",
+            "system.developer_execute_python",
+        }
+        if operation_name in generic_operations:
+            if not self._generic_api_enabled():
+                return "Generic csc/tool/Python execution is disabled in production policy"
+            expected_feature = {
+                "system.csc_query": "csc_query",
+                "system.csc_mutate": "csc_mutate",
+                "system.developer_execute_python": "developer_execute_python",
+            }.get(operation_name)
+            if expected_feature and feature.id != expected_feature:
+                return "Generic operation is not bound to this feature id"
+            return None
+        if operation_name == "system.action_invoke":
+            action_id = str(arguments.get("action_id", ""))
+            return None if self.action_allowed(feature.id, action_id) else "Action id is not bound to this feature"
+        if operation_name == "system.ui_file_flow":
+            ui_file_features = {
+                "import_usd",
+                "export_usd",
+                "import_glb",
+                "export_glb",
+                "import_gltf",
+                "export_gltf",
+                "import_vrm",
+            }
+            return None if feature.id in ui_file_features else "UI file flow is not bound to this feature"
+        if feature.id == "view_mode" and operation_name in {"system.view_mode_get", "system.view_mode_set"}:
+            return None
+        aliases = {
+            "auto_posing": "generation.auto_posing",
+            "auto_physics": "physics.auto_snap",
+        }
+        expected = aliases.get(feature.id, feature.route)
+        if operation_name != expected:
+            return f"Operation {operation_name!r} is not bound to feature {feature.id!r}; expected {expected!r}"
+        return None
+
     def feature_search(
-        self, query: str, family: str | None = None, state: str | None = None, limit: int = 100
+        self,
+        query: str,
+        family: str | None = None,
+        state: str | None = None,
+        limit: int = 100,
+        layer: str = "product",
     ) -> list[dict[str, Any]]:
         needle = query.casefold()
         result = []
         for feature in self._features:
+            if layer not in {"product", "discovered", "all"}:
+                raise ValueError("layer must be product, discovered, or all")
+            if layer != "all" and feature.truth_layer != layer:
+                continue
             if family and feature.family != family:
                 continue
             if state and feature.state.value != state:
@@ -267,7 +376,10 @@ class CascadeurService:
         attempt: int = 1,
     ) -> dict[str, Any]:
         feature = self.feature(feature_id)
-        if feature.destructive or self._operation_is_destructive(operation_name):
+        binding_error = self._operation_binding_error(feature, operation_name, arguments)
+        if binding_error:
+            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
+        if self._operation_is_mutating(operation_name):
             return self._host_error(
                 feature_id,
                 ErrorCode.CONFIRMATION_REQUIRED,
@@ -321,7 +433,10 @@ class CascadeurService:
         return record.model_dump(mode="json")
 
     def retry_job(self, job_id: str) -> dict[str, Any]:
-        record = self.jobs.get(job_id)
+        try:
+            record = self.jobs.get(job_id)
+        except ValueError:
+            record = None
         if record is None:
             return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "Unknown job id"}
         if record.status not in ("failed", "canceled"):
@@ -358,10 +473,22 @@ class CascadeurService:
         timeout: float = 30.0,
         confirmation_token: str | None = None,
     ) -> ResultEnvelope:
+        build_error = self._supported_build_error(feature_id)
+        if build_error and not (feature_id == "status" and operation_name == "system.status"):
+            return build_error
         try:
             feature = self.feature(feature_id)
         except KeyError:
             return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, "Unknown feature id")
+        if operation_name in {
+            "system.csc_query",
+            "system.csc_mutate",
+            "system.tool_call",
+            "system.developer_execute_python",
+        }:
+            binding_error = self._operation_binding_error(feature, operation_name, arguments)
+            if binding_error:
+                return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error)
         if feature.state == CapabilityState.LICENSE_GATED:
             return self._host_error(
                 feature_id, ErrorCode.LICENSE_GATED, f"{feature.name} requires {feature.license} license"
@@ -388,32 +515,25 @@ class CascadeurService:
                 f"no postcondition-safe adapter is available (route: {feature.route})",
                 mode=ExecutionMode.UIA,
             )
-        if feature.requires_scene and scene_id is None and self._live_scene_id:
-            scene_id = self._live_scene_id
-            if expected_revision is None:
-                expected_revision = self._live_scene_revision
-        effective_destructive = (
-            feature.destructive
-            or operation_name == "system.csc_mutate"
-            or (operation_name == "system.tool_call" and bool((arguments or {}).get("mutate")))
-        )
-        if effective_destructive:
-            return self._host_error(
-                feature_id, ErrorCode.CONFIRMATION_REQUIRED, "Use change_prepare and change_commit for this feature"
-            )
-        if self._operation_is_mutating(operation_name) and expected_revision is None:
-            return self._host_error(
-                feature_id,
-                ErrorCode.INVALID_REQUEST,
-                "expected_revision is required for scene mutations",
-                mode=feature.execution_mode,
-            )
         if feature.state == CapabilityState.UNHEALTHY and not feature.adapter_id:
             return self._host_error(
                 feature_id,
                 ErrorCode.POSTCONDITION_FAILED,
                 "Capability was inventoried but its dedicated execution adapter is not implemented",
                 mode=feature.execution_mode,
+            )
+        binding_error = self._operation_binding_error(feature, operation_name, arguments)
+        if binding_error:
+            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error)
+        if feature.requires_scene and scene_id is None and self._live_scene_id:
+            scene_id = self._live_scene_id
+            if expected_revision is None:
+                expected_revision = self._live_scene_revision
+        if self._operation_is_mutating(operation_name):
+            return self._host_error(
+                feature_id,
+                ErrorCode.CONFIRMATION_REQUIRED,
+                "All scene and file mutations require change_prepare and change_commit",
             )
         if operation_name == "system.action_invoke" and not feature.route.startswith(
             ("action_invoke:", "command.")
@@ -446,6 +566,10 @@ class CascadeurService:
             timeout=timeout,
             safety_context=safety,
         )
+        result.operation_id = operation_name
+        result.status = "succeeded" if result.ok else "failed"
+        result.scene_revision_before = expected_revision
+        result.scene_revision_after = result.scene_revision
         if result.ok and output_path:
             result = self._wait_for_output_file(result, str(output_path), timeout, before_output)
         self._remember_scene_result(result)
@@ -460,7 +584,17 @@ class CascadeurService:
             feature = self.feature(feature_id)
         except KeyError:
             return
-        if not feature.adapter_id or not result.ok:
+        product = PRODUCT_CATALOG.by_id.get(feature_id)
+        if not feature.adapter_id or not result.ok or product is None:
+            return
+        observed = {
+            str(item.get("id")): bool(item.get("ok"))
+            for item in result.postconditions
+            if isinstance(item, dict) and item.get("id")
+        }
+        if not product.live_test_id or not product.fixture_id:
+            return
+        if not product.postconditions or not all(observed.get(item) is True for item in product.postconditions):
             return
         self.evidence_store.record(
             feature_id,
@@ -469,6 +603,10 @@ class CascadeurService:
             operation=operation_name,
             scene_id=result.scene_id,
             evidence=[item.model_dump(mode="json") for item in result.evidence],
+            license_name=self._license_name,
+            observed_postconditions=observed,
+            fixture_id=product.fixture_id,
+            test_id=product.live_test_id,
         )
 
     def batch(
@@ -481,11 +619,27 @@ class CascadeurService:
         timeout: float = 60.0,
         confirmation_token: str | None = None,
     ) -> ResultEnvelope:
+        build_error = self._supported_build_error(feature_id)
+        if build_error:
+            return build_error
         parsed = [Operation.model_validate(item) for item in operations]
-        destructive = any(self._operation_is_destructive(item.name) for item in parsed)
-        if destructive:
+        try:
+            feature = self.feature(feature_id)
+        except KeyError:
+            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, "Unknown feature id")
+        binding_errors = [self._operation_binding_error(feature, item.name, item.arguments) for item in parsed]
+        if any(binding_errors):
             return self._host_error(
-                feature_id, ErrorCode.CONFIRMATION_REQUIRED, "Destructive batches must be split into prepared changes"
+                feature_id,
+                ErrorCode.INVALID_REQUEST,
+                next(item for item in binding_errors if item),
+            )
+        mutating = any(self._operation_is_mutating(item.name) for item in parsed)
+        if mutating:
+            return self._host_error(
+                feature_id,
+                ErrorCode.CONFIRMATION_REQUIRED,
+                "Mutating batches must be split into individually prepared changes",
             )
         if any(self._operation_is_mutating(item.name) for item in parsed) and expected_revision is None:
             return self._host_error(
@@ -497,15 +651,31 @@ class CascadeurService:
             scene_id=scene_id,
             expected_revision=expected_revision,
             timeout=timeout,
-            safety_context=SafetyContext(destructive=destructive, confirmation_token=confirmation_token),
+            safety_context=SafetyContext(destructive=False, confirmation_token=confirmation_token),
         )
+        result.operation_id = "batch"
+        result.status = "succeeded" if result.ok else "failed"
+        result.scene_revision_before = expected_revision
+        result.scene_revision_after = result.scene_revision
         self._remember_scene_result(result)
         return result
 
     def prepare_change(
         self, feature_id: str, operation_name: str, arguments: dict[str, Any], ttl: float = 300.0
     ) -> dict[str, Any]:
+        build_error = self._supported_build_error(feature_id)
+        if build_error:
+            return build_error.model_dump(mode="json")
         feature = self.feature(feature_id)
+        if operation_name in {
+            "system.csc_query",
+            "system.csc_mutate",
+            "system.tool_call",
+            "system.developer_execute_python",
+        }:
+            binding_error = self._operation_binding_error(feature, operation_name, arguments)
+            if binding_error:
+                return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
         if feature.state == CapabilityState.LICENSE_GATED:
             return self._host_error(
                 feature_id, ErrorCode.LICENSE_GATED, f"{feature.name} requires {feature.license} license"
@@ -539,6 +709,15 @@ class CascadeurService:
                 "Capability was inventoried but its dedicated execution adapter is not implemented",
                 mode=feature.execution_mode,
             ).model_dump(mode="json")
+        binding_error = self._operation_binding_error(feature, operation_name, arguments)
+        if binding_error:
+            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
+        if not self._operation_is_mutating(operation_name):
+            return self._host_error(
+                feature_id,
+                ErrorCode.INVALID_REQUEST,
+                "Read-only operations must be executed directly and cannot mint change tokens",
+            ).model_dump(mode="json")
         status = self.refresh_live()
         if not status.ok:
             return status.model_dump(mode="json")
@@ -552,15 +731,26 @@ class CascadeurService:
             ).model_dump(mode="json")
         destination = arguments.get("path") or arguments.get("destination")
         if destination:
+            path_policy = self._path_policy()
             if (
                 operation_name == "scene.open"
                 or operation_name.startswith("io.import_")
                 or bool(arguments.get("input"))
             ):
-                validated = validate_local_input_path(str(destination))
+                validated = validate_local_input_path(
+                    str(destination),
+                    allow_unc_paths=path_policy["allow_unc_paths"],
+                    allow_device_paths=path_policy["allow_device_paths"],
+                )
             else:
                 validated = validate_local_path(
-                    str(destination), allow_overwrite=bool(arguments.get("allow_overwrite"))
+                    str(destination),
+                    allow_overwrite=(
+                        bool(arguments.get("allow_overwrite"))
+                        or not path_policy["require_confirmation_for_overwrite"]
+                    ),
+                    allow_unc_paths=path_policy["allow_unc_paths"],
+                    allow_device_paths=path_policy["allow_device_paths"],
                 )
             arguments = {**arguments, "path": str(validated)}
         snapshot_id = str(uuid.uuid4())
@@ -602,7 +792,7 @@ class CascadeurService:
             state = post_snapshot.result
         impact = {
             "feature": feature.name,
-            "destructive": feature.destructive or self._operation_is_destructive(operation_name),
+            "destructive": True,
             "selected_entities": len(state.get("selection", [])),
             "object_count": len(state.get("objects", [])),
             "destination": arguments.get("path"),
@@ -635,6 +825,9 @@ class CascadeurService:
         }
 
     def commit_change(self, token: str, timeout: float = 120.0) -> ResultEnvelope:
+        build_error = self._supported_build_error("change_commit")
+        if build_error:
+            return build_error
         try:
             record = self.changes.load(token)
         except SafetyError as exc:
@@ -672,9 +865,18 @@ class CascadeurService:
                 ),
             )
         result.snapshot_id = Path(record.backup_path).stem if record.backup_path else None
+        result.operation_id = record.operation.name
+        result.status = "succeeded" if result.ok else "failed"
+        result.scene_revision_before = record.scene_revision
+        result.scene_revision_after = result.scene_revision
         try:
             if result.ok and record.operation.name == "scene.open":
                 result = self._wait_for_open_scene(result, str(record.operation.arguments["path"]), timeout)
+            if result.ok and record.operation.name == "safety.rollback":
+                working_path = self.paths.snapshots / (
+                    str(record.operation.arguments["working_id"]) + ".working.casc"
+                )
+                result = self._wait_for_open_scene(result, str(working_path), timeout)
             if result.ok and record.operation.name == "physics.auto_snap":
                 result = self._complete_auto_physics_snap(result, timeout)
             if result.ok and record.operation.name in {
@@ -703,6 +905,10 @@ class CascadeurService:
             self._write_registry()
         elif record.backup_path:
             result = self._restore_failed_change(record, result)
+        result.operation_id = record.operation.name
+        result.status = "succeeded" if result.ok else "failed"
+        result.scene_revision_before = record.scene_revision
+        result.scene_revision_after = result.scene_revision
         self._remember_scene_result(result)
         return result
 
@@ -724,6 +930,7 @@ class CascadeurService:
                         timeout=timeout,
                         safety_context=SafetyContext(
                             destructive=True,
+                            confirmation_token=record.token,
                             selection_fingerprint=record.selection_fingerprint,
                             allow_overwrite=bool(arguments.get("allow_overwrite")),
                         ),
@@ -855,7 +1062,7 @@ class CascadeurService:
         the scene is still clean.
         """
         snapshot_id = Path(record.backup_path).stem
-        restored = self.rollback(snapshot_id)
+        restored = self._rollback_internal(snapshot_id)
         if restored.ok:
             failed.scene_id = restored.scene_id
             failed.scene_revision = restored.scene_revision
@@ -1074,9 +1281,80 @@ class CascadeurService:
             failed.evidence = latest.evidence
         return failed
 
-    def rollback(self, snapshot_id: str, expected_revision: str | None = None) -> ResultEnvelope:
-        path = (self.paths.snapshots / f"{snapshot_id}.casc").resolve()
+    def _snapshot_path(self, snapshot_id: str) -> Path | None:
+        try:
+            canonical = str(uuid.UUID(str(snapshot_id)))
+        except (ValueError, TypeError, AttributeError):
+            return None
+        if canonical != str(snapshot_id).casefold():
+            return None
+        path = (self.paths.snapshots / f"{canonical}.casc").resolve()
         if path.parent != self.paths.snapshots.resolve() or not path.is_file():
+            return None
+        return path
+
+    def prepare_rollback(self, snapshot_id: str, ttl: float = 300.0) -> dict[str, Any]:
+        build_error = self._supported_build_error("change_rollback")
+        if build_error:
+            return build_error.model_dump(mode="json")
+        path = self._snapshot_path(snapshot_id)
+        if path is None:
+            return self._host_error(
+                "change_rollback", ErrorCode.INVALID_REQUEST, "Unknown snapshot"
+            ).model_dump(mode="json")
+        status = self.refresh_live()
+        if not status.ok or not isinstance(status.result, dict):
+            return status.model_dump(mode="json")
+        state = status.result
+        working_id = str(uuid.uuid4())
+        operation = Operation(
+            name="safety.rollback",
+            arguments={"path": str(path), "working_id": working_id, "snapshot_id": snapshot_id},
+        )
+        impact = {
+            "feature": "Rollback",
+            "destructive": True,
+            "snapshot_id": snapshot_id,
+            "expected_result": "Replace the active document with a writable clone of the snapshot",
+        }
+        record = self.changes.prepare(
+            feature_id="change_rollback",
+            scene_id=state.get("scene_id"),
+            scene_revision=state.get("revision"),
+            selection_fingerprint=state.get("selection_fingerprint"),
+            operation=operation,
+            impact=impact,
+            backup_path=str(path),
+            ttl=ttl,
+        )
+        return {
+            "ok": True,
+            "confirmation_token": record.token,
+            "feature_id": record.feature_id,
+            "scene_id": record.scene_id,
+            "scene_revision": record.scene_revision,
+            "selection_fingerprint": record.selection_fingerprint,
+            "operation": record.operation.model_dump(mode="json"),
+            "impact": impact,
+            "snapshot_id": snapshot_id,
+            "working_id": working_id,
+            "expires_at": record.expires_at,
+        }
+
+    def rollback(self, confirmation_token: str, timeout: float = 120.0) -> ResultEnvelope:
+        try:
+            record = self.changes.load(confirmation_token)
+        except SafetyError as exc:
+            return self._host_error("change_rollback", ErrorCode.INVALID_REQUEST, str(exc))
+        if record.feature_id != "change_rollback" or record.operation.name != "safety.rollback":
+            return self._host_error(
+                "change_rollback", ErrorCode.INVALID_REQUEST, "Token is not bound to a rollback operation"
+            )
+        return self.commit_change(confirmation_token, timeout)
+
+    def _rollback_internal(self, snapshot_id: str) -> ResultEnvelope:
+        path = self._snapshot_path(snapshot_id)
+        if path is None:
             return self._host_error("change_rollback", ErrorCode.INVALID_REQUEST, "Unknown snapshot")
         working_id = str(uuid.uuid4())
         working_path = (self.paths.snapshots / f"{working_id}.working.casc").resolve()
@@ -1084,11 +1362,10 @@ class CascadeurService:
             "change_rollback",
             [
                 Operation(
-                    name="safety.rollback",
+                    name="safety.rollback_internal",
                     arguments={"path": str(path), "working_id": working_id},
                 )
             ],
-            expected_revision=expected_revision,
             timeout=120,
             safety_context=SafetyContext(destructive=True),
         )
@@ -1112,58 +1389,14 @@ class CascadeurService:
         }
         return final in schema_methods
 
-    def _operation_is_destructive(self, name: str) -> bool:
-        lowered = name.casefold()
-        return lowered.startswith(("io.import_", "io.export_", "safety.")) or lowered in {
-            "scene.new",
-            "scene.open",
-            "scene.close",
-            "scene.save_as",
-            "object.create",
-            "object.duplicate",
-            "object.delete",
-            "object.parent",
-            "object.unparent",
-            "animation.key_delete",
-            "animation.graph_edit",
-            "animation.bake",
-            "layer.delete",
-            "physics.ragdoll",
-            "physics.ballistic",
-            "physics.center_of_mass",
-            "physics.constraint_point",
-            "physics.constraint_transform",
-            "physics.collision_create",
-            "physics.penetration_clean",
-            "rig.create",
-            "rig.regenerate",
-            "rig.joint",
-            "rig.rigid_body",
-            "rig.ik",
-            "rig.spline_ik",
-            "render.camera_create",
-            "render.camera_aim",
-            "render.light_point",
-            "render.light_spot",
-            "render.viewport_capture",
-            "render.image",
-            "render.video",
-            "generation.auto_posing",
-            "generation.inbetweening",
-            "generation.root_motion",
-            "generation.unbaking",
-            "physics.auto_snap",
-            "rig.mass_set",
-            "system.csc_mutate",
-        }
-
     def _operation_is_mutating(self, name: str) -> bool:
         lowered = name.casefold()
+        product_bindings = [item for item in PRODUCT_CATALOG.features if item.operation == name]
+        if product_bindings:
+            return any(item.mutation for item in product_bindings)
         return lowered not in {
             "system.status",
             "system.logs",
-            "system.tool_inspect",
-            "system.settings_get",
             "system.view_mode_get",
             "physics.auto_state",
             "physics.state",
@@ -1171,9 +1404,7 @@ class CascadeurService:
             "rig.constraint_drivers",
             "generation.state",
             "system.tools",
-            "system.tool_schema",
             "system.introspect",
-            "system.csc_query",
             "scene.summary",
             "scene.objects",
             "scene.list",
@@ -1198,5 +1429,10 @@ class CascadeurService:
         feature_id: str, code: ErrorCode, message: str, mode: ExecutionMode = ExecutionMode.NATIVE
     ) -> ResultEnvelope:
         return ResultEnvelope(
-            ok=False, feature_id=feature_id, execution_mode=mode, error_code=code, error_message=message
+            ok=False,
+            feature_id=feature_id,
+            execution_mode=mode,
+            status="failed",
+            error_code=code,
+            error_message=message,
         )

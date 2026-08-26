@@ -72,8 +72,6 @@ def test_bridge_handler_modules_register_structured_routes():
         "timeline.range",
         "generation.auto_posing",
         "system.logs",
-        "system.tool_inspect",
-        "system.settings_get",
         "system.view_mode",
     ):
         assert f'"{route}"' in sources

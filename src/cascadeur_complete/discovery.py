@@ -10,6 +10,7 @@ from typing import Any
 
 from .feature_registry import build_registry, registry_json
 from .paths import CASCADEUR_EXE, CASCADEUR_SCRIPTS, CSC_SCHEMA_CANDIDATES, RuntimePaths
+from .product_catalog import PRODUCT_CATALOG
 
 BASELINE_TOOLS = [
     "DefaultFbxSynchronizationTool",
@@ -102,7 +103,7 @@ def discover_installation() -> dict[str, Any]:
         "executable": str(executable) if executable else None,
         "version": version,
         "adapter": "2026.1",
-        "compatible": bool(version and version.startswith("2026.1.")),
+        "compatible": version == PRODUCT_CATALOG.supported_build,
     }
 
 

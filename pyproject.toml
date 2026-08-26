@@ -1,14 +1,29 @@
 [project]
 name = "cascadeur-complete"
 version = "0.1.0"
-description = "Clean-room, capability-adaptive MCP server for Cascadeur 2026.1.x"
+description = "Version-pinned MCP automation for a verified subset of Cascadeur 2026.1.2"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
+license = { file = "LICENSE" }
+keywords = ["cascadeur", "mcp", "animation", "automation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
 dependencies = [
   "mcp>=2.0.0,<3",
   "pydantic>=2.12,<3",
   "pywinauto==0.6.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/muhwagwa0112/cascadeur-complete"
+Repository = "https://github.com/muhwagwa0112/cascadeur-complete"
+Issues = "https://github.com/muhwagwa0112/cascadeur-complete/issues"
+Security = "https://github.com/muhwagwa0112/cascadeur-complete/security/policy"
 
 [project.optional-dependencies]
 dev = [
@@ -27,6 +42,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cascadeur_complete"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"inventory/product_features_2026_1_2.json" = "cascadeur_complete/data/product_features_2026_1_2.json"
+"inventory/csc_schema.json" = "cascadeur_complete/data/csc_schema.json"
+"policy.default.json" = "cascadeur_complete/data/policy.default.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

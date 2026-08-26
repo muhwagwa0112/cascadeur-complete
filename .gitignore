@@ -1,37 +1,8 @@
-# Python environments and caches
 .venv/
-.uv-cache/
-__pycache__/
+artifacts/
+build/
+dist/
 *.py[cod]
+__pycache__/
 .pytest_cache/
 .ruff_cache/
-.mypy_cache/
-.coverage
-.coverage.*
-htmlcov/
-
-# Local test and validation artifacts
-.test-tmp-*/
-outputs/
-
-# Runtime state (created under Local AppData in normal installations)
-state/
-logs/
-snapshots/
-requests/
-responses/
-jobs/
-test-scenes/
-policy.json
-
-# Local configuration and secrets
-.env
-.env.*
-!.env.example
-*.log
-
-# Editors and Windows metadata
-.idea/
-.vscode/
-Thumbs.db
-Desktop.ini

@@ -1,0 +1,96 @@
+name: Signed release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Validate tag and install pinned build frontend
+        shell: pwsh
+        run: |
+          $version = (Select-String pyproject.toml '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ('v' + $version -ne '${{ github.ref_name }}') { throw "Tag does not match pyproject version $version" }
+          python -m pip install uv==0.12.5
+      - name: Build staged application
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -SkipInstaller
+      - uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1 commit
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign bundled executables using OIDC
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0 commit
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          endpoint: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_TRUSTED_SIGNING_PROFILE }}
+          files-folder: artifacts/stage/app
+          files-folder-filter: exe
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Rebind SBOM to signed frozen payload
+        shell: pwsh
+        run: |
+          $version = (Select-String pyproject.toml '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          ./artifacts/build-venv/Scripts/python.exe packaging/finalize_sbom.py `
+            --sbom artifacts/cascadeur-mcp.cdx.json `
+            --app artifacts/stage/app `
+            --version $version
+      - name: Compile installer from signed payload
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -InstallerOnly
+      - name: Sign installer using OIDC
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0 commit
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          endpoint: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_TRUSTED_SIGNING_PROFILE }}
+          files-folder: artifacts/installer
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Enforce signatures and regenerate checksums
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -InstallerOnly -SkipInstaller -RequireSignature
+      - name: Attest signed release set
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            artifacts/installer/*.exe
+            artifacts/cascadeur-mcp.cdx.json
+            artifacts/SHA256SUMS.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cascadeur-mcp-${{ github.ref_name }}
+          path: |
+            artifacts/installer/*.exe
+            artifacts/cascadeur-mcp.cdx.json
+            artifacts/SHA256SUMS.json
+          if-no-files-found: error
+      - name: Publish GitHub release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create '${{ github.ref_name }}' artifacts/installer/*.exe artifacts/cascadeur-mcp.cdx.json artifacts/SHA256SUMS.json --verify-tag --generate-notes

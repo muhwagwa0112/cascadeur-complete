@@ -26,15 +26,23 @@ class RuntimePaths:
     responses: Path
     jobs: Path
     tokens: Path
+    seen: Path
     snapshots: Path
     registry: Path
     evidence_manifest: Path
     policy: Path
     logs: Path
+    bridge_key: Path
+    confirmation_key: Path
 
     @classmethod
     def discover(cls, root: Path | None = None) -> RuntimePaths:
-        base = (root or canonical_local_app_data() / "CascadeurMCP" / "cascadeur-complete").resolve()
+        configured_root = os.environ.get("CASCADEUR_MCP_ROOT")
+        base = (
+            root
+            or (Path(configured_root) if configured_root else None)
+            or canonical_local_app_data() / "CascadeurMCP" / "cascadeur-complete"
+        ).resolve()
         state = base / "state"
         return cls(
             root=base,
@@ -43,11 +51,14 @@ class RuntimePaths:
             responses=state / "responses",
             jobs=state / "jobs",
             tokens=state / "tokens",
+            seen=state / "seen",
             snapshots=base / "snapshots",
             registry=state / "feature_registry.json",
             evidence_manifest=state / "live_evidence.json",
             policy=base / "policy.json",
             logs=base / "logs",
+            bridge_key=state / "bridge.key",
+            confirmation_key=state / "confirmation.key",
         )
 
     def ensure(self) -> None:
@@ -58,6 +69,7 @@ class RuntimePaths:
             self.responses,
             self.jobs,
             self.tokens,
+            self.seen,
             self.snapshots,
             self.logs,
         ):
@@ -68,6 +80,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CSC_SCHEMA_CANDIDATES = (
     canonical_local_app_data() / "CascadeurMCP" / "cascadeur-complete" / "state" / "csc_schema.json",
     PROJECT_ROOT / "inventory" / "csc_schema.json",
+    Path(__file__).resolve().parent / "data" / "csc_schema.json",
 )
 CASCADEUR_EXE = Path(os.environ.get("CASCADEUR_EXE", r"C:\Program Files\Cascadeur\cascadeur.exe"))
 CASCADEUR_SCRIPTS = Path(r"C:\Program Files\Cascadeur\resources\scripts\python")

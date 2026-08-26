@@ -92,8 +92,7 @@ When a timeout or UI lock could have an unknown outcome, first check scene revis
 
 - `cascadeur_status(refresh=true)`: health, version, license, scene, feature-state counts.
 - `cascadeur_logs(lines, pattern)`: bounded log evidence; filter narrowly and avoid exposing unrelated paths/data.
-- `cascadeur_tool_inspect(tool_name)`: public members only; inspection is not authorization to invoke them.
-- `setting_get`: typed read of one setting.
+- Runtime tool introspection and arbitrary setting reads are not exposed in production builds; both are explicit `unsupported` safety-policy entries in the product manifest.
 - `feature_search`/`feature_describe`: route and gate source of truth.
 - `inventory_refresh`: use after Cascadeur/version/scripts change; it rebuilds the installed schema/registry.
 

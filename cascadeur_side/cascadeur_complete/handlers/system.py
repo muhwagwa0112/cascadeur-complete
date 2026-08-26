@@ -1,96 +1,46 @@
 from __future__ import annotations
 
 import os
-import re
 from collections import deque
 from pathlib import Path
 
 from ..handler_registry import handler
-
-
-def _public_members(value):
-    rows = []
-    for name in sorted(item for item in dir(value) if not item.startswith("_")):
-        try:
-            member = getattr(value, name)
-        except Exception as exc:
-            rows.append({"name": name, "kind": "error", "detail": str(exc)})
-            continue
-        rows.append({"name": name, "kind": "method" if callable(member) else "property", "type": type(member).__name__})
-    return rows
-
-
-@handler("system.tool_inspect")
-def tool_inspect(_scene, arguments, _request, context):
-    name = str(arguments["tool_name"])
-    app = context["csc"].app.get_application()
-    tool = app.get_tools_manager().get_tool(name)
-    view_scene = context["scene_view"]()
-    editor = None
-    editor_error = None
-    if view_scene is not None:
-        try:
-            editor = tool.editor(view_scene)
-        except Exception as exc:
-            editor_error = str(exc)
-    return {
-        "tool_name": name,
-        "tool_type": type(tool).__name__,
-        "tool_members": _public_members(tool),
-        "editor_type": type(editor).__name__ if editor is not None else None,
-        "editor_members": _public_members(editor) if editor is not None else [],
-        "editor_error": editor_error,
-    }, []
+from ..log_safety import LOG_LEVELS, MAX_LOG_SCAN_BYTES, read_bounded_log_lines, summarize_log_levels
 
 
 @handler("system.logs")
 def read_logs(_scene, arguments, _request, _context):
-    count = min(2000, max(1, int(arguments.get("lines", 200))))
+    count = min(500, max(1, int(arguments.get("lines", 200))))
     pattern = str(arguments.get("pattern", ""))
+    aliases = {"warn": "WARNING"}
+    requested_level = aliases.get(pattern.casefold(), pattern.upper()) if pattern else ""
+    if requested_level and requested_level not in LOG_LEVELS:
+        raise ValueError("log filter must be a level: critical, fatal, error, warning, info, debug, trace, or other")
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
         raise RuntimeError("LOCALAPPDATA is unavailable")
     path = Path(local_app_data) / "Nekki Limited" / "Cascadeur" / "logs" / "cascadeur_log.log"
     if not path.is_file():
         raise FileNotFoundError(path)
-    with path.open("r", encoding="utf-8", errors="replace") as stream:
-        lines = deque(stream, maxlen=count)
-    rows = [line.rstrip("\r\n") for line in lines]
-    if pattern:
-        expression = re.compile(pattern, flags=re.IGNORECASE)
-        rows = [line for line in rows if expression.search(line)]
-    return {"path": str(path), "lines": rows, "count": len(rows), "tail_limit": count}, []
-
-
-@handler("system.settings_get")
-def settings_get(_scene, arguments, _request, context):
-    value_type = str(arguments.get("type", "string")).casefold()
-    getters = {
-        "bool": "get_bool_value",
-        "float": "get_float_value",
-        "int": "get_int_value",
-        "string": "get_string_value",
-    }
-    if value_type not in getters:
-        raise ValueError("type must be bool, float, int, or string")
-    view_scene = context["scene_view"]()
-    if view_scene is None:
-        raise RuntimeError("No application scene is available")
-    handler = view_scene.get_setting_handler()
-    path = str(arguments["key"])
-    section = str(arguments.get("section", ""))
-    key = path
-    if not section:
-        if "/" not in path:
-            raise ValueError("key must be SECTION/KEY or section must be provided explicitly")
-        section, key = path.split("/", 1)
-    value = getattr(handler, getters[value_type])(section, key)
+    # Public production diagnostics never return raw log messages. Convert a
+    # fixed-size tail into a level-only schema so paths, scene data, tokens, and
+    # novel multiline credential formats cannot cross the MCP boundary.
+    raw_rows, source_truncated = read_bounded_log_lines(path)
+    levels = summarize_log_levels(raw_rows)
+    if requested_level:
+        levels = [level for level in levels if level == requested_level]
+    levels = list(deque(levels, maxlen=count))
+    counts = {level: levels.count(level) for level in LOG_LEVELS if level in levels}
     return {
-        "path": path,
-        "section": section,
-        "key": key,
-        "type": value_type,
-        "value": context["json_safe"](value),
+        "source": "cascadeur_log.log",
+        "lines": [f"<{level}>" for level in levels],
+        "levels": levels,
+        "level_counts": counts,
+        "count": len(levels),
+        "tail_limit": count,
+        "scan_limit_bytes": MAX_LOG_SCAN_BYTES,
+        "source_truncated": source_truncated,
+        "raw_content_exposed": False,
     }, []
 
 
