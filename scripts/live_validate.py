@@ -26,7 +26,10 @@ def main() -> int:
     parser.add_argument("--skip-verified", action="store_true")
     args = parser.parse_args()
     if args.all:
-        selected = list(SCENARIOS)
+        risky = sorted(name for name, item in SCENARIOS.items() if item.crash_risk)
+        if risky:
+            print("skipping crash-risk scenarios (run them by name): " + ", ".join(risky), file=sys.stderr)
+        selected = [name for name, item in SCENARIOS.items() if not item.crash_risk]
     else:
         selected = [item for item in SCENARIOS if SCENARIOS[item].fixture_id in args.fixture] + [
             item for item in args.features if item in SCENARIOS

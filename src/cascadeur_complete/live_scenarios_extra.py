@@ -210,7 +210,11 @@ def _import_vrm(s: LiveSession) -> Any:
     return _ui_flow(s, "import", "vrm", str(source))
 
 
-@scenario("blend_shape", CUBE)
+@scenario(
+    "blend_shape",
+    CUBE,
+    crash_risk="2026.1.3 crashed right after importing a blend-shape FBX through the Python FBX loader",
+)
 def _blend_shape(s: LiveSession) -> Any:
     # blendshape_cube.fbx: a Blender cube "BlendCube" with one "Stretch" shape key.
     source = s.service.paths.root / "live-fixtures" / "blendshape_cube.fbx"

@@ -169,6 +169,8 @@ class Scenario:
     feature_id: str
     fixture_id: str
     run: Callable[[LiveSession], Any]
+    # Known to crash the pinned build: excluded from --all, run only by name.
+    crash_risk: str | None = None
 
     @property
     def live_test_id(self) -> str:
@@ -178,11 +180,11 @@ class Scenario:
 SCENARIOS: dict[str, Scenario] = {}
 
 
-def scenario(feature_id: str, fixture_id: str):
+def scenario(feature_id: str, fixture_id: str, *, crash_risk: str | None = None):
     def register(function: Callable[[LiveSession], Any]) -> Callable[[LiveSession], Any]:
         if feature_id in SCENARIOS:
             raise RuntimeError(f"Duplicate live scenario for {feature_id}")
-        SCENARIOS[feature_id] = Scenario(feature_id, fixture_id, function)
+        SCENARIOS[feature_id] = Scenario(feature_id, fixture_id, function, crash_risk)
         return function
 
     return register
