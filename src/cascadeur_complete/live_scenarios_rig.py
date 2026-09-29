@@ -84,6 +84,9 @@ def _twist(s: LiveSession) -> Any:
     boxes = s.owners("ProtoBox")
     if not boxes:
         raise LiveValidationError("no ProtoBox is available for twist")
+    # Earlier scenarios on this fixture may already have twisted the box with
+    # this joint; clear it first so the set is an observable change.
+    s.change("twist", "rig.twist", {"action": "remove", "box_id": boxes[0]})
     return s.change("twist", "rig.twist", {"action": "set", "box_id": boxes[0], "joint_id": joints(s)["p3b"]})
 
 
