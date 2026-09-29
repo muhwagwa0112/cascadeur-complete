@@ -664,6 +664,11 @@ def twist(scene, arguments, _request, context):
     before_joint = _reference_owner(viewer, proto_box, "twist_id", context)
 
     if action == "set":
+        import prototypes.prototypes_common.pub as prototype_pub
+
+        links = viewer.get_behaviour_by_name(prototype_pub.get_pub_id(viewer, box), "TechnicalLinks")
+        if not links.is_null() and not viewer.get_behaviour_reference(links, "direction_point").is_null():
+            raise ValueError("Cascadeur does not apply Twist to rig elements with a rigid body (direction point)")
         joint = context["object_id"](joint_id)
         if viewer.get_behaviour_by_name(joint, "Joint").is_null():
             raise ValueError("joint_id does not own Joint: " + joint_id)

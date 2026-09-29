@@ -80,14 +80,17 @@ def _spline_ik(s: LiveSession) -> Any:
 
 @scenario("twist", THREE)
 def _twist(s: LiveSession) -> Any:
-    _rig_element(s)
-    boxes = s.owners("ProtoBox")
-    if not boxes:
-        raise LiveValidationError("no ProtoBox is available for twist")
-    # Earlier scenarios on this fixture may already have twisted the box with
-    # this joint; clear it first so the set is an observable change.
+    # Cascadeur refuses Twist on rig elements with a rigid body (direction
+    # point), so build an element without a direction joint and twist its box.
+    names = joints(s)
+    before = set(s.owners("ProtoBox"))
+    s.change("manual_rig", "rig.rig_elements_create", {"pairs": [{"joint_id": names["p3b"]}]})
+    boxes = sorted(set(s.owners("ProtoBox")) - before)
+    if len(boxes) != 1:
+        raise LiveValidationError(f"expected one new ProtoBox, found {len(boxes)}")
+    result = s.change("twist", "rig.twist", {"action": "set", "box_id": boxes[0], "joint_id": names["p2b"]})
     s.change("twist", "rig.twist", {"action": "remove", "box_id": boxes[0]})
-    return s.change("twist", "rig.twist", {"action": "set", "box_id": boxes[0], "joint_id": joints(s)["p3b"]})
+    return result
 
 
 @scenario("rigid_body", THREE)
