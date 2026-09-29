@@ -313,4 +313,5 @@ def _auto_physics(s: LiveSession) -> Any:
 
 @scenario("blender_export", BACKFLIP)
 def _blender_export(s: LiveSession) -> Any:
+    s.use_fixture(BACKFLIP)  # FBX export rejects duplicate names (retargeting imports a second Cascy)
     return s.change("blender_export", "io.export_fbx", {"path": s.output("blender.fbx")}, timeout=360)

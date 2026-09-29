@@ -305,6 +305,9 @@ def _import_dae(s: LiveSession) -> Any:
 
 @scenario("export_fbx", CUBE)
 def _export_fbx(s: LiveSession) -> Any:
+    # FBX export fails on duplicate object names, which earlier import scenarios
+    # add to the shared Cube scene; export from a freshly opened fixture.
+    s.use_fixture(CUBE)
     result = s.change("export_fbx", "io.export_fbx", {"path": s.output("cube.fbx")})
     s.exported_fbx = result["path"]
     return result
