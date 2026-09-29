@@ -665,8 +665,16 @@ def untwist(scene, arguments, _request, context):
     py_scene = pycsc.wrap(domain)
 
     def has_untwist():
-        # The Untwist behaviours live on the box's update node (ProxyUntwist.has_fn).
-        return bool(ProxyUntwist.has_fn(py_scene, pycsc.wrap(box, py_scene)))
+        # The Untwist behaviours live on the box's update node, which pycsc only
+        # exposes inside PyScene.edit (ProxyUntwist.has_fn reads it there).
+        found = []
+        py_scene.edit(
+            "Cascadeur Complete: inspect untwist",
+            lambda current: found.append(bool(ProxyUntwist.has_fn(current, pycsc.wrap(box, current)))),
+        )
+        if not found:
+            raise RuntimeError("Could not inspect the target box for an Untwist")
+        return found[0]
 
     if has_untwist():
         raise ValueError("The target already has an Untwist")
