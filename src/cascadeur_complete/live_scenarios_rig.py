@@ -227,7 +227,12 @@ def _proto_com_remove(s: LiveSession) -> Any:
     ensure_rig_mode(s)
     centers = s.owners("ProtoCenterOfMass")
     if not centers:
-        raise LiveValidationError("Rig Mode produced no prototype Center of Mass")
+        # The 2026.1.3 Cascy sample has none in Rig Mode; try the UE5 Manny sample.
+        s.use_fixture("fixture.rigmode.ue5")
+        ensure_rig_mode(s)
+        centers = s.owners("ProtoCenterOfMass")
+    if not centers:
+        raise LiveValidationError("neither Cascy nor UE5 Manny has a prototype Center of Mass in Rig Mode")
     return s.change("prototype_com_remove", "rig.proto_center_of_mass_remove", {"center_of_mass_ids": centers[:1]})
 
 
