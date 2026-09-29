@@ -901,6 +901,23 @@ def complete_export_video_form(
     )
 
 
+def finish_export_video_form(timeout: float = 60.0) -> bool:
+    """Close the "Export video" completion screen (its "Ok" button appears after rendering)."""
+    spec = _owner_spec()
+    if spec is None:
+        raise UIAutomationError("No visible Cascadeur window", not_running=True)
+    window = spec.child_window(title=EXPORT_VIDEO_TITLE, control_type="Window")
+    if not window.exists(timeout=0.5, retry_interval=0.1):
+        return False
+    done = window.child_window(title="Ok", control_type="Button")
+    if not done.exists(timeout=max(1.0, timeout), retry_interval=0.2):
+        raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} did not reach its completion screen")
+    done.click_input()
+    if window.exists(timeout=5.0, retry_interval=0.1):
+        raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} did not close after Ok")
+    return True
+
+
 def owned_window_titles() -> list[str]:
     """List the titles of windows owned by the main Cascadeur window (dialogs, modals)."""
     try:

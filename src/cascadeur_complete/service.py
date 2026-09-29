@@ -40,6 +40,7 @@ from .uia import (
     complete_export_video_form,
     complete_file_dialog,
     cycle_scene_tab,
+    finish_export_video_form,
     resolve_autophysics_snap_warning,
     resolve_optional_rig_mode_helper,
     sample_difference,
@@ -1394,7 +1395,22 @@ class CascadeurService:
                 result, f"Host accepted the exact options window {arguments['options_title']}", "exact_options_window"
             )
         if arguments.get("form") == "export_video":
-            return self._wait_for_rendered_video(result, Path(str(arguments["path"])), timeout, started)
+            result = self._wait_for_rendered_video(result, Path(str(arguments["path"])), timeout, started)
+            try:
+                closed = finish_export_video_form(timeout=min(120.0, timeout))
+            except UIAutomationError as exc:
+                return self._host_error(
+                    record.feature_id, ErrorCode.UI_LOCKED, f"Rendered, but {exc}", mode=ExecutionMode.UIA
+                )
+            if result.ok and closed:
+                result.evidence.append(
+                    Evidence(
+                        kind="host_ui_file_dialog",
+                        detail="Export video reached its completion screen; host pressed Ok",
+                        observed_at=time.time(),
+                    )
+                )
+            return result
         if bool(arguments.get("output")):
             return self._wait_for_output_file(result, str(arguments["path"]), timeout, before_output)
         before_revision = record.scene_revision
