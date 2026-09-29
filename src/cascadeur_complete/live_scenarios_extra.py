@@ -243,3 +243,19 @@ def _retargeting(s: LiveSession) -> Any:
         "generation.retargeting",
         {"source_point_id": sources[name], "target_point_id": targets[name], "first_frame": 0, "last_frame": 20},
     )
+
+
+def _video_export(s: LiveSession, feature_id: str) -> Any:
+    arguments = dialog_flow_arguments(feature_id, s.output(feature_id))
+    arguments.update({"width": 320, "height": 180, "quality": "LOW"})
+    return s.change(feature_id, "system.ui_file_flow", arguments, timeout=900)
+
+
+@scenario("export_video", BACKFLIP)
+def _export_video(s: LiveSession) -> Any:
+    return _video_export(s, "export_video")
+
+
+@scenario("render_video", CUBE)
+def _render_video(s: LiveSession) -> Any:
+    return _video_export(s, "render_video")

@@ -5,6 +5,7 @@ import os
 import re
 import time
 import uuid
+from glob import escape as glob_escape
 from pathlib import Path
 from threading import Thread
 from typing import Any
@@ -36,6 +37,7 @@ from .uia import (
     cancel_file_flow,
     cancel_owned_file_dialogs,
     capture_window_sample,
+    complete_export_video_form,
     complete_file_dialog,
     cycle_scene_tab,
     resolve_autophysics_snap_warning,
@@ -183,6 +185,9 @@ def ui_file_flow_arguments(
         "dialog_title": dialog_title,
         "options_title": options_title,
         "options_accept_title": options_accept_title,
+        "options_accept_index": 0,
+        "after_accept_title": None,
+        "form": None,
         "file_type_extension": file_type_extension,
         "input": direction == "import",
         "output": direction == "export",
@@ -224,6 +229,23 @@ UI_FILE_FLOWS: dict[str, dict[str, Any]] = {
         "extension": ".partscasc",
         "direction": "import",
     },
+    # File > Export > Video opens Cascadeur's own "Export video" form; "path"
+    # is the output folder plus file name without extension (the host waits for
+    # the rendered file of that name). render_video is the same product route.
+    "export_video": {
+        "action_id": "File.Export.Video...",
+        "dialog_title": "Export video",
+        "form": "export_video",
+        "extension": None,
+        "direction": "export",
+    },
+    "render_video": {
+        "action_id": "File.Export.Video...",
+        "dialog_title": "Export video",
+        "form": "export_video",
+        "extension": None,
+        "direction": "export",
+    },
     "import_image": {
         "action_id": "View.Reference image",
         "dialog_title": "Load image",
@@ -231,9 +253,15 @@ UI_FILE_FLOWS: dict[str, dict[str, Any]] = {
         "direction": "import",
     },
     "import_video": {
+        # Cascadeur's "Load video" window: first "Choose..." opens a native
+        # file dialog with the same title, then "Import" applies the video.
         "action_id": "View.Bind video",
         "dialog_title": "Load video",
-        "extension": None,
+        "options_title": "Load video",
+        "options_accept_title": "Choose...",
+        "options_accept_index": 0,
+        "after_accept_title": "Import",
+        "extension": ".mp4",
         "direction": "import",
     },
 }
@@ -252,8 +280,11 @@ def dialog_flow_arguments(feature_id: str, path: str, allow_overwrite: bool = Fa
         "action_id": flow["action_id"],
         "path": path,
         "dialog_title": flow["dialog_title"],
-        "options_title": None,
-        "options_accept_title": None,
+        "options_title": flow.get("options_title"),
+        "options_accept_title": flow.get("options_accept_title"),
+        "options_accept_index": int(flow.get("options_accept_index", 0)),
+        "after_accept_title": flow.get("after_accept_title"),
+        "form": flow.get("form"),
         "file_type_extension": None,
         "input": flow["direction"] == "import",
         "output": flow["direction"] == "export",
@@ -559,7 +590,16 @@ class CascadeurService:
             expected = _expected_ui_flow(feature.id, arguments)
             if expected is None:
                 return "UI file flow is not bound to this feature"
-            keys = ("action_id", "dialog_title", "options_title", "options_accept_title", "file_type_extension")
+            keys = (
+                "action_id",
+                "dialog_title",
+                "options_title",
+                "options_accept_title",
+                "options_accept_index",
+                "after_accept_title",
+                "form",
+                "file_type_extension",
+            )
             if any(arguments.get(key) != expected[key] for key in keys):
                 return "UI file flow arguments differ from the registered action and dialog for this feature"
             return None
@@ -1266,16 +1306,31 @@ class CascadeurService:
 
         worker = Thread(target=dispatch, name="cascadeur-ui-file-flow", daemon=True)
         worker.start()
+        started = time.time()
         try:
-            dialog = complete_file_dialog(
-                action_id=action_id,
-                path=str(arguments["path"]),
-                expected_dialog_title=str(arguments["dialog_title"]),
-                options_title=arguments.get("options_title"),
-                options_accept_title=arguments.get("options_accept_title"),
-                file_type_extension=arguments.get("file_type_extension"),
-                timeout=min(timeout, 30.0),
-            )
+            if arguments.get("form") == "export_video":
+                target = Path(str(arguments["path"]))
+                dialog = complete_export_video_form(
+                    action_id=action_id,
+                    folder=str(target.parent).replace("\\", "/"),
+                    name=target.name,
+                    width=int(arguments.get("width", 320)),
+                    height=int(arguments.get("height", 180)),
+                    quality=str(arguments.get("quality", "LOW")),
+                    timeout=min(timeout, 30.0),
+                )
+            else:
+                dialog = complete_file_dialog(
+                    action_id=action_id,
+                    path=str(arguments["path"]),
+                    expected_dialog_title=str(arguments["dialog_title"]),
+                    options_title=arguments.get("options_title"),
+                    options_accept_title=arguments.get("options_accept_title"),
+                    file_type_extension=arguments.get("file_type_extension"),
+                    timeout=min(timeout, 30.0),
+                    options_accept_index=int(arguments.get("options_accept_index") or 0),
+                    after_accept_title=arguments.get("after_accept_title"),
+                )
         except Exception as exc:
             if not cancel_file_flow(
                 expected_dialog_title=str(arguments["dialog_title"]),
@@ -1338,6 +1393,8 @@ class CascadeurService:
             add_postconditions(
                 result, f"Host accepted the exact options window {arguments['options_title']}", "exact_options_window"
             )
+        if arguments.get("form") == "export_video":
+            return self._wait_for_rendered_video(result, Path(str(arguments["path"])), timeout, started)
         if bool(arguments.get("output")):
             return self._wait_for_output_file(result, str(arguments["path"]), timeout, before_output)
         before_revision = record.scene_revision
@@ -1505,6 +1562,33 @@ class CascadeurService:
             return None
         stat = candidate.stat()
         return stat.st_size, stat.st_mtime_ns
+
+    def _wait_for_rendered_video(
+        self, initial: ResultEnvelope, stem_path: Path, timeout: float, started: float
+    ) -> ResultEnvelope:
+        """Wait for the file Cascadeur renders under the requested name (extension set by its format)."""
+        deadline = time.monotonic() + max(1.0, timeout)
+        while time.monotonic() < deadline:
+            candidates = sorted(
+                (
+                    item
+                    for item in stem_path.parent.glob(glob_escape(stem_path.name) + ".*")
+                    if item.is_file() and item.stat().st_mtime >= started - 1.0
+                ),
+                key=lambda item: item.stat().st_mtime,
+            )
+            if candidates:
+                remaining = max(1.0, deadline - time.monotonic())
+                return self._wait_for_output_file(
+                    initial, str(candidates[-1]), remaining, None, stable_seconds=3.0
+                )
+            time.sleep(0.5)
+        return self._host_error(
+            initial.feature_id,
+            ErrorCode.POSTCONDITION_FAILED,
+            f"No rendered video named {stem_path.name}.* appeared in {stem_path.parent}",
+            mode=ExecutionMode.UIA,
+        )
 
     def _wait_for_output_file(
         self,

@@ -947,23 +947,35 @@
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": "tool.RenderToFile",
-      "action": "tool.RenderToFile",
-      "operation": "tool.RenderToFile",
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "postconditions": [
+        "exact_file_dialog",
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_video]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
-      "arguments": {},
+      "arguments": {
+        "path": "output folder + file name without extension (format set by the Export video window)",
+        "width": "int (default 320)",
+        "height": "int (default 180)",
+        "quality": "LOW|MEDIUM|HIGH (default LOW)"
+      },
       "fixed_arguments": {}
     },
     {
@@ -4129,23 +4141,35 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "tool.RenderToFile",
-      "action": "tool.RenderToFile",
-      "operation": "tool.RenderToFile",
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "postconditions": [
+        "exact_file_dialog",
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[render_video]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
-      "arguments": {},
+      "arguments": {
+        "path": "output folder + file name without extension (format set by the Export video window)",
+        "width": "int (default 320)",
+        "height": "int (default 180)",
+        "quality": "LOW|MEDIUM|HIGH (default LOW)"
+      },
       "fixed_arguments": {}
     },
     {

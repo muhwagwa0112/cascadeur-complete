@@ -122,6 +122,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | `material` | Filament Material | `render.material` | `ids`: object IDs (defaults to every owner of the behaviour), `values`: {property: value} | — | `behaviour_values_equal_request` |
 | `material_textures` | Material textures | `render.material_textures` | `ids`: object IDs (defaults to every owner of the behaviour), `values`: {property: value} | — | `behaviour_values_equal_request` |
 | `point_light_properties` | Point light properties | `render.point_light_properties` | `ids`: object IDs (defaults to every owner of the behaviour), `values`: {property: value} | — | `behaviour_values_equal_request` |
+| `render_video` | Render video | `system.ui_file_flow` | `path`: output folder + file name without extension (format set by the Export video window), `width`: int (default 320), `height`: int (default 180), `quality`: LOW\|MEDIUM\|HIGH (default LOW) | — | `exact_file_dialog`, `output_file`, `nonzero_bytes` |
 | `spot_light_properties` | Spot light properties | `render.spot_light_properties` | `ids`: object IDs (defaults to every owner of the behaviour), `values`: {property: value} | — | `behaviour_values_equal_request` |
 | `viewport` | Viewport | `render.viewport_layout` | `count`: 1\|2\|4 | — | `viewport_count_equals_request` |
 | `viewport_layout` | Viewport layout and visibility | `render.viewport_layout` | `count`: 1\|2\|4 | — | `viewport_count_equals_request` |
@@ -130,6 +131,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 
 | Feature | Name | Operation | Arguments | Fixed | Postconditions |
 |---|---|---|---|---|---|
+| `export_video` | Export video | `system.ui_file_flow` | `path`: output folder + file name without extension (format set by the Export video window), `width`: int (default 320), `height`: int (default 180), `quality`: LOW\|MEDIUM\|HIGH (default LOW) | — | `exact_file_dialog`, `output_file`, `nonzero_bytes` |
 | `fix_scene` | Fix Scene | `scene.fix` | — | — | `scene_valid_after_fix` |
 | `import_image` | Import image | `system.ui_file_flow` | `path`: image | — | `exact_file_dialog`, `scene_revision_changed` |
 | `import_scene_to_current` | Import Scene To Current | `system.ui_file_flow` | `path`: .casc | — | `exact_file_dialog`, `scene_revision_changed` |

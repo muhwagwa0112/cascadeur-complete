@@ -58,6 +58,12 @@ def _b(
 
 VALUES = {"ids": "object IDs (defaults to every owner of the behaviour)", "values": "{property: value}"}
 VIDEO = {"path": "absolute .mp4 path", "width": "int", "height": "int", "samples": "int"}
+VIDEO_FORM = {
+    "path": "output folder + file name without extension (format set by the Export video window)",
+    "width": "int (default 320)",
+    "height": "int (default 180)",
+    "quality": "LOW|MEDIUM|HIGH (default LOW)",
+}
 DIALOG_EXPORT = ("exact_file_dialog", "output_file", "nonzero_bytes")
 DIALOG_IMPORT = ("exact_file_dialog", "scene_revision_changed")
 UIA = ExecutionMode.UIA
@@ -549,6 +555,8 @@ BINDINGS: tuple[AdapterBinding, ...] = (
     _b(
         "scene_parts_import", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": ".partscasc"}, gap=True, mode=UIA
     ),
+    _b("export_video", "system.ui_file_flow", DIALOG_EXPORT, arguments=VIDEO_FORM, mode=UIA),
+    _b("render_video", "system.ui_file_flow", DIALOG_EXPORT, arguments=VIDEO_FORM, mode=UIA),
     _b("import_image", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": "image"}, mode=UIA),
     _b("import_video", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": "video"}, mode=UIA),
 )

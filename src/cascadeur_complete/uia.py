@@ -614,6 +614,8 @@ def complete_file_dialog(
     options_accept_title: str | None = None,
     file_type_extension: str | None = None,
     timeout: float = 20.0,
+    options_accept_index: int = 0,
+    after_accept_title: str | None = None,
 ) -> FileDialogEvidence:
     """Complete one version-pinned Cascadeur 2026.1 file flow.
 
@@ -650,7 +652,11 @@ def complete_file_dialog(
             raise UIAutomationError(f"Unexpected Cascadeur options window: {options.window_text()}")
         if not options_accept_title:
             raise UIAutomationError("options_accept_title is required for an options window")
-        accept_options = options.child_window(title=options_accept_title, control_type="Button")
+        # Some windows repeat a button caption ("Choose..." per input row);
+        # the registered flow names which occurrence to press.
+        accept_options = options.child_window(
+            title=options_accept_title, control_type="Button", found_index=int(options_accept_index)
+        )
         if not accept_options.exists(timeout=min(2.0, remaining()), retry_interval=0.05):
             raise UIAutomationError(f"Expected options button did not appear: {options_title} > {options_accept_title}")
         accept_options.click_input()
@@ -658,10 +664,13 @@ def complete_file_dialog(
     # A trailing "*" pins a title prefix: some 2026.1 dialogs append the scene
     # name ("Save Scene <name>"). Everything before it must still match exactly.
     prefix = expected_dialog_title[:-1] if expected_dialog_title.endswith("*") else None
+    # When Cascadeur's own window and the native file dialog share a title
+    # ("Load video"), only the native common dialog (#32770) is the target.
+    native = {"class_name": "#32770"} if options_title and options_title == expected_dialog_title else {}
     dialog = (
-        owner_spec.child_window(title_re=re.escape(prefix) + ".*", control_type="Window")
+        owner_spec.child_window(title_re=re.escape(prefix) + ".*", control_type="Window", **native)
         if prefix is not None
-        else owner_spec.child_window(title=expected_dialog_title, control_type="Window")
+        else owner_spec.child_window(title=expected_dialog_title, control_type="Window", **native)
     )
     if not dialog.exists(timeout=remaining(), retry_interval=0.05):
         raise UIAutomationError(
@@ -779,6 +788,15 @@ def complete_file_dialog(
         accept_automation_id = "1"
     if dialog.exists(timeout=min(5.0, remaining()), retry_interval=0.05):
         raise UIAutomationError(f"File dialog did not close after accepting path: {expected_dialog_title}")
+    if after_accept_title:
+        if not options_title:
+            raise UIAutomationError("after_accept_title requires an options window")
+        finish = options.child_window(title=after_accept_title, control_type="Button")
+        if not finish.exists(timeout=min(5.0, remaining()), retry_interval=0.05):
+            raise UIAutomationError(f"Expected button did not appear: {options_title} > {after_accept_title}")
+        finish.click_input()
+        if options.exists(timeout=min(10.0, remaining()), retry_interval=0.1):
+            raise UIAutomationError(f"Options window did not close after {after_accept_title}: {options_title}")
     return FileDialogEvidence(
         action_id=action_id,
         options_title=options_title,
@@ -802,6 +820,85 @@ def _owner_spec():
         key=lambda item: item.rectangle().width() * item.rectangle().height(),
     )
     return desktop.window(handle=owner.handle)
+
+
+EXPORT_VIDEO_TITLE = "Export video"
+EXPORT_VIDEO_QUALITIES = ("LOW", "MEDIUM", "HIGH")
+
+
+def complete_export_video_form(
+    *,
+    action_id: str,
+    folder: str,
+    name: str,
+    width: int,
+    height: int,
+    quality: str = "LOW",
+    timeout: float = 20.0,
+) -> FileDialogEvidence:
+    """Fill Cascadeur 2026.1's "Export video" window and start rendering.
+
+    The window is Cascadeur's own form (no native file dialog): mode buttons,
+    output folder and file name fields, width/height fields, quality buttons
+    and "Start rendering". The observed layout is verified before anything is
+    written; any mismatch aborts without starting a render.
+    """
+    if quality not in EXPORT_VIDEO_QUALITIES:
+        raise UIAutomationError("quality must be LOW, MEDIUM or HIGH")
+    spec = _owner_spec()
+    if spec is None:
+        raise UIAutomationError("No visible Cascadeur window", not_running=True)
+    window_spec = spec.child_window(title=EXPORT_VIDEO_TITLE, control_type="Window")
+    if not window_spec.exists(timeout=max(1.0, timeout), retry_interval=0.1):
+        raise UIAutomationError(f"Expected window did not appear: {EXPORT_VIDEO_TITLE}; owned: {owned_window_titles()}")
+    window = window_spec.wrapper_object()
+    frame = window.rectangle()
+    owner = spec.wrapper_object()
+
+    def inside(item):
+        r = item.rectangle()
+        return item.is_visible() and frame.left <= r.left and r.right <= frame.right and frame.top <= r.top and (
+            r.bottom <= frame.bottom
+        )
+
+    def button(title):
+        matches = [
+            item for item in owner.descendants(control_type="Button") if inside(item) and item.window_text() == title
+        ]
+        if len(matches) != 1:
+            raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} does not expose exactly one '{title}' button")
+        return matches[0]
+
+    edits = sorted(
+        (item for item in owner.descendants(control_type="Edit") if inside(item)),
+        key=lambda item: (item.rectangle().top, item.rectangle().left),
+    )
+    if len(edits) < 4:
+        raise UIAutomationError(
+            f"{EXPORT_VIDEO_TITLE} exposes {len(edits)} fields; expected folder, name, width and height"
+        )
+    folder_edit, name_edit, width_edit, height_edit = edits[:4]
+    choose = button("Choose...")
+    same_row = abs(folder_edit.rectangle().top - choose.rectangle().top) <= 4
+    if not same_row or not width_edit.window_text().isdigit() or not height_edit.window_text().isdigit():
+        raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} layout differs from the verified 2026.1 form")
+    button("VIDEO FILE").click_input()
+    for edit, value in ((folder_edit, folder), (name_edit, name), (width_edit, str(width)), (height_edit, str(height))):
+        edit.iface_value.SetValue(value)
+        time.sleep(0.1)
+        if edit.window_text() != value:
+            raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} field did not accept {value!r}: {edit.window_text()!r}")
+    button(quality).click_input()
+    button("Start rendering").click_input()
+    return FileDialogEvidence(
+        action_id=action_id,
+        options_title=None,
+        dialog_title=EXPORT_VIDEO_TITLE,
+        file_name_automation_id="form:name",
+        accept_automation_id="Start rendering",
+        file_type=None,
+        completed_at=time.time(),
+    )
 
 
 def owned_window_titles() -> list[str]:
