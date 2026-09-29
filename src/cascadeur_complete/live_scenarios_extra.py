@@ -190,6 +190,8 @@ def _finger_auto_posing(s: LiveSession) -> Any:
 
 @scenario("autophysics_freeze", BACKFLIP)
 def _autophysics_freeze(s: LiveSession) -> Any:
+    # Freezing only shows while AutoPhysics results are displayed.
+    s.change("auto_physics_enable", "physics.auto_enable", {})
     return _toggle(s, "autophysics_freeze", "physics.autophysics_freeze")
 
 
