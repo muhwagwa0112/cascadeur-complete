@@ -65,7 +65,38 @@ Video export is not UI-only: File > Export > Video opens Cascadeur's own
 for the rendered file (`export_video`, `render_video`). The `RenderToFile`
 Python route stays unused because it crashes 2026.1.
 
-Blend Shape sliders are the exception: an FBX imported with blend shapes stores
+Blend Shape sliders have a data route: an FBX imported with blend shapes stores
 each channel as an animated `<channel>_Weight` datum on a `Blendshape <name>`
 Dynamic behaviour (`common/mesh.py`), so `blend_shape` writes those weights on a
-frame and reads them back.
+frame and reads them back. It has no live evidence yet (see the 2026.1.3 findings).
+
+## Findings on 2026.1.3.0.15619
+
+- **License gate.** Cascadeur itself shows "Feature not available" (Upgrade /
+  Sync / Close) for USD and glTF/GLB export under this machine's license, although
+  `is_pro_features_available()` reports Pro and the same exports worked under
+  Basic on 2026.1.2. The host closes the gate (Close only; Upgrade and Sync are
+  account actions left to the user), cancels the unclaimed request and returns
+  `LICENSE_GATED`. Imports are validated from Blender-built fixtures instead.
+- **Timeline cycles.** `Timeline.Create cycle` leaves Cascadeur's layer
+  invariants broken on the sample scenes ("checkCycles: no keys",
+  "checkAnimatedSettings"); the scene then cannot be saved and a later edit
+  crashes. Every timeline edit (cycle, bake, stretch, interval edit/copy) now
+  proves that Cascadeur still saves the scene, and rolls back otherwise, so
+  `cycle` is reported as a failed postcondition instead of breaking the scene.
+- **Blend shapes.** Importing a blend-shape FBX through the Python FBX loader
+  crashed 2026.1.3; `blend_shape` is excluded from `--all` runs
+  (`crash_risk`) and stays unverified.
+- **Playback.** The playhead is part of the scene revision, so playback toggles
+  are bound to the scene identity only (host and bridge both restrict this to
+  `timeline.playback`). Opening a scene while playback runs crashed Cascadeur.
+- **Crash resilience.** `scripts/live_validate.py` relaunches Cascadeur after a
+  crash and marks the scenario that crashed.
+- **API document gaps.** `csc.layers.Editor.normalize_sections` takes the domain
+  scene and `csc.model.DataViewer.get_all_data_id` takes an object id, although
+  `api_document.py` shows neither argument; the shipped scripts are authoritative.
+- **Not observable.** `layer_activate` (the timeline selection lists every item),
+  `control_picker` (`activate(session, {ObjectId: ObjectId})` has no documented
+  mapping), `collision_clean` (the sample poses have nothing to fix) and
+  `prototype_com_remove` (no sample has a prototype Center of Mass in Rig Mode)
+  have adapters but no live evidence.
