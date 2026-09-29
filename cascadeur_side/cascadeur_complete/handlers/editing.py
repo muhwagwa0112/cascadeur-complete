@@ -70,7 +70,7 @@ def _select_interval(domain, layer_ids, first, last, context):
     selector = domain.get_layers_selector()
     interval = selector.selection().frames_interval()
     observed = {
-        "layer_ids": sorted(context["id_string"](item) for item in selector.all_included_layer_ids()),
+        "layer_ids": sorted(context["id_string"](item) for item in selector.selection().item_ids()),
         "first_frame": int(context["read_member"](interval, "first")),
         "last_frame": int(context["read_member"](interval, "last")),
     }

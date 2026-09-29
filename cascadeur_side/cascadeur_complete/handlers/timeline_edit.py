@@ -535,12 +535,13 @@ def activate_layer(scene, arguments, _request, context):
     if accepted and accepted[0] is False:
         raise ValueError("Cascadeur rejected the layer selection")
     selector = domain.get_layers_selector()
-    included = sorted(context["id_string"](item) for item in selector.all_included_layer_ids())
+    # all_included_layer_ids() lists the layers enabled for editing, not the
+    # timeline selection; the selection container holds the selected items.
+    selected = sorted(context["id_string"](item) for item in selector.selection().item_ids())
     requested = context["id_string"](layer_id)
-    if included != [requested]:
+    if selected != [requested]:
         raise AssertionError(
-            f"POSTCONDITION_FAILED: {len(included)} included layers after selecting {requested} "
-            f"(first: {included[:3]}, top: {context['id_string'](selector.top_layer_id())})"
+            f"POSTCONDITION_FAILED: selected items {selected[:3]} (of {len(selected)}) after selecting {requested}"
         )
     return {"layer_id": requested, "frame": frame, "top_layer_id": context["id_string"](selector.top_layer_id())}, []
 
