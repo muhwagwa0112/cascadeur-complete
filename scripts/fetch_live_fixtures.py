@@ -61,6 +61,16 @@ bpy.context.active_object.name = "UsdCube"
 bpy.ops.wm.usd_export(filepath=out)
 """
 
+# The same cube as glTF binary and glTF JSON (import fixtures independent of export).
+GLTF_SCRIPT = r"""
+import bpy, sys
+out, fmt = sys.argv[sys.argv.index("--") + 1 :]
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=2)
+bpy.context.active_object.name = "GltfCube"
+bpy.ops.export_scene.gltf(filepath=out, export_format=fmt)
+"""
+
 FIXTURES = {
     "VRM1_Constraint_Twist_Sample.vrm": (
         "https://raw.githubusercontent.com/pixiv/three-vrm/dev/packages/three-vrm/examples/models/"
@@ -114,6 +124,18 @@ def main() -> int:
         )
     if usd.is_file():
         print(usd.name, usd.stat().st_size)
+    for name, fmt in (("cube.glb", "GLB"), ("cube.gltf", "GLTF_SEPARATE")):
+        target = root / name
+        if not target.is_file() and blender is not None:
+            subprocess.run(
+                [str(blender), "--background", "--factory-startup", "--python-expr", GLTF_SCRIPT, "--"]
+                + [str(target), fmt],
+                check=True,
+                capture_output=True,
+                timeout=300,
+            )
+        if target.is_file():
+            print(target.name, target.stat().st_size)
     return 0
 
 

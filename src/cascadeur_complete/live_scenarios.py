@@ -371,9 +371,11 @@ def _export_glb(s: LiveSession) -> Any:
 @scenario("import_glb", CUBE)
 def _import_glb(s: LiveSession) -> Any:
     source = getattr(s, "exported_glb", None)
-    if not source:
-        _export_glb(s)
-        source = s.exported_glb
+    if not source or not Path(source).is_file():
+        # Export can be license-gated; import a Blender-built file instead.
+        source = str(s.service.paths.root / "live-fixtures" / "cube.glb")
+        if not Path(source).is_file():
+            raise LiveValidationError("run scripts/fetch_live_fixtures.py to build the glb fixture")
     return _ui_flow(s, "import", "glb", source)
 
 
@@ -386,9 +388,11 @@ def _export_gltf(s: LiveSession) -> Any:
 @scenario("import_gltf", CUBE)
 def _import_gltf(s: LiveSession) -> Any:
     source = getattr(s, "exported_gltf", None)
-    if not source:
-        _export_gltf(s)
-        source = s.exported_gltf
+    if not source or not Path(source).is_file():
+        # Export can be license-gated; import a Blender-built file instead.
+        source = str(s.service.paths.root / "live-fixtures" / "cube.gltf")
+        if not Path(source).is_file():
+            raise LiveValidationError("run scripts/fetch_live_fixtures.py to build the gltf fixture")
     return _ui_flow(s, "import", "gltf", source)
 
 
