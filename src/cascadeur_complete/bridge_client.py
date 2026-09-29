@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Callable
 from threading import Event, RLock, Thread
 
-from .atomic_queue import AtomicQueue
+from .atomic_queue import AtomicQueue, read_json
 from .models import BridgeRequest, ErrorCode, ExecutionMode, Operation, ResultEnvelope, SafetyContext
 from .paths import RuntimePaths
 from .queue_auth import QueueAuthenticationError
@@ -66,7 +66,16 @@ class BridgeClient:
         )
         request_path = self.queue.submit(request)
         dispatch_attempts = 0
-        if self.trigger:
+        lingering_until = self.lingering_until()
+        if lingering_until is not None:
+            # The bridge is still draining on the UI thread after the previous
+            # request; it claims this one without another UI trigger.
+            wait = min(timeout, max(0.0, lingering_until - time.time()) + 0.75)
+            response = self._wait_response(request, wait)
+            if response is not None:
+                response.duration_ms = int((time.monotonic() - started) * 1000)
+                return response
+        if self.trigger and request_path.exists():
             dispatch_attempts = 1
             trigger_error = self._trigger_error(min(timeout, 14.0))
             if trigger_error is not None and not trigger_error.not_running and not trigger_error.timed_out:
@@ -169,6 +178,14 @@ class BridgeClient:
         if dispatch_attempts > 1:
             response.warnings.append(f"UI dispatch succeeded after {dispatch_attempts} attempts")
         return response
+
+    def lingering_until(self) -> float | None:
+        marker = self.paths.state / "drain_active.json"
+        try:
+            until = float(read_json(marker).get("until", 0.0))
+        except (OSError, ValueError, TypeError):
+            return None
+        return until if until > time.time() else None
 
     def _wait_response(self, request: BridgeRequest, timeout: float) -> ResultEnvelope | None:
         try:

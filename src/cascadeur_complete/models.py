@@ -140,6 +140,8 @@ class FeatureRecord(BaseModel):
     mutation: bool = False
     contract_status: Literal["bound", "gate", "not_implemented", "discovered"] = "discovered"
     truth_layer: Literal["product", "discovered"] = "discovered"
+    arguments: dict[str, str] = Field(default_factory=dict)
+    fixed_arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChangeToken(BaseModel):

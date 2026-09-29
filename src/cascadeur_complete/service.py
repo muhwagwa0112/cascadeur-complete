@@ -31,13 +31,50 @@ from .product_catalog import PRODUCT_CATALOG
 from .safety import ChangeManager, SafetyError, validate_local_input_path, validate_local_path
 from .uia import (
     UIAutomationError,
+    active_scene_title,
     cancel_file_flow,
-    cascadeur_window_titles,
     complete_file_dialog,
+    cycle_scene_tab,
     resolve_autophysics_snap_warning,
     resolve_optional_rig_mode_helper,
 )
 from .verification import LiveEvidenceStore
+
+# Operations whose success is a new or replaced file at arguments["path"].
+OUTPUT_OPERATIONS = frozenset(
+    {
+        "render.viewport_capture",
+        "render.image",
+        "render.video",
+        "io.export_image",
+        "io.export_video",
+        "io.export_fbx",
+        "io.export_dae",
+        "scene.save_as",
+    }
+)
+
+# Postconditions verified by the host itself (file system, native windows,
+# UI Automation or the persisted registry) after the bridge response.
+HOST_POSTCONDITIONS = {
+    **{operation: ("output_file", "nonzero_bytes") for operation in OUTPUT_OPERATIONS},
+    "scene.open": ("stable_scene_path",),
+    "scene.activate": ("stable_scene_path",),
+    "scene.new": ("stable_scene_path",),
+    "safety.rollback": ("stable_scene_path",),
+    "system.ui_file_flow": (
+        "exact_file_dialog",
+        "exact_options_window",
+        "registered_uia_flow_token",
+        "scene_revision_changed",
+        "output_file",
+        "nonzero_bytes",
+    ),
+    "system.action_invoke": ("registered_action_binding",),
+    "physics.auto_snap": ("scene_revision_changed",),
+    "system.introspect": ("feature_registry",),
+    "timeline.playback": ("playback_frames_advance", "playback_frame_stable"),
+}
 
 MUTATION_VERBS = (
     "add",
@@ -70,6 +107,56 @@ MUTATION_VERBS = (
     "unset",
     "update",
 )
+
+
+def ui_file_flow_arguments(
+    direction: str, format: str, path: str, preset: str = "scene", allow_overwrite: bool = False
+) -> tuple[str, dict[str, Any]]:
+    """Return the feature id and exact 2026.1.2 action/dialog contract for a UI file flow."""
+    if direction not in ("import", "export"):
+        raise ValueError("direction must be import or export")
+    if format not in ("usd", "glb", "gltf", "vrm"):
+        raise ValueError("format must be usd, glb, gltf, or vrm")
+    suffix = "." + format
+    if not path.casefold().endswith(suffix):
+        raise ValueError(f"{format} path must end with {suffix}")
+    if format == "vrm" and direction == "export":
+        raise ValueError("Cascadeur 2026.1.2 exposes VRM import but no VRM export action")
+    if format == "usd":
+        allowed = {"import": {"animation", "model", "scene"}, "export": {"model", "scene"}}[direction]
+        if preset not in allowed:
+            raise ValueError(f"USD {direction} supports presets: {', '.join(sorted(allowed))}")
+        action_id = f"File.{direction.title()}.{preset.title()}.Usd..."
+        dialog_title = f"{direction.title()}. preset: {preset}"
+        options_title = None
+        options_accept_title = None
+        file_type_extension = None
+    else:
+        action_id = "File.Import.Glb" if direction == "import" else "File.Export.Glb"
+        dialog_title = f"{direction.title()}. preset: default"
+        options_title = "Glb/Gltf/Vrm(a) Import" if direction == "import" else "Glb/Gltf Export"
+        options_accept_title = direction.title()
+        file_type_extension = None if format == "glb" else suffix
+    return f"{direction}_{format}", {
+        "action_id": action_id,
+        "path": path,
+        "dialog_title": dialog_title,
+        "options_title": options_title,
+        "options_accept_title": options_accept_title,
+        "file_type_extension": file_type_extension,
+        "input": direction == "import",
+        "output": direction == "export",
+        "allow_overwrite": allow_overwrite,
+    }
+
+
+def add_postconditions(result: ResultEnvelope, detail: str, *identifiers: str) -> None:
+    """Record host-verified postconditions next to the bridge-asserted ones."""
+    present = {str(item.get("id")) for item in result.postconditions if isinstance(item, dict)}
+    for identifier in identifiers:
+        if identifier not in present:
+            result.postconditions.append({"id": identifier, "ok": True, "detail": detail})
+            present.add(identifier)
 
 
 class CascadeurService:
@@ -138,7 +225,14 @@ class CascadeurService:
             self._live_scene_id = None
             self._live_scene_revision = None
 
-    def refresh_live(self, timeout: float = 45.0, *, bind_to_cached: bool = True) -> ResultEnvelope:
+    def refresh_live(self, timeout: float = 45.0, *, bind_to_cached: bool = False) -> ResultEnvelope:
+        """Re-read live state and resynchronize the cached scene identity.
+
+        Status is the resynchronization primitive, so it is unbound by
+        default: binding it to the cached revision would make every later
+        status (and therefore every prepare/commit) fail permanently after a
+        scene finished loading or the user edited the scene in the UI.
+        """
         result = self.client.execute(
             "status",
             [Operation(name="system.status")],
@@ -167,6 +261,10 @@ class CascadeurService:
         self._live_tools = live.get("tools", BASELINE_TOOLS)
         self._license_name = live.get("license", "Basic")
         self._scene_available = bool(live.get("scene_id"))
+        self._rebuild_features()
+        self._write_registry()
+        if self.paths.registry.is_file() and self.paths.registry.stat().st_size > 0:
+            add_postconditions(result, "Host rebuilt and persisted the feature registry", "feature_registry")
         self._record_live_evidence("inventory_refresh", "system.introspect", result)
         self._rebuild_features()
         self._write_registry()
@@ -334,7 +432,21 @@ class CascadeurService:
         expected = aliases.get(feature.id, feature.route)
         if operation_name != expected:
             return f"Operation {operation_name!r} is not bound to feature {feature.id!r}; expected {expected!r}"
+        for name, value in feature.fixed_arguments.items():
+            if name in arguments and arguments[name] != value:
+                return f"Feature {feature.id!r} fixes argument {name!r} to {value!r}"
         return None
+
+    def _bound_arguments(self, feature_id: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
+        """Merge the arguments a feature fixes (shared operations are feature-specific)."""
+        merged = dict(arguments or {})
+        try:
+            fixed = self.feature(feature_id).fixed_arguments
+        except KeyError:
+            return merged
+        for name, value in fixed.items():
+            merged.setdefault(name, value)
+        return merged
 
     def feature_search(
         self,
@@ -379,6 +491,7 @@ class CascadeurService:
         binding_error = self._operation_binding_error(feature, operation_name, arguments)
         if binding_error:
             return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
+        arguments = self._bound_arguments(feature_id, arguments)
         if self._operation_is_mutating(operation_name):
             return self._host_error(
                 feature_id,
@@ -525,6 +638,7 @@ class CascadeurService:
         binding_error = self._operation_binding_error(feature, operation_name, arguments)
         if binding_error:
             return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error)
+        arguments = self._bound_arguments(feature_id, arguments)
         if feature.requires_scene and scene_id is None and self._live_scene_id:
             scene_id = self._live_scene_id
             if expected_revision is None:
@@ -572,6 +686,10 @@ class CascadeurService:
         result.scene_revision_after = result.scene_revision
         if result.ok and output_path:
             result = self._wait_for_output_file(result, str(output_path), timeout, before_output)
+        if result.ok and operation_name == "system.action_invoke":
+            add_postconditions(
+                result, "Host bound the action id to an installed command record", "registered_action_binding"
+            )
         self._remember_scene_result(result)
         if result.ok and feature.adapter_id:
             self._record_live_evidence(feature_id, operation_name, result)
@@ -623,6 +741,8 @@ class CascadeurService:
         if build_error:
             return build_error
         parsed = [Operation.model_validate(item) for item in operations]
+        for item in parsed:
+            item.arguments = self._bound_arguments(feature_id, item.arguments)
         try:
             feature = self.feature(feature_id)
         except KeyError:
@@ -712,6 +832,18 @@ class CascadeurService:
         binding_error = self._operation_binding_error(feature, operation_name, arguments)
         if binding_error:
             return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
+        arguments = self._bound_arguments(feature_id, arguments)
+        if operation_name == "timeline.playback":
+            moving = self._playback_moving()
+            wants_play = arguments.get("state") == "play"
+            if moving is None or moving == wants_play:
+                return self._host_error(
+                    feature_id,
+                    ErrorCode.INVALID_REQUEST,
+                    "Playback is already " + ("running" if moving else "stopped")
+                    if moving is not None
+                    else "The playhead could not be sampled",
+                ).model_dump(mode="json")
         if not self._operation_is_mutating(operation_name):
             return self._host_error(
                 feature_id,
@@ -786,7 +918,7 @@ class CascadeurService:
                 ).model_dump(mode="json")
             # Bind the token to the writable working document created by the
             # snapshot operation, never to the original or immutable backup.
-            post_snapshot = self.refresh_live()
+            post_snapshot = self.refresh_live(bind_to_cached=True)
             if not post_snapshot.ok:
                 return post_snapshot.model_dump(mode="json")
             state = post_snapshot.result
@@ -872,6 +1004,13 @@ class CascadeurService:
         try:
             if result.ok and record.operation.name == "scene.open":
                 result = self._wait_for_open_scene(result, str(record.operation.arguments["path"]), timeout)
+            if result.ok and record.operation.name in {"scene.activate", "scene.new"}:
+                payload = result.result if isinstance(result.result, dict) else {}
+                if not payload.get("tab_id"):
+                    raise RuntimeError("Scene change result does not identify the target tab")
+                result = self._wait_for_open_scene(
+                    result, str(payload.get("path") or ""), timeout, expected_tab_id=str(payload["tab_id"])
+                )
             if result.ok and record.operation.name == "safety.rollback":
                 working_path = self.paths.snapshots / (
                     str(record.operation.arguments["working_id"]) + ".working.casc"
@@ -879,13 +1018,17 @@ class CascadeurService:
                 result = self._wait_for_open_scene(result, str(working_path), timeout)
             if result.ok and record.operation.name == "physics.auto_snap":
                 result = self._complete_auto_physics_snap(result, timeout)
-            if result.ok and record.operation.name in {
-                "render.viewport_capture",
-                "render.image",
-                "render.video",
-                "io.export_image",
-                "io.export_video",
-            }:
+            if result.ok and record.operation.name == "timeline.playback":
+                wants_play = record.operation.arguments.get("state") == "play"
+                moving = self._playback_moving()
+                if moving is None or moving != wants_play:
+                    raise RuntimeError("playhead motion after the toggle does not match the requested state")
+                add_postconditions(
+                    result,
+                    "Playhead sampled twice after the UI thread was released",
+                    "playback_frames_advance" if wants_play else "playback_frame_stable",
+                )
+            if result.ok and record.operation.name in OUTPUT_OPERATIONS:
                 result = self._wait_for_output_file(
                     result, str(record.operation.arguments["path"]), timeout, before_output
                 )
@@ -1001,6 +1144,16 @@ class CascadeurService:
         )
         if not result.ok:
             return result
+        add_postconditions(
+            result,
+            f"Host completed the exact owned dialog {dialog.dialog_title}",
+            "exact_file_dialog",
+            "registered_uia_flow_token",
+        )
+        if arguments.get("options_title"):
+            add_postconditions(
+                result, f"Host accepted the exact options window {arguments['options_title']}", "exact_options_window"
+            )
         if bool(arguments.get("output")):
             return self._wait_for_output_file(result, str(arguments["path"]), timeout, before_output)
         before_revision = record.scene_revision
@@ -1050,6 +1203,7 @@ class CascadeurService:
                 observed_at=time.time(),
             )
         )
+        add_postconditions(result, "Scene revision changed after UI file import", "scene_revision_changed")
         return result
 
     def _restore_failed_change(self, record, failed: ResultEnvelope) -> ResultEnvelope:
@@ -1125,6 +1279,9 @@ class CascadeurService:
                     if warning != "Cascadeur may be waiting for the known AutoPhysics single-use-feature confirmation"
                 ]
                 initial.changed_entities = sorted(set(initial.changed_entities + ["scene.animation"]))
+                add_postconditions(
+                    initial, "Scene revision changed after the AutoPhysics confirmation", "scene_revision_changed"
+                )
                 initial.evidence.extend(latest.evidence)
                 initial.evidence.append(
                     Evidence(
@@ -1195,6 +1352,12 @@ class CascadeurService:
                             observed_at=time.time(),
                         )
                     )
+                    add_postconditions(
+                        initial,
+                        f"Output file became stable with {signature[0]} bytes",
+                        "output_file",
+                        "nonzero_bytes",
+                    )
                     return initial
             time.sleep(0.2)
         failed = self._host_error(
@@ -1208,78 +1371,133 @@ class CascadeurService:
         failed.evidence = list(initial.evidence)
         return failed
 
-    def _wait_for_open_scene(self, initial: ResultEnvelope, expected_path: str, timeout: float) -> ResultEnvelope:
-        deadline = time.monotonic() + max(1.0, timeout)
-        expected = os.path.normcase(os.path.abspath(expected_path))
-        expected_name = Path(expected_path).name.casefold()
+    @staticmethod
+    def _same_path(left: str | None, right: str | None) -> bool:
+        """Compare scene labels: absolute paths by file identity, untitled tabs by name."""
+        if not left or not right:
+            return False
+        if os.path.isabs(left) and os.path.isabs(right):
+            return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+        return left.strip().casefold() == right.strip().casefold()
 
-        def window_evidence() -> str | None:
-            return next(
-                (title for title in cascadeur_window_titles() if expected_name and expected_name in title.casefold()),
-                None,
-            )
+    @staticmethod
+    def _scene_label(state: dict[str, Any]) -> str | None:
+        return state.get("path") or state.get("name")
 
-        def complete(observed_path: str, stable_observations: int, title: str | None) -> ResultEnvelope:
-            initial.changed_entities = sorted(set(initial.changed_entities + ["scene"]))
-            initial.result = {
-                "path": observed_path,
-                "loaded": True,
-                "stable_observations": stable_observations,
-            }
-            if title:
-                initial.result["window_title"] = title
-                initial.evidence.append(
-                    Evidence(
-                        kind="host_window_postcondition",
-                        detail=f"Cascadeur window shows loaded scene: {title}",
-                        observed_at=time.time(),
-                    )
-                )
-            return initial
+    def _timeline_frame(self) -> int | None:
+        observed = self.client.execute("timeline_get", [Operation(name="timeline.get")], timeout=30)
+        if not observed.ok or not isinstance(observed.result, dict):
+            return None
+        return int(observed.result.get("current_frame", -1))
 
-        # The 2026.1 bridge verifies the active scene path synchronously after
-        # load_scene returns. Cross-check that exact path with the native window
-        # title instead of reopening the QML menu twice just to poll status.
-        if isinstance(initial.result, dict) and initial.result.get("loaded"):
-            observed_path = initial.result.get("path")
-            observed = os.path.normcase(os.path.abspath(observed_path)) if observed_path else ""
-            title = window_evidence()
-            if observed == expected and title:
-                return complete(str(observed_path), 2, title)
+    def _playback_moving(self, interval: float = 1.2) -> bool | None:
+        """Sample the playhead twice after the UI thread is free; None if unreadable."""
+        self._wait_for_bridge_idle()
+        first = self._timeline_frame()
+        self._wait_for_bridge_idle()
+        time.sleep(interval)
+        second = self._timeline_frame()
+        if first is None or second is None:
+            return None
+        return first != second
 
-        previous_revision = None
-        stable_observations = 0
+    def _active_tab_id(self) -> str | None:
+        listed = self.client.execute("scene_list", [Operation(name="scene.list")], timeout=30)
+        if not listed.ok or not isinstance(listed.result, list):
+            return None
+        return next((str(item.get("tab_id")) for item in listed.result if item.get("active")), None)
+
+    def _wait_for_bridge_idle(self, limit: float = 3.0) -> None:
+        """Wait until a lingering bridge drain released the UI thread."""
+        deadline = time.monotonic() + limit
+        while time.monotonic() < deadline and self.client.lingering_until() is not None:
+            time.sleep(0.1)
+
+    def _wait_for_open_scene(
+        self,
+        initial: ResultEnvelope,
+        expected_path: str,
+        timeout: float,
+        *,
+        expected_tab_id: str | None = None,
+    ) -> ResultEnvelope:
+        """Require the expected scene to stay active after Cascadeur's UI settles.
+
+        The bridge verifies the target inside the command, but Cascadeur's tab
+        bar re-asserts its previous selection once the command returns. The
+        host therefore re-observes the active scene with fresh reads (each
+        dispatched after the event loop ran) and, when the UI reverted,
+        selects tabs through the UI with Ctrl+Tab until the target is active.
+        Untitled scenes are matched by session tab id instead of path.
+        """
+        deadline = time.monotonic() + max(5.0, timeout)
+        tab_cycles = 0
+        max_tab_cycles = 40
+        stable = 0
         latest = None
         while time.monotonic() < deadline:
-            latest = self.client.execute("scene_open", [Operation(name="system.status")], timeout=15)
-            if latest.ok and isinstance(latest.result, dict):
-                observed_path = latest.result.get("path")
-                observed = os.path.normcase(os.path.abspath(observed_path)) if observed_path else ""
-                if observed == expected:
-                    revision = latest.result.get("revision")
-                    title = window_evidence()
-                    if title:
-                        initial.scene_id = latest.scene_id
-                        initial.scene_revision = latest.scene_revision
-                        initial.evidence.extend(latest.evidence)
-                        return complete(str(observed_path), 2, title)
-                    stable_observations = stable_observations + 1 if revision == previous_revision else 1
-                    previous_revision = revision
-                    if stable_observations >= 2:
-                        initial.scene_id = latest.scene_id
-                        initial.scene_revision = latest.scene_revision
-                        initial.evidence.extend(latest.evidence)
-                        return complete(str(observed_path), stable_observations, None)
-            time.sleep(0.1)
-        failed = self._host_error(
-            initial.feature_id,
-            ErrorCode.POSTCONDITION_FAILED,
-            f"Scene did not settle at expected path: {expected_path}",
+            if expected_tab_id is not None:
+                matched = self._active_tab_id() == expected_tab_id
+            else:
+                matched = self._same_path(active_scene_title(), expected_path)
+            if matched:
+                latest = self.refresh_live(timeout=min(30.0, max(1.0, deadline - time.monotonic())))
+                label_ok = expected_tab_id is not None or (
+                    latest.ok
+                    and isinstance(latest.result, dict)
+                    and self._same_path(self._scene_label(latest.result), expected_path)
+                )
+                if latest.ok and label_ok:
+                    stable += 1
+                    if stable >= 2:
+                        break
+                    self._wait_for_bridge_idle()
+                    time.sleep(0.5)
+                    continue
+            stable = 0
+            if tab_cycles >= max_tab_cycles:
+                break
+            self._wait_for_bridge_idle()
+            try:
+                cycle_scene_tab()
+            except UIAutomationError:
+                break
+            tab_cycles += 1
+            time.sleep(0.8)
+        if stable < 2 or latest is None:
+            failed = self._host_error(
+                initial.feature_id,
+                ErrorCode.POSTCONDITION_FAILED,
+                "Scene did not stay active after the UI settled: " + (expected_tab_id or expected_path),
+            )
+            failed.snapshot_id = initial.snapshot_id
+            if latest is not None:
+                failed.evidence = list(latest.evidence)
+            return failed
+        initial.scene_id = latest.scene_id
+        initial.scene_revision = latest.scene_revision
+        initial.changed_entities = sorted(set(initial.changed_entities + ["scene"]))
+        payload = dict(initial.result) if isinstance(initial.result, dict) else {}
+        payload.update(
+            {
+                "path": latest.result.get("path"),
+                "loaded": True,
+                "stable_observations": stable,
+                "ui_tab_cycles": tab_cycles,
+            }
         )
-        failed.snapshot_id = initial.snapshot_id
-        if latest is not None:
-            failed.evidence = latest.evidence
-        return failed
+        initial.result = payload
+        initial.evidence.extend(latest.evidence)
+        target = expected_tab_id or expected_path
+        initial.evidence.append(
+            Evidence(
+                kind="host_window_postcondition",
+                detail=f"Scene stayed active after UI settle ({tab_cycles} UI tab cycles): {target}",
+                observed_at=time.time(),
+            )
+        )
+        add_postconditions(initial, f"Active scene settled at {target}", "stable_scene_path")
+        return initial
 
     def _snapshot_path(self, snapshot_id: str) -> Path | None:
         try:

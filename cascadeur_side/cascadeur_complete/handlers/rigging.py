@@ -77,7 +77,7 @@ def _reference_owner(viewer, behaviour_id, property_name, context):
     return context["id_string"](viewer.get_behaviour_owner(reference))
 
 
-@handler("rig.state")
+@handler("rig.state", postconditions=("rig_inventory",))
 def rig_state(scene, _arguments, _request, context):
     domain = context["domain_scene"](scene)
     model_viewer = domain.model_viewer()
@@ -137,7 +137,7 @@ def rig_state(scene, _arguments, _request, context):
     }, []
 
 
-@handler("rig.constraint_drivers")
+@handler("rig.constraint_drivers", postconditions=("constraint_driver_catalog", "scene_unchanged"))
 def constraint_drivers(scene, _arguments, _request, context):
     domain = context["domain_scene"](scene)
     viewer = domain.model_viewer()
@@ -171,7 +171,7 @@ def constraint_drivers(scene, _arguments, _request, context):
     return {"items": candidates, "count": len(candidates)}, []
 
 
-@handler("rig.joint_create")
+@handler("rig.joint_create", postconditions=("joint_count_increased_by_one", "created_joint_selected"))
 def joint_create(scene, _arguments, _request, context):
     from commands.add import add_joint
 
@@ -202,7 +202,10 @@ def joint_create(scene, _arguments, _request, context):
     }, []
 
 
-@handler("rig.rig_info_create")
+@handler(
+    "rig.rig_info_create",
+    postconditions=("rig_info_count_increased_by_one", "related_joints_equal_request"),
+)
 def rig_info_create(scene, arguments, _request, context):
     import rig_gen.add_support_info as support_info
 
@@ -268,7 +271,7 @@ def rig_info_create(scene, arguments, _request, context):
     }, []
 
 
-@handler("rig.ik_chain_create")
+@handler("rig.ik_chain_create", postconditions=("chain_ik_created_on_main_end",))
 def ik_chain_create(scene, arguments, _request, context):
     import pycsc
     from commands.ik.add_ik import calculate_chain_length, resolve_attraction_point
@@ -339,7 +342,10 @@ def ik_chain_create(scene, arguments, _request, context):
     }, []
 
 
-@handler("rig.rig_elements_create")
+@handler(
+    "rig.rig_elements_create",
+    postconditions=("one_technical_links_owner_per_pair", "linked_joints_equal_request"),
+)
 def rig_elements_create(scene, arguments, request, context):
     """Create deterministic manual-rig elements from explicit joint pairs.
 
@@ -476,7 +482,7 @@ def rig_elements_create(scene, arguments, request, context):
     }, []
 
 
-@handler("rig.additional_point_create")
+@handler("rig.additional_point_create", postconditions=("one_manual_point_link_added",))
 def additional_point_create(scene, arguments, _request, context):
     from prototypes.additional_actions import actions as additional_actions
 
@@ -507,7 +513,7 @@ def additional_point_create(scene, arguments, _request, context):
     }, []
 
 
-@handler("rig.additional_box_create")
+@handler("rig.additional_box_create", postconditions=("one_additional_box_link_added",))
 def additional_box_create(scene, arguments, _request, context):
     from prototypes.additional_actions import actions as additional_actions
 
@@ -539,7 +545,10 @@ def additional_box_create(scene, arguments, _request, context):
     }, []
 
 
-@handler("rig.spline_ik_create")
+@handler(
+    "rig.spline_ik_create",
+    postconditions=("one_proto_spline_ik_created", "resolved_hierarchy_references_equal"),
+)
 def spline_ik_create(scene, arguments, _request, context):
     from prototypes.main_actions import actions as main_actions
 
@@ -626,7 +635,7 @@ def spline_ik_create(scene, arguments, _request, context):
     }, []
 
 
-@handler("rig.twist")
+@handler("rig.twist", postconditions=("proto_box_twist_reference_equals_request",))
 def twist(scene, arguments, _request, context):
     from prototypes.main_actions import actions as main_actions
 

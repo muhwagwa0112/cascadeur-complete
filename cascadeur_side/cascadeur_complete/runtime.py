@@ -17,6 +17,7 @@ from pathlib import Path
 import csc
 
 from . import handlers as _handlers  # noqa: F401
+from .handler_registry import declared_postconditions
 from .handler_registry import dispatch as dispatch_registered
 
 PROTOCOL_VERSION = "2.0"
@@ -49,6 +50,49 @@ READ_ONLY_OPERATIONS = {
     "rig.state",
     "rig.constraint_drivers",
 }
+
+
+# Postconditions asserted by the inline operations below. Each id is enforced by
+# the operation body (an AssertionError is raised when the observed state
+# differs), so a normal return means every listed id was observed.
+INLINE_POSTCONDITIONS = {
+    "system.status": ("scene_identity", "runtime_tools"),
+    "scene.summary": ("scene_revision",),
+    "scene.objects": ("pagination_contract",),
+    "scene.open": ("stable_scene_path",),
+    "scene.save": ("save_completed",),
+    "timeline.set_frame": ("frame_equals_requested",),
+    "timeline.get": ("unclamped_frame",),
+    "animation.transform_get": ("transform_payload",),
+    "animation.transform_set": ("transform_equals_requested",),
+    "selection.get": ("selection_payload",),
+    "selection.filter": ("filter_matches",),
+    "selection.set": ("selection_equals_requested",),
+    "selection.add": ("selection_contains_requested",),
+    "selection.remove": ("selection_excludes_requested",),
+    "layer.list": ("layer_payload",),
+    "animation.key_list": ("key_payload",),
+    "layer.create": ("layer_present",),
+    "layer.delete": ("layer_absent",),
+    "layer.visibility": ("visibility_equals_requested",),
+    "layer.lock": ("lock_equals_requested",),
+    "animation.key_add": ("key_present",),
+    "animation.key_delete": ("key_absent",),
+    "io.import_fbx": ("scene_changed",),
+    "system.introspect": ("schema_counts",),
+}
+
+
+def operation_postconditions(name, arguments, result):
+    """Return the postcondition ids proven by a successfully returned operation."""
+    if isinstance(result, dict) and isinstance(result.get("observed_postconditions"), (list, tuple)):
+        return tuple(str(item) for item in result["observed_postconditions"])
+    if name in ("system.undo", "system.redo", "system.action_invoke"):
+        return ("scene_revision_changed",) if bool((arguments or {}).get("expect_change", True)) else ()
+    declared = declared_postconditions(name)
+    if declared:
+        return declared
+    return INLINE_POSTCONDITIONS.get(name, ())
 
 
 class BridgeAuthenticationError(PermissionError):
@@ -1197,21 +1241,33 @@ def _run_operation(scene, operation, request):
         if not output.is_file() or output.stat().st_size <= 0:
             raise AssertionError("POSTCONDITION_FAILED: current scene was not saved")
         return {"path": str(output), "bytes": output.stat().st_size}, []
-    if name == "scene.new":
-        result = csc.app.get_application().get_scene_manager().create_application_scene()
-        return json_safe(result), []
     if name == "scene.open":
         path = str(args["path"])
         return _load_scene_verified(path), []
     if name == "io.import_fbx":
+        before = scene_state(scene)
         result = _file_loader("FbxSceneLoader", scene, "import_scene", args["path"])
-        return json_safe(result), []
+        after = scene_state(_scene_view() or scene)
+        if before["revision"] == after["revision"]:
+            raise AssertionError("POSTCONDITION_FAILED: FBX import made no observable scene change")
+        before_ids = {item["id"] for item in before["objects"]}
+        return {
+            "path": str(args["path"]),
+            "created_ids": sorted(item["id"] for item in after["objects"] if item["id"] not in before_ids),
+            "before_revision": before["revision"],
+            "after_revision": after["revision"],
+            "return_value": json_safe(result),
+        }, []
     if name == "io.export_fbx":
         result = _file_loader("FbxSceneLoader", scene, "export_all_objects", args["path"])
         destination = Path(args["path"])
-        if not destination.is_file():
-            raise AssertionError("POSTCONDITION_FAILED: FBX output was not created")
-        return {"path": str(destination), "bytes": destination.stat().st_size, "return_value": json_safe(result)}, []
+        # The loader may finish writing after it returns; the host waits for a
+        # stable non-empty file and owns the output postconditions.
+        return {
+            "path": str(destination),
+            "exists_on_return": destination.is_file(),
+            "return_value": json_safe(result),
+        }, []
     if name == "safety.snapshot":
         snapshot_id = str(args["snapshot_id"])
         working_id = str(args["working_id"])
@@ -1225,7 +1281,10 @@ def _run_operation(scene, operation, request):
         if path.resolve().parent != snapshots_root or working_path.parent != snapshots_root:
             raise ValueError("Rollback paths must remain inside the snapshots directory")
         shutil.copy2(str(path.resolve()), str(working_path))
-        loaded = _load_scene_verified(working_path, prefer_other_open=True, close_previous=True)
+        # Never remove the failed working tab from inside a command: Cascadeur's
+        # tab bar re-selects its previous tab after the command returns, and
+        # removing that tab terminates the application.
+        loaded = _load_scene_verified(working_path, prefer_other_open=True, close_previous=False)
         loaded["restored_from"] = str(path.resolve())
         loaded["working_path"] = str(working_path)
         return loaded, []
@@ -1285,12 +1344,16 @@ def execute_request(scene, request):
             return _error(feature_id, "POSTCONDITION_FAILED", str(exc), started, before)
     results = []
     warnings = []
+    proven = []
     try:
         current_scene = _scene_view() or scene
         for operation in request.get("operations", []):
             result, operation_warnings = _run_operation(current_scene, operation, request)
             results.append({"operation": operation["name"], "result": result})
             warnings.extend(operation_warnings)
+            for postcondition in operation_postconditions(operation["name"], operation.get("arguments"), result):
+                if postcondition not in proven:
+                    proven.append(postcondition)
             current_scene = _scene_view() or current_scene
         after = scene_state(current_scene)
         return {
@@ -1324,6 +1387,10 @@ def execute_request(scene, request):
                     "ok": True,
                     "detail": "Operation completed and live scene state was re-read",
                 }
+            ]
+            + [
+                {"id": item, "ok": True, "detail": "Asserted by the bridge operation on the Cascadeur UI thread"}
+                for item in proven
             ],
             "evidence_id": None,
         }
@@ -1389,7 +1456,64 @@ def _error(feature_id, code, message, started, state, snapshot_id=None):
     }
 
 
+# Operations that hand work to Cascadeur's event loop (rendering, modal
+# confirmations, file dialogs, scene loading, tab changes). The drain returns
+# right after them so the UI thread can finish that work before the host polls.
+YIELDING_OPERATIONS = frozenset(
+    {
+        "render.viewport_capture",
+        "render.image",
+        "io.export_image",
+        "physics.auto_enable",
+        "physics.auto_snap",
+        "system.action_dispatch",
+        "scene.new",
+        "scene.open",
+        "scene.activate",
+        "scene.close",
+        "safety.rollback",
+        "safety.rollback_internal",
+    }
+)
+DRAIN_LINGER_SECONDS = 1.0
+DRAIN_MAX_SECONDS = 20.0
+
+
 def process_pending(scene, *, matching_scene_only=False):
+    """Drain queued requests, lingering briefly for follow-up requests.
+
+    One UI trigger (menu command or tab activation) costs several seconds, but
+    MCP clients usually send short bursts (status, snapshot, commit, re-read).
+    After each pass the drain waits up to ``DRAIN_LINGER_SECONDS`` for the next
+    request and stops at ``DRAIN_MAX_SECONDS`` or after an event-loop-bound
+    operation, keeping the Cascadeur UI responsive between bursts.
+    """
+    started = time.monotonic()
+    total = 0
+    requests = runtime_root() / "state" / "requests"
+    try:
+        while True:
+            processed, must_yield = _drain_once(scene, matching_scene_only=matching_scene_only)
+            total += processed
+            if processed == 0 or must_yield or time.monotonic() - started >= DRAIN_MAX_SECONDS:
+                return total
+            linger_deadline = time.monotonic() + DRAIN_LINGER_SECONDS
+            _mark_draining(time.time() + DRAIN_LINGER_SECONDS)
+            while time.monotonic() < linger_deadline and not any(requests.glob("*.json")):
+                time.sleep(0.02)
+            if not any(requests.glob("*.json")):
+                return total
+    finally:
+        _mark_draining(0.0)
+
+
+def _mark_draining(until):
+    """Tell the host until when a queued request is claimed without a UI trigger."""
+    with suppress(Exception):
+        atomic_json(runtime_root() / "state" / "drain_active.json", {"until": float(until), "pid": os.getpid()})
+
+
+def _drain_once(scene, *, matching_scene_only=False):
     # Event and command callbacks can carry a stale per-tab scene argument.
     # Queue routing must follow the document that is actually active now.
     scene = _scene_view() or scene
@@ -1397,12 +1521,15 @@ def process_pending(scene, *, matching_scene_only=False):
     try:
         bridge_secret = _bridge_key(root)
     except Exception:
-        return 0
+        return 0, True
     requests = root / "state" / "requests"
     responses = root / "state" / "responses"
     processed = 0
+    must_yield = False
     active_scene_id = scene_state(scene).get("scene_id") if matching_scene_only else None
     for path in sorted(requests.glob("*.json")):
+        if must_yield:
+            break
         if matching_scene_only:
             try:
                 preview = json.loads(path.read_text(encoding="utf-8"))
@@ -1462,6 +1589,15 @@ def process_pending(scene, *, matching_scene_only=False):
                 result["mac"] = _sign_message(result, bridge_secret)
                 atomic_json(responses / (request_id + ".json"), result)
             processed += 1
+            if authenticated and any(
+                str(item.get("name")) in YIELDING_OPERATIONS for item in request.get("operations") or []
+            ):
+                must_yield = True
+            # A request may change the active scene (open/new/rollback), so the
+            # scene filter is re-evaluated for the remaining queue entries.
+            scene = _scene_view() or scene
+            if matching_scene_only:
+                active_scene_id = scene_state(scene).get("scene_id")
         finally:
             claimed.unlink(missing_ok=True)
-    return processed
+    return processed, must_yield

@@ -8,7 +8,7 @@ from ..handler_registry import handler
 from ..log_safety import LOG_LEVELS, MAX_LOG_SCAN_BYTES, read_bounded_log_lines, summarize_log_levels
 
 
-@handler("system.logs")
+@handler("system.logs", postconditions=("bounded_tail",))
 def read_logs(_scene, arguments, _request, _context):
     count = min(500, max(1, int(arguments.get("lines", 200))))
     pattern = str(arguments.get("pattern", ""))
@@ -44,7 +44,12 @@ def read_logs(_scene, arguments, _request, _context):
     }, []
 
 
-@handler("system.view_mode", "system.view_mode_get", "system.view_mode_set")
+@handler(
+    "system.view_mode",
+    "system.view_mode_get",
+    "system.view_mode_set",
+    postconditions=("viewport_mode_equals_request",),
+)
 def view_mode(_scene, arguments, _request, context):
     view_scene = context["scene_view"]()
     if view_scene is None:
@@ -79,6 +84,7 @@ def view_mode(_scene, arguments, _request, context):
     if requested is not None and any(item["mode"].casefold() != enum_name.casefold() for item in rows):
         raise AssertionError("POSTCONDITION_FAILED: viewport mode differs from request")
     return {
+        "observed_postconditions": ["viewport_mode_equals_request"] if requested is not None else [],
         "mode_changed": requested is not None,
         "apply_to_all": apply_to_all,
         "viewports": rows,

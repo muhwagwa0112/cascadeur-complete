@@ -61,7 +61,7 @@ def _generation_state(scene, context):
     }
 
 
-@handler("generation.state")
+@handler("generation.state", postconditions=("generation_precondition_report",))
 def generation_state(scene, _arguments, _request, context):
     return _generation_state(scene, context), []
 
@@ -87,19 +87,19 @@ def _call_generation_action(scene, context, action_id, readiness_key, feature_na
     }, []
 
 
-@handler("generation.inbetweening")
+@handler("generation.inbetweening", postconditions=("scene_revision_changed",))
 def inbetweening(scene, _arguments, _request, context):
     return _call_generation_action(scene, context, "View.Inbetweening_Run", "ready_for_inbetweening", "Inbetweening")
 
 
-@handler("generation.root_motion")
+@handler("generation.root_motion", postconditions=("scene_revision_changed",))
 def root_motion(scene, _arguments, _request, context):
     return _call_generation_action(
         scene, context, "View.Inbetweening_RunRootMotion", "ready_for_root_motion", "Root Motion"
     )
 
 
-@handler("generation.unbaking")
+@handler("generation.unbaking", postconditions=("scene_revision_changed",))
 def unbaking(scene, arguments, _request, context):
     step = str(arguments.get("step", "adjust_keys_and_interpolation"))
     actions = {
@@ -112,7 +112,7 @@ def unbaking(scene, arguments, _request, context):
     return _call_generation_action(scene, context, actions[step], "ready_for_unbaking", "Animation Unbaking")
 
 
-@handler("generation.auto_posing")
+@handler("generation.auto_posing", postconditions=("scene_revision_changed",))
 def auto_posing(scene, arguments, _request, context):
     action = str(arguments.get("action", "update"))
     if action not in ("add", "update"):

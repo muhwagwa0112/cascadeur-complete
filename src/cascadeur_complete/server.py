@@ -8,7 +8,7 @@ from typing import Any, Literal
 from mcp.server import MCPServer
 
 from .models import ErrorCode, ExecutionMode, ResultEnvelope
-from .service import CascadeurService
+from .service import CascadeurService, ui_file_flow_arguments
 
 mcp = MCPServer(
     "cascadeur-complete",
@@ -282,10 +282,10 @@ def selection_edit(
 
 @mcp.tool()
 def object_delete_prepare(ids: list[str], ttl_seconds: float = 300) -> dict[str, Any]:
-    """Return the exact UI-only gate for deletion until a verified adapter exists."""
+    """Snapshot and prepare deletion of exact objects (constraints are cleaned like the Delete command)."""
     if not ids:
         return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "ids cannot be empty"}
-    return service().prepare_change("object_delete", "object.delete", {"ids": ids}, ttl_seconds)
+    return service().prepare_change("object_delete", "objects.delete", {"ids": ids}, ttl_seconds)
 
 
 @mcp.tool()
@@ -353,11 +353,12 @@ def object_write(
     if position is not None:
         arguments["position"] = position
     arguments["size"] = size
+    operation = {"delete": "objects.delete", "duplicate": "objects.duplicate"}.get(action, f"object.{action}")
     return (
         service()
         .execute(
             feature_id,
-            f"object.{action}",
+            operation,
             arguments,
             scene_id=scene_id,
             expected_revision=expected_revision,
@@ -403,6 +404,37 @@ def change_prepare(
 
 
 @mcp.tool()
+def feature_prepare(
+    feature_id: str, arguments: dict[str, Any] | None = None, ttl_seconds: float = 300
+) -> dict[str, Any]:
+    """Snapshot and prepare any adapter-bound feature by id; see feature_describe for its arguments."""
+    svc = service()
+    try:
+        feature = svc.feature(feature_id)
+    except KeyError:
+        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "Unknown feature id"}
+    if not feature.adapter_id:
+        return {
+            "ok": False,
+            "feature_id": feature_id,
+            "error_code": ErrorCode.INVALID_REQUEST,
+            "error_message": f"{feature_id} has no dedicated adapter (state: {feature.state.value})",
+        }
+    return svc.prepare_change(feature_id, feature.route, dict(arguments or {}), ttl_seconds)
+
+
+@mcp.tool()
+def feature_read(feature_id: str, arguments: dict[str, Any] | None = None, timeout: float = 60) -> dict[str, Any]:
+    """Run a read-only adapter-bound feature by id (mutating features must use feature_prepare)."""
+    svc = service()
+    try:
+        feature = svc.feature(feature_id)
+    except KeyError:
+        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "Unknown feature id"}
+    return svc.execute(feature_id, feature.route, dict(arguments or {}), timeout=timeout).model_dump(mode="json")
+
+
+@mcp.tool()
 def change_commit(confirmation_token: str, timeout: float = 120) -> dict[str, Any]:
     """Commit exactly the prepared operation if scene revision and selection still match."""
     return service().commit_change(confirmation_token, timeout).model_dump(mode="json")
@@ -436,56 +468,11 @@ def scene_exchange_prepare(
     ttl_seconds: float = 300,
 ) -> dict[str, Any]:
     """Prepare a protected USD/GLB/GLTF/VRM file flow using exact 2026.1 action and dialog IDs."""
-    suffix = "." + format
-    if not path.casefold().endswith(suffix):
-        return {
-            "ok": False,
-            "error_code": ErrorCode.INVALID_REQUEST,
-            "error_message": f"{format} path must end with {suffix}",
-        }
-    if format == "vrm" and direction == "export":
-        return {
-            "ok": False,
-            "error_code": ErrorCode.INVALID_REQUEST,
-            "error_message": "Cascadeur 2026.1.2 exposes VRM import but no VRM export action",
-        }
-    if format == "usd":
-        allowed = {"import": {"animation", "model", "scene"}, "export": {"model", "scene"}}[direction]
-        if preset not in allowed:
-            return {
-                "ok": False,
-                "error_code": ErrorCode.INVALID_REQUEST,
-                "error_message": f"USD {direction} supports presets: {', '.join(sorted(allowed))}",
-            }
-        action_id = f"File.{direction.title()}.{preset.title()}.Usd..."
-        feature_id = f"{direction}_usd"
-        dialog_title = f"{direction.title()}. preset: {preset}"
-        options_title = None
-        options_accept_title = None
-        file_type_extension = None
-    else:
-        action_id = "File.Import.Glb" if direction == "import" else "File.Export.Glb"
-        feature_id = f"{direction}_{format}"
-        dialog_title = f"{direction.title()}. preset: default"
-        options_title = "Glb/Gltf/Vrm(a) Import" if direction == "import" else "Glb/Gltf Export"
-        options_accept_title = direction.title()
-        file_type_extension = None if format == "glb" else suffix
-    return service().prepare_change(
-        feature_id,
-        "system.ui_file_flow",
-        {
-            "action_id": action_id,
-            "path": path,
-            "dialog_title": dialog_title,
-            "options_title": options_title,
-            "options_accept_title": options_accept_title,
-            "file_type_extension": file_type_extension,
-            "input": direction == "import",
-            "output": direction == "export",
-            "allow_overwrite": allow_overwrite,
-        },
-        ttl_seconds,
-    )
+    try:
+        feature_id, arguments = ui_file_flow_arguments(direction, format, path, preset, allow_overwrite)
+    except ValueError as exc:
+        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": str(exc)}
+    return service().prepare_change(feature_id, "system.ui_file_flow", arguments, ttl_seconds)
 
 
 @mcp.tool()

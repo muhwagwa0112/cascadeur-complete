@@ -5,7 +5,18 @@ from pathlib import Path
 from ..handler_registry import handler
 
 
-@handler("render.camera_create", "render.camera_aim", "render.light_point", "render.light_spot")
+@handler(
+    "render.camera_create",
+    "render.camera_aim",
+    "render.light_point",
+    "render.light_spot",
+    postconditions={
+        "render.camera_create": ("new_camera_objects",),
+        "render.camera_aim": ("new_camera_rig_objects",),
+        "render.light_point": ("point_light_count_increased",),
+        "render.light_spot": ("spot_light_count_increased",),
+    },
+)
 def create_render_object(scene, _arguments, request, context):
     operation = str((request.get("operations") or [{}])[0].get("name", ""))
     runners = {
@@ -68,7 +79,7 @@ def _viewport_row(viewport, active, context):
     }
 
 
-@handler("render.viewport_state")
+@handler("render.viewport_state", postconditions=("viewport_payload",))
 def viewport_state(_scene, _arguments, _request, context):
     view_scene = context["scene_view"]()
     active = view_scene.active_viewport()
@@ -76,7 +87,7 @@ def viewport_state(_scene, _arguments, _request, context):
     return {"viewports": rows, "count": len(rows)}, []
 
 
-@handler("render.camera_catalog")
+@handler("render.camera_catalog", postconditions=("camera_payload",))
 def camera_catalog(_scene, _arguments, _request, context):
     view_scene = context["scene_view"]()
     active_viewport = view_scene.active_viewport()
@@ -93,7 +104,7 @@ def camera_catalog(_scene, _arguments, _request, context):
     return {"cameras": rows}, []
 
 
-@handler("render.camera_view")
+@handler("render.camera_view", postconditions=("camera_equals_requested",))
 def camera_view(_scene, arguments, _request, context):
     view_scene = context["scene_view"]()
     viewport = view_scene.active_viewport()
@@ -124,7 +135,7 @@ def camera_view(_scene, arguments, _request, context):
     return observed, []
 
 
-@handler("render.camera_activate")
+@handler("render.camera_activate", postconditions=("camera_active",))
 def camera_activate(_scene, arguments, _request, context):
     view_scene = context["scene_view"]()
     viewport = view_scene.active_viewport()

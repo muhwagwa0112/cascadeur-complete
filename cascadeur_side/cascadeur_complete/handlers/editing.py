@@ -83,7 +83,7 @@ def _select_interval(domain, layer_ids, first, last, context):
     return observed
 
 
-@handler("editing.mirror")
+@handler("editing.mirror", postconditions=("target_transform_fingerprint_changed",))
 def mirror(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
     model = domain.model_viewer()

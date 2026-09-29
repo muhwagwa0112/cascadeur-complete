@@ -1,6 +1,6 @@
 # Public MCP Tool Routing
 
-This catalog mirrors the 70 production tools in the `cascadeur-complete` MCP contract. Prefer the most specific tool in the relevant row. Capability and scene state still determine whether a listed tool can execute. Generic csc/tool/Python execution, runtime tool introspection, and arbitrary settings reads are compiled out of release builds.
+This catalog mirrors the 72 production tools in the `cascadeur-complete` MCP contract. Prefer the most specific tool in the relevant row. Capability and scene state still determine whether a listed tool can execute. Generic csc/tool/Python execution, runtime tool introspection, and arbitrary settings reads are compiled out of release builds.
 
 <!-- MCP-TOOLS-START -->
 
@@ -10,6 +10,7 @@ This catalog mirrors the 70 production tools in the `cascadeur-complete` MCP con
 | Persistent jobs | Submit, inspect, cancel, or retry retained non-destructive work | `job_submit`, `job_status`, `job_cancel`, `job_retry` |
 | Scene and object context | Scene summary, paginated objects, selection, object reads/writes, one-entry batching | `scene_summary`, `scene_objects`, `selection_edit`, `object_delete_prepare`, `object_read`, `object_write`, `operation_batch` |
 | Protection and recovery | Snapshot/dry-run, commit/cancel/two-step rollback, exact UI file-flow preparation | `change_prepare`, `change_commit`, `change_cancel`, `change_rollback_prepare`, `change_rollback`, `scene_exchange_prepare`, `ui_flow_prepare` |
+| Adapter-bound features | Prepare or read any feature that has a dedicated adapter, using the argument contract from `feature_describe` | `feature_prepare`, `feature_read` |
 | Scene files and interchange | CASC lifecycle and registered import/export routes | `scene_file`, `io_transfer` |
 | Timeline and animation | Playhead, transforms, layers, keys, curves, and interval selection | `timeline_set_frame`, `timeline_get`, `transform_edit`, `layer_list`, `layer_write`, `key_edit`, `animation_curve`, `timeline_select_interval` |
 | Camera and render | Camera/view state, protected camera/light creation, file output | `viewport_camera`, `render_object_create_prepare`, `render_output` |
@@ -34,6 +35,10 @@ Use `scene_summary`, `scene_objects`, `object_read`, `timeline_get`, `layer_list
 ### Make an ordinary revision-checked edit
 
 Use `selection_edit`, `timeline_set_frame`, `transform_edit`, non-destructive `layer_write`/`key_edit`/`animation_curve` actions, camera updates, or `auto_physics_enable`. Pass the latest scene identity/revision and re-read after success.
+
+### Use an adapter-bound feature
+
+`feature_describe(feature_id)` returns `arguments` (what to pass) and `fixed_arguments` (what the feature pins, e.g. `hinge_union` fixes `action="union"`). Mutating features go through `feature_prepare(feature_id, arguments)` followed by `change_commit(token)`; read-only features use `feature_read`. Passing a conflicting value for a fixed argument is rejected.
 
 ### Make a protected change
 

@@ -1,5 +1,6 @@
 from . import (  # noqa: F401
     animation,
+    behaviours,
     editing,
     generation,
     io,
@@ -7,14 +8,17 @@ from . import (  # noqa: F401
     objects,
     physics,
     render,
+    rig_prototypes,
     rigging,
     scene,
     system,
     timeline,
+    timeline_edit,
 )
 
 __all__ = [
     "animation",
+    "behaviours",
     "editing",
     "generation",
     "io",
@@ -22,8 +26,10 @@ __all__ = [
     "objects",
     "physics",
     "render",
+    "rig_prototypes",
     "rigging",
     "scene",
     "system",
     "timeline",
+    "timeline_edit",
 ]

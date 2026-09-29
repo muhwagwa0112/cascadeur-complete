@@ -60,15 +60,28 @@ def _property_value(behaviour_viewer, behaviour_id, property_name, property_type
         return {"unreadable": True, "error": str(exc)}
 
 
-@handler("object.hierarchy")
+@handler("object.hierarchy", postconditions=("acyclic_parent_graph",))
 def hierarchy(scene, _arguments, _request, context):
     domain = context["domain_scene"](scene)
     rows = _hierarchy(domain, context)
+    parents = {item["id"]: item["parent_id"] for item in rows}
+    for start in parents:
+        seen = set()
+        current = start
+        while current is not None:
+            if current in seen:
+                raise AssertionError("POSTCONDITION_FAILED: parent graph contains a cycle at " + start)
+            seen.add(current)
+            current = parents.get(current)
     roots = [item["id"] for item in rows if item["parent_id"] is None]
     return {"roots": roots, "items": rows}, []
 
 
-@handler("object.properties", "object.behaviors")
+@handler(
+    "object.properties",
+    "object.behaviors",
+    postconditions={"object.properties": ("object_metadata",), "object.behaviors": ("behavior_schema",)},
+)
 def object_details(scene, arguments, request, context):
     domain = context["domain_scene"](scene)
     viewer = domain.model_viewer()
@@ -120,7 +133,7 @@ def object_details(scene, arguments, request, context):
     return {"items": rows, "include_values": include_values, "operation": request.get("feature_id")}, []
 
 
-@handler("object.rename")
+@handler("object.rename", postconditions=("name_equals_requested",))
 def rename_object(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
     object_id = context["object_id"](arguments["id"])
@@ -136,10 +149,19 @@ def rename_object(scene, arguments, _request, context):
     return {"id": str(arguments["id"]), "name": observed}, []
 
 
-@handler("object.parent", "object.unparent")
-def reparent_objects(scene, arguments, _request, context):
+@handler(
+    "object.parent",
+    "object.unparent",
+    postconditions={"object.parent": ("parent_equals_requested",), "object.unparent": ("parent_is_null",)},
+)
+def reparent_objects(scene, arguments, request, context):
     import common.hierarchy as hierarchy
 
+    operation = str((request.get("operations") or [{}])[0].get("name", ""))
+    if operation == "object.parent" and not arguments.get("parent_id"):
+        raise ValueError("object.parent requires parent_id; use object.unparent to clear parents")
+    if operation == "object.unparent" and arguments.get("parent_id"):
+        raise ValueError("object.unparent does not accept parent_id")
     domain = context["domain_scene"](scene)
     children = [context["object_id"](item) for item in arguments.get("ids", [])]
     if not children:
@@ -158,7 +180,7 @@ def reparent_objects(scene, arguments, _request, context):
     return {"parent_id": expected, "objects": observed}, []
 
 
-@handler("object.create")
+@handler("object.create", postconditions=("object_present",))
 def create_object(scene, arguments, _request, context):
     import samples.model_cube as model_cube
 

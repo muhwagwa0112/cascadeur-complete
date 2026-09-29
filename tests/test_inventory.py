@@ -25,7 +25,7 @@ def test_installed_inventory_matches_baseline_counts():
 def test_product_catalog_core_matches_registry_contract():
     assert PRODUCT_CATALOG.product_version == "2026.1.2"
     assert PRODUCT_CATALOG.supported_build == SUPPORTED_BUILD
-    assert len(PRODUCT_CATALOG.core_features) == 153
+    assert len(PRODUCT_CATALOG.core_features) == 194
     assert {item.id for item in PRODUCT_CATALOG.core_features} == {
         spec.feature_id for spec in __import__(
             "cascadeur_complete.feature_registry", fromlist=["CORE_FEATURES"]
@@ -46,7 +46,7 @@ def test_product_catalog_core_matches_registry_contract():
 def test_implemented_features_reference_real_test_nodes():
     root = __import__("pathlib").Path(__file__).parents[1]
     implemented = [item for item in PRODUCT_CATALOG.core_features if item.implementation_status == "implemented"]
-    assert len(implemented) == 106
+    assert len(implemented) == 166
     for feature in implemented:
         assert feature.adapter_id
         assert feature.postconditions
@@ -59,7 +59,7 @@ def test_implemented_features_reference_real_test_nodes():
 
 def test_official_documentation_gaps_are_explicit():
     gaps = PRODUCT_CATALOG.official_gaps
-    assert len(gaps) == 70
+    assert len(gaps) == 29
     assert all(item.implementation_status == "not_implemented" for item in gaps)
     assert all(item.route is None and item.adapter_id is None for item in gaps)
     assert {
@@ -68,7 +68,6 @@ def test_official_documentation_gaps_are_explicit():
         "official_gap.node_editor",
         "official_gap.ballistic_ghosts",
         "official_gap.open_autosave",
-        "official_gap.rig_json_import",
         "official_gap.filament_environment_map",
     } <= {item.id for item in gaps}
 
@@ -161,12 +160,12 @@ def test_registry_json_uses_schema_v3_and_reports_truth_layer_gaps():
         "product_version": "2026.1.2",
         "supported_build": "2026.1.2.0.15343",
         "feature_count": 223,
-        "core_feature_count": 153,
-        "official_gap_count": 70,
+        "core_feature_count": 194,
+        "official_gap_count": 29,
     }
-    # 70 official documentation gaps plus 38 legacy core entries that have
+    # Official documentation gaps plus legacy UI-only core entries that have
     # neither an adapter nor an explicit gate evidence record.
-    assert payload["unclassified_count"] == 108
+    assert payload["unclassified_count"] == 45
 
 
 def test_wrong_build_marks_product_and_discovered_inventory_unsupported():

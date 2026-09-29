@@ -10,7 +10,7 @@ def _fbx_loader(context):
     return tool.get_fbx_loader(context["scene_view"]())
 
 
-@handler("io.import_dae")
+@handler("io.import_dae", postconditions=("scene_changed", "new_objects"))
 def import_dae(scene, arguments, _request, context):
     path = Path(str(arguments["path"]))
     if path.suffix.casefold() != ".dae":
@@ -44,12 +44,12 @@ def export_dae(_scene, arguments, _request, context):
     if path.suffix.casefold() != ".dae":
         raise ValueError("DAE export requires a .dae destination")
     result = _fbx_loader(context).export_all_objects(str(path).replace("\\", "/"))
-    if not path.is_file() or path.stat().st_size <= 0:
-        raise AssertionError("POSTCONDITION_FAILED: DAE output was not created")
-    return {"path": str(path), "bytes": path.stat().st_size, "return_value": context["json_safe"](result)}, []
+    # The file can appear after the loader returns; the host waits for a stable
+    # non-empty output and owns the output postconditions.
+    return {"path": str(path), "exists_on_return": path.is_file(), "return_value": context["json_safe"](result)}, []
 
 
-@handler("io.import_audio")
+@handler("io.import_audio", postconditions=("audio_behaviour_count_increased",))
 def import_audio(scene, arguments, _request, context):
     from add_function.topology_add import add_audio
 

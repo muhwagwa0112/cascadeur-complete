@@ -5,8 +5,14 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from .adapter_bindings import BINDINGS, BY_OPERATION
+from .build_profile import DEVELOPER_BUILD
 from .models import CapabilityState, ExecutionMode, FeatureRecord, VerificationState
 from .product_catalog import PRODUCT_CATALOG, ProductFeature
+
+# Generic csc/Python execution is compiled out of release builds; these rows are
+# gated by the developer build policy rather than implemented for production.
+DEVELOPER_POLICY = "Developer build with local developer_mode and generic_api policy"
 
 
 @dataclass(frozen=True)
@@ -256,6 +262,11 @@ csc_query|CSC_query|system.csc_query csc_mutate|CSC_mutate|system.csc_mutate
 developer_execute_python|Developer_Python|system.developer_execute_python
 """,
         destructive={"action_invoke", "csc_mutate"},
+        dependencies={
+            "csc_query": DEVELOPER_POLICY,
+            "csc_mutate": DEVELOPER_POLICY,
+            "developer_execute_python": DEVELOPER_POLICY,
+        },
         no_scene={
             "settings_get",
             "settings_set",
@@ -266,6 +277,31 @@ developer_execute_python|Developer_Python|system.developer_execute_python
         },
     )
 )
+
+
+def _binding_specs(specs: list[CoreSpec]) -> tuple[CoreSpec, ...]:
+    """Apply dedicated adapter bindings on top of the legacy core table."""
+    by_id = {spec.feature_id: spec for spec in specs}
+    for binding in BINDINGS:
+        product = PRODUCT_CATALOG.by_id.get(binding.feature_id)
+        legacy = by_id.get(binding.feature_id)
+        if legacy is None and product is None:
+            continue
+        by_id[binding.feature_id] = CoreSpec(
+            family=legacy.family if legacy else product.family,
+            feature_id=binding.feature_id,
+            name=legacy.name if legacy else product.name,
+            route=binding.operation,
+            mode=binding.mode,
+            requires_scene=binding.requires_scene,
+            destructive=binding.mutation,
+            license=legacy.license if legacy else product.license,
+            dependency=legacy.dependency if legacy else product.dependency,
+        )
+    return tuple(by_id.values())
+
+
+CORE_FEATURES = _binding_specs(list(CORE_FEATURES))
 
 
 @dataclass(frozen=True)
@@ -577,6 +613,10 @@ ADAPTER_SPECS = dict(
         _adapter("system.csc_mutate", postconditions=("registered_mutation", "scene_revision_changed")),
         _adapter("system.developer_execute_python", postconditions=("policy_enabled",)),
     ]
+    + [
+        _adapter(operation, postconditions=bindings[0].postconditions, mode=bindings[0].mode)
+        for operation, bindings in sorted(BY_OPERATION.items())
+    ]
 )
 
 
@@ -601,8 +641,8 @@ def _record(
         spec.route.startswith("command.") and spec.route.removeprefix("command.") not in available_commands
     )
     dependency = spec.dependency
-    if spec.feature_id == "developer_execute_python" and not developer_enabled:
-        dependency = "Local policy developer_execute_python=true"
+    if spec.feature_id == "developer_execute_python" and developer_enabled and DEVELOPER_BUILD:
+        dependency = None
     if version_name != PRODUCT_CATALOG.supported_build or spec.feature_id == "export_vrm":
         state = CapabilityState.UNSUPPORTED_VERSION
         mode = ExecutionMode.GATED
@@ -614,7 +654,7 @@ def _record(
         mode = ExecutionMode.GATED
     elif dependency:
         state = CapabilityState.MISSING_DEPENDENCY
-        mode = ExecutionMode.GATED if spec.feature_id == "developer_execute_python" else ExecutionMode.EXTERNAL
+        mode = ExecutionMode.GATED if dependency == DEVELOPER_POLICY else ExecutionMode.EXTERNAL
     elif adapter and (not adapter.requires_live or spec.feature_id in verified_features):
         state = (
             CapabilityState.NEEDS_SCENE if spec.requires_scene and not scene_available else CapabilityState.AVAILABLE
@@ -681,6 +721,8 @@ def _record(
         public_action=product.action if product else None,
         operation_id=product.operation if product else None,
         fixture_id=product.fixture_id if product else None,
+        arguments=dict(product.arguments) if product else {},
+        fixed_arguments=dict(product.fixed_arguments) if product else {},
         mutation=product.mutation if product else spec.destructive,
         contract_status=(
             "bound"

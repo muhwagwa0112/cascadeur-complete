@@ -113,6 +113,49 @@ def cascadeur_window_titles() -> list[str]:
     return titles
 
 
+def active_scene_title() -> str | None:
+    """Return the scene path/name shown by the main Cascadeur window title."""
+    titles = cascadeur_window_titles()
+    if not titles:
+        return None
+    suffix = " - Cascadeur"
+    title = max(titles, key=len)
+    if title.strip().casefold() == "cascadeur":
+        return ""  # an untitled scene (or the home screen) shows no document label
+    if not title.endswith(suffix):
+        return None
+    return title[: -len(suffix)].lstrip("*").strip()
+
+
+def cycle_scene_tab() -> None:
+    """Select the next scene tab through the UI (Ctrl+Tab).
+
+    Cascadeur's tab bar re-asserts its own selection after a Python command
+    returns, so an activation made through SceneManager inside a command does
+    not persist. A UI-level chord changes the tab bar selection itself.
+    """
+    import ctypes
+
+    handles = _native_cascadeur_handles()
+    if not handles:
+        raise UIAutomationError("No visible Cascadeur window", not_running=True)
+    user32 = ctypes.windll.user32
+    handle = max(handles, key=lambda item: user32.GetWindowTextLengthW(item))
+    for _attempt in range(3):
+        user32.ShowWindow(handle, 9)  # SW_RESTORE
+        user32.BringWindowToTop(handle)
+        user32.SetForegroundWindow(handle)
+        time.sleep(0.3)
+        if int(user32.GetForegroundWindow()) == handle:
+            break
+    else:
+        raise UIAutomationError("Cascadeur could not become the foreground window")
+    user32.keybd_event(0x11, 0, 0, 0)  # VK_CONTROL down
+    user32.keybd_event(0x09, 0, 0, 0)  # VK_TAB down
+    user32.keybd_event(0x09, 0, 0x0002, 0)
+    user32.keybd_event(0x11, 0, 0x0002, 0)
+
+
 def _active_tab_span(pixels: list[tuple[int, int, int]]) -> tuple[int, int] | None:
     """Locate Cascadeur 2026.1's active scene-tab background in a screen row."""
     indices = [index for index, (red, green, blue) in enumerate(pixels) if red == green == blue and 56 <= red <= 64]

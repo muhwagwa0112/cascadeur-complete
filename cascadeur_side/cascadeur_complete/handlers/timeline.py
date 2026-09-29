@@ -3,7 +3,7 @@ from __future__ import annotations
 from ..handler_registry import handler
 
 
-@handler("timeline.range")
+@handler("timeline.range", postconditions=("selected_interval_equals_requested",))
 def select_interval(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
     viewer = domain.layers_viewer()

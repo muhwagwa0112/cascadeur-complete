@@ -89,7 +89,7 @@ def _cycle_layers(domain, requested, context):
     return layer_ids
 
 
-@handler("animation.cycle_query")
+@handler("animation.cycle_query", postconditions=("normalized_cycle_catalog",))
 def cycle_query(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
     viewer = domain.layers_viewer()
@@ -106,19 +106,31 @@ def cycle_query(scene, arguments, _request, context):
     return {"cycles": rows, "count": len(rows), "first_frame": first, "last_frame": last}, []
 
 
-@handler("animation.graph_query")
+@handler("animation.graph_query", postconditions=("section_payload",))
 def graph_query(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
     rows = _sections(domain, arguments, context)
     return {"sections": rows, "count": len(rows)}, []
 
 
-@handler("animation.interpolation_set", "animation.tangent_set")
-def edit_section(scene, arguments, _request, context):
+@handler(
+    "animation.interpolation_set",
+    "animation.tangent_set",
+    postconditions={
+        "animation.interpolation_set": ("interpolation_equals_requested",),
+        "animation.tangent_set": ("tangent_mode_equals_requested",),
+    },
+)
+def edit_section(scene, arguments, request, context):
     domain = context["domain_scene"](scene)
     layer_id = context["guid"](arguments["layer_id"])
     frame = int(arguments["frame"])
     operation = str(arguments["operation"])
+    bound = {"animation.interpolation_set": "interpolation", "animation.tangent_set": "tangent"}.get(
+        str((request.get("operations") or [{}])[0].get("name", ""))
+    )
+    if bound is not None and operation != bound:
+        raise ValueError("operation argument " + operation + " does not match the requested bridge operation")
     requested = str(arguments["value"])
     if operation == "interpolation":
         enum_class = context["csc"].layers.layer.Interpolation
@@ -152,7 +164,7 @@ def edit_section(scene, arguments, _request, context):
     return observed, []
 
 
-@handler("animation.key_reduce")
+@handler("animation.key_reduce", postconditions=("observed_keys_equal_reduction_plan",))
 def key_reduce(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
     viewer = domain.layers_viewer()

@@ -39,6 +39,8 @@ class ProductFeature:
     live_test_id: str | None
     fixture_id: str | None
     since: str
+    arguments: tuple[tuple[str, str], ...] = ()
+    fixed_arguments: tuple[tuple[str, Any], ...] = ()
 
     @classmethod
     def from_json(cls, value: dict[str, Any]) -> ProductFeature:
@@ -63,6 +65,8 @@ class ProductFeature:
             live_test_id=value.get("live_test_id"),
             fixture_id=value.get("fixture_id"),
             since=value.get("since", "2026.1"),
+            arguments=tuple(sorted((value.get("arguments") or {}).items())),
+            fixed_arguments=tuple(sorted((value.get("fixed_arguments") or {}).items())),
         )
 
     def binding_material(self) -> dict[str, Any]:
@@ -76,6 +80,7 @@ class ProductFeature:
                 "operation": self.operation,
                 "preconditions": self.preconditions,
                 "postconditions": self.postconditions,
+                "fixed_arguments": [list(item) for item in self.fixed_arguments],
             },
             "tests": self.contract_test_ids + ((self.live_test_id,) if self.live_test_id else ()),
             "fixture": self.fixture_id,

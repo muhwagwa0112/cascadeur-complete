@@ -102,12 +102,12 @@ def _select_objects(domain, object_ids, context, label):
     return converted
 
 
-@handler("physics.state")
+@handler("physics.state", postconditions=("physics_inventory",))
 def physics_state(scene, _arguments, _request, context):
     return _physics_state(scene, context), []
 
 
-@handler("rig.mass_set", "physics.mass_set")
+@handler("rig.mass_set", "physics.mass_set", postconditions=("total_mass_equals_requested",))
 def physics_mass_set(scene, arguments, _request, context):
     requested_total = float(arguments["total_mass"])
     if requested_total <= 0:
@@ -162,7 +162,7 @@ def physics_mass_set(scene, arguments, _request, context):
     }, []
 
 
-@handler("physics.ballistic")
+@handler("physics.ballistic", postconditions=("persisted_ballistic_count_increased",))
 def ballistic(scene, arguments, _request, context):
     view_scene = context["scene_view"]()
     if view_scene is None:
@@ -217,7 +217,7 @@ def ballistic(scene, arguments, _request, context):
     }, []
 
 
-@handler("physics.center_of_mass")
+@handler("physics.center_of_mass", postconditions=("center_of_mass_count_increased", "scene_revision_changed"))
 def center_of_mass(scene, arguments, _request, context):
     from commands.center_of_mass import (
         connect_with_controllers,
@@ -250,6 +250,11 @@ def center_of_mass(scene, arguments, _request, context):
     elif before_revision == after_revision:
         raise AssertionError("POSTCONDITION_FAILED: Center of Mass operation made no scene change")
     return {
+        "observed_postconditions": (
+            ["center_of_mass_count_increased"]
+            if mode in ("from_rigids", "composite")
+            else ["scene_revision_changed"]
+        ),
         "mode": mode,
         "execution": "commands.center_of_mass." + commands[mode].__name__.rsplit(".", 1)[-1] + ".run",
         "before_center_of_mass_ids": before["center_of_mass_ids"],
@@ -259,7 +264,7 @@ def center_of_mass(scene, arguments, _request, context):
     }, []
 
 
-@handler("physics.collision_create")
+@handler("physics.collision_create", postconditions=("collision_count_increased",))
 def collision_create(scene, arguments, _request, context):
     shape = str(arguments.get("shape", "box"))
     behaviour_by_shape = {
@@ -331,7 +336,7 @@ def collision_create(scene, arguments, _request, context):
     }, []
 
 
-@handler("physics.collision_delete")
+@handler("physics.collision_delete", postconditions=("target_collision_behaviours_absent",))
 def collision_delete(scene, arguments, _request, context):
     from commands.collision import delete_selected
 
@@ -380,7 +385,7 @@ def collision_delete(scene, arguments, _request, context):
     }, []
 
 
-@handler("physics.constraint_transform")
+@handler("physics.constraint_transform", postconditions=("constraint_count_increased",))
 def constraint_transform(scene, arguments, _request, context):
     from common.constraints.transform_constraints import constrain_ortho_transform
 
@@ -404,7 +409,7 @@ def constraint_transform(scene, arguments, _request, context):
 
     domain.modify_with_session("Cascadeur Complete: transform constraint", add_constraint)
     after_count = len(_behaviour_ids(behaviours, "TransformConstraint")[0])
-    if after_count <= before_count and not created:
+    if after_count <= before_count or not created:
         raise AssertionError("POSTCONDITION_FAILED: transform constraint was not created")
     return {
         "driver_id": str(arguments["driver_id"]),
@@ -415,7 +420,7 @@ def constraint_transform(scene, arguments, _request, context):
     }, []
 
 
-@handler("physics.constraint_point")
+@handler("physics.constraint_point", postconditions=("constraint_count_increased",))
 def constraint_point(scene, arguments, _request, context):
     from commands.constrain.add_constraint import (
         constrain_single_point,
@@ -538,12 +543,12 @@ def _auto_physics_state(scene, context):
     }
 
 
-@handler("physics.auto_state")
+@handler("physics.auto_state", postconditions=("autophysics_prerequisite_report",))
 def auto_physics_state(scene, _arguments, _request, context):
     return _auto_physics_state(scene, context), []
 
 
-@handler("physics.auto_enable")
+@handler("physics.auto_enable", postconditions=("physics_assistant_action_dispatched",))
 def auto_physics_enable(scene, _arguments, _request, context):
     state = _auto_physics_state(scene, context)
     if not state["ready_to_enable"]:
@@ -568,7 +573,7 @@ def auto_physics_enable(scene, _arguments, _request, context):
     }, ["Cascadeur does not expose the internal working AutoPhysics flag; wait for the assistant to recalculate"]
 
 
-@handler("physics.auto_snap")
+@handler("physics.auto_snap", postconditions=("scene_revision_changed",))
 def auto_physics_snap(scene, _arguments, _request, context):
     prerequisite = _auto_physics_state(scene, context)
     if not prerequisite["ready_to_enable"]:
@@ -582,6 +587,7 @@ def auto_physics_snap(scene, _arguments, _request, context):
     after = context["scene_state"](context["scene_view"]() or scene)
     completed_synchronously = before["revision"] != after["revision"]
     return {
+        "observed_postconditions": ["scene_revision_changed"] if completed_synchronously else [],
         "action_id": "AutoPhysicsTool.Snap to Auto Physics",
         "return_value": context["json_safe"](result),
         "prerequisite": prerequisite,

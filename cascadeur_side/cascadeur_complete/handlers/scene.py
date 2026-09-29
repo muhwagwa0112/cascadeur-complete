@@ -69,12 +69,12 @@ def _find_tab(context, tab_id):
     return None
 
 
-@handler("scene.list")
+@handler("scene.list", postconditions=("tab_catalog",))
 def list_scenes(_scene, _arguments, _request, context):
     return [_public_tab(item) for item in _tabs(context)], []
 
 
-@handler("scene.activate")
+@handler("scene.activate", postconditions=("tab_active",))
 def activate_scene(_scene, arguments, _request, context):
     target = _find_tab(context, arguments.get("tab_id"))
     if target is None:
@@ -87,30 +87,41 @@ def activate_scene(_scene, arguments, _request, context):
     return _public_tab(observed), []
 
 
-@handler("scene.close")
+@handler("scene.new", postconditions=("new_scene_identity",))
+def new_scene(_scene, _arguments, _request, context):
+    manager = context["csc"].app.get_application().get_scene_manager()
+    before = {item["tab_id"] for item in _tabs(context)}
+    created = manager.create_application_scene()
+    if created is not None:
+        manager.set_current_scene(created)
+    tabs = _tabs(context)
+    added = [item for item in tabs if item["tab_id"] not in before]
+    if len(added) != 1:
+        raise AssertionError("POSTCONDITION_FAILED: exactly one new scene tab was not created")
+    state = context["scene_state"](added[0]["scene"])
+    if not state.get("scene_id"):
+        raise AssertionError("POSTCONDITION_FAILED: new scene has no identity")
+    return {**_public_tab(added[0]), "scene_id": state["scene_id"], "tab_count": len(tabs)}, []
+
+
+@handler("scene.close", postconditions=("tab_absent",))
 def close_scene(_scene, arguments, _request, context):
     target = _find_tab(context, arguments.get("tab_id"))
     if target is None:
         raise KeyError("Unknown scene tab: " + str(arguments.get("tab_id")))
+    if target["active"]:
+        # Cascadeur's tab bar keeps its own selection while a command runs;
+        # removing the tab it shows terminates the application. Activate
+        # another tab (scene_activate) before closing this one.
+        raise ValueError("The active scene tab cannot be closed; activate another tab first")
     manager = context["csc"].app.get_application().get_scene_manager()
-    replacement = None
-    if target["active"] or len(manager.scenes()) == 1:
-        # Removing the active application scene can terminate Cascadeur even
-        # when SceneManager still reports stale background tabs. Always move
-        # focus to a newly-created replacement before removing an active tab.
-        replacement = manager.create_application_scene()
-        manager.set_current_scene(replacement)
     manager.remove_application_scene(target["scene"])
     if _find_tab(context, target["tab_id"]) is not None:
         raise AssertionError("POSTCONDITION_FAILED: scene tab remains open")
-    return {
-        "tab_id": target["tab_id"],
-        "closed": True,
-        "replacement_tab_id": _tab_identity(replacement) if replacement is not None else None,
-    }, []
+    return {"tab_id": target["tab_id"], "closed": True}, []
 
 
-@handler("scene.save_as")
+@handler("scene.save_as", postconditions=("output_file", "nonzero_bytes"))
 def save_scene_as(_scene, arguments, _request, context):
     destination = Path(str(arguments["path"]))
     normalized = str(destination).replace("\\", "/")
@@ -146,7 +157,7 @@ def save_scene_as(_scene, arguments, _request, context):
     }, []
 
 
-@handler("scene.validate")
+@handler("scene.validate", postconditions=("validation_report",))
 def validate_scene(scene, _arguments, _request, context):
     state = context["scene_state"](scene)
     object_ids = [item["id"] for item in state["objects"]]
@@ -172,3 +183,22 @@ def validate_scene(scene, _arguments, _request, context):
         "scene_id": state["scene_id"],
         "revision": state["revision"],
     }, []
+
+
+@handler("scene.fix", postconditions=("scene_valid_after_fix",))
+def fix_scene(scene, _arguments, _request, context):
+    """Run Cascadeur's Fix Scene repairs and prove the result is stable."""
+    import common.fix_scene as fixer
+
+    domain = context["domain_scene"](scene)
+    before = context["scene_state"](context["scene_view"]() or scene)["revision"]
+    fixer.run(domain)
+    fixed = context["scene_state"](context["scene_view"]() or scene)["revision"]
+    fixer.run(domain)
+    again = context["scene_state"](context["scene_view"]() or scene)["revision"]
+    if fixed != again:
+        raise AssertionError("POSTCONDITION_FAILED: Fix Scene is not idempotent; the scene still needed repairs")
+    report, _warnings = validate_scene(scene, {}, {}, context)
+    if not report["valid"]:
+        raise AssertionError("POSTCONDITION_FAILED: scene validation reports issues after Fix Scene")
+    return {"changed": before != fixed, "before_revision": before, "after_revision": fixed}, []

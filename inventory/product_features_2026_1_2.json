@@ -42,8 +42,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[status]",
+      "fixture_id": "fixture.none",
       "since": "2026.1"
     },
     {
@@ -129,8 +129,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[logs]",
+      "fixture_id": "fixture.none",
       "since": "2026.1"
     },
     {
@@ -158,8 +158,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_validate]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -234,15 +234,16 @@
         "compatible_version"
       ],
       "postconditions": [
-        "new_scene_identity"
+        "new_scene_identity",
+        "stable_scene_path"
       ],
       "adapter_id": "cascadeur_2026_1.scene.new",
       "contract_test_ids": [
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_new]",
+      "fixture_id": "fixture.empty_scene",
       "since": "2026.1"
     },
     {
@@ -270,8 +271,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_open]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -299,8 +300,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_save]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -329,8 +330,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_save_as]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -358,8 +359,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_close]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -387,8 +388,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_list]",
+      "fixture_id": "fixture.none",
       "since": "2026.1"
     },
     {
@@ -409,15 +410,16 @@
         "compatible_version"
       ],
       "postconditions": [
-        "tab_active"
+        "tab_active",
+        "stable_scene_path"
       ],
       "adapter_id": "cascadeur_2026_1.scene.activate",
       "contract_test_ids": [
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_activate]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -445,8 +447,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_summary]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -474,8 +476,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_fbx]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -504,8 +506,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_fbx]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -534,8 +536,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_dae]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -564,8 +566,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_dae]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -594,8 +596,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_usd]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -625,8 +627,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_usd]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -656,8 +658,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_gltf]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -688,8 +690,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_gltf]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -719,8 +721,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_glb]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -751,8 +753,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_glb]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -883,8 +885,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_audio]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -913,8 +915,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_image]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -966,8 +968,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_search]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -995,8 +997,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[selection_get]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1024,8 +1026,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[selection_set]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1053,8 +1055,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[selection_add]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1082,8 +1084,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[selection_remove]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1111,8 +1113,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[selection_filter]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1140,8 +1142,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_create]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1151,22 +1153,31 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.CopierTool",
-      "action": "object_duplicate",
-      "operation": "tool.CopierTool",
+      "route": "objects.duplicate",
+      "action": "objects.duplicate",
+      "operation": "objects.duplicate",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "one_duplicate_created"
+      ],
+      "adapter_id": "cascadeur_2026_1.objects.duplicate",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "id": "object ID"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "object_delete",
@@ -1175,22 +1186,31 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "action.Delete_objects",
-      "action": "object_delete",
-      "operation": "action.Delete_objects",
+      "route": "objects.delete",
+      "action": "objects.delete",
+      "operation": "objects.delete",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "objects_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.objects.delete",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "object_rename",
@@ -1217,8 +1237,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_rename]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1246,8 +1266,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_parent]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1275,8 +1295,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_unparent]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1304,8 +1324,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_hierarchy]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1333,8 +1353,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_properties]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1362,8 +1382,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_behaviors]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1391,8 +1411,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[transform_get]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1420,8 +1440,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[transform_set]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -1605,22 +1625,36 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Timeline",
-      "action": "graph_edit",
-      "operation": "tool.Timeline",
+      "route": "animation.section_edit",
+      "action": "animation.section_edit",
+      "operation": "animation.section_edit",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "section_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.section_edit",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_id": "layer GUID",
+        "frame": "key frame",
+        "interpolation": "optional Interpolation name",
+        "tangents": "optional Tangents name",
+        "ik_fk": "optional IK|FK",
+        "fixation": "optional Free|Fulcrum"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "timeline_get",
@@ -1717,22 +1751,31 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Timeline",
-      "action": "timeline_play",
-      "operation": "tool.Timeline",
+      "route": "timeline.playback",
+      "action": "timeline.playback",
+      "operation": "timeline.playback",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "playback_frames_advance"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.playback",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {
+        "state": "play"
+      }
     },
     {
       "id": "timeline_stop",
@@ -1741,22 +1784,31 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Timeline",
-      "action": "timeline_stop",
-      "operation": "tool.Timeline",
+      "route": "timeline.playback",
+      "action": "timeline.playback",
+      "operation": "timeline.playback",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "playback_frame_stable"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.playback",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {
+        "state": "stop"
+      }
     },
     {
       "id": "layer_list",
@@ -1852,22 +1904,31 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Timeline",
-      "action": "layer_activate",
-      "operation": "tool.Timeline",
+      "route": "layer.activate",
+      "action": "layer.activate",
+      "operation": "layer.activate",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "active_layer_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.layer.activate",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_id": "layer GUID"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "layer_visibility",
@@ -1993,22 +2054,35 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Timeline",
-      "action": "cycle",
-      "operation": "tool.Timeline",
+      "route": "timeline.cycle",
+      "action": "timeline.cycle",
+      "operation": "timeline.cycle",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "cycle_present"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.cycle",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int"
+      },
+      "fixed_arguments": {
+        "action": "create"
+      }
     },
     {
       "id": "stretch",
@@ -2017,22 +2091,34 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Timeline",
-      "action": "stretch",
-      "operation": "tool.Timeline",
+      "route": "timeline.stretch",
+      "action": "timeline.stretch",
+      "operation": "timeline.stretch",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "keys_retimed_to_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.stretch",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int",
+        "new_last_frame": "int"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "bake",
@@ -2041,22 +2127,33 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Timeline",
-      "action": "bake",
-      "operation": "tool.Timeline",
+      "route": "timeline.bake",
+      "action": "timeline.bake",
+      "operation": "timeline.bake",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "every_frame_is_key"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.bake",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "tween",
@@ -2065,22 +2162,33 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Tween",
-      "action": "tween",
-      "operation": "tool.Tween",
+      "route": "editing.tween",
+      "action": "editing.tween",
+      "operation": "editing.tween",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "target_transform_fingerprint_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.editing.tween",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "point/controller IDs",
+        "mode": "Previous|Next|Inertial|InverseInertial|Average",
+        "frame": "int"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "mirror",
@@ -2120,22 +2228,34 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Copier",
-      "action": "copy_animation",
-      "operation": "tool.Copier",
+      "route": "timeline.copy_interval",
+      "action": "timeline.copy_interval",
+      "operation": "timeline.copy_interval",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "destination_keys_match_source"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.copy_interval",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int",
+        "target_frame": "int"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "interval_edit",
@@ -2144,22 +2264,34 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.Timeline",
-      "action": "interval_edit",
-      "operation": "tool.Timeline",
+      "route": "timeline.interval_edit",
+      "action": "timeline.interval_edit",
+      "operation": "timeline.interval_edit",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "frame_count_changed_by_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.interval_edit",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int",
+        "action": "add|remove"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "trajectory",
@@ -2216,22 +2348,34 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.FixFootTool",
-      "action": "fixing",
-      "operation": "tool.FixFootTool",
+      "route": "editing.fix_foot",
+      "action": "editing.fix_foot",
+      "operation": "editing.fix_foot",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.editing.fix_foot",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "IDs",
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "hiding",
@@ -2240,22 +2384,32 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "action.hiding",
-      "action": "hiding",
-      "operation": "action.hiding",
+      "route": "objects.visibility",
+      "action": "objects.visibility",
+      "operation": "objects.visibility",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.objects.visibility",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs",
+        "values": "{\"visibility\": bool}"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "generation_state",
@@ -2487,22 +2641,35 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "action.fulcrum_cleaning",
-      "action": "fulcrum_cleaning",
-      "operation": "action.fulcrum_cleaning",
+      "route": "timeline.fulcrum",
+      "action": "timeline.fulcrum",
+      "operation": "timeline.fulcrum",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "key_fixation_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.fulcrum",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int"
+      },
+      "fixed_arguments": {
+        "state": "Free"
+      }
     },
     {
       "id": "key_reduction",
@@ -2630,22 +2797,35 @@
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": "action.fulcrum",
-      "action": "fulcrum",
-      "operation": "action.fulcrum",
+      "route": "timeline.fulcrum",
+      "action": "timeline.fulcrum",
+      "operation": "timeline.fulcrum",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "key_fixation_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.fulcrum",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int"
+      },
+      "fixed_arguments": {
+        "state": "Fulcrum"
+      }
     },
     {
       "id": "auto_physics_state",
@@ -2743,22 +2923,33 @@
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": "action.ragdoll",
-      "action": "ragdoll",
-      "operation": "action.ragdoll",
+      "route": "physics.ragdoll",
+      "action": "physics.ragdoll",
+      "operation": "physics.ragdoll",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.ragdoll",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}",
+        "add_missing": "bool"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "constraint_point",
@@ -2884,22 +3075,34 @@
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": "tool.FixCollisionsTool",
-      "action": "collision_clean",
-      "operation": "tool.FixCollisionsTool",
+      "route": "physics.fix_collisions",
+      "action": "physics.fix_collisions",
+      "operation": "physics.fix_collisions",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.fix_collisions",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "IDs",
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "penetration_clean",
@@ -2908,22 +3111,32 @@
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": "action.penetration_clean",
-      "action": "penetration_clean",
-      "operation": "action.penetration_clean",
+      "route": "physics.penetration_cleaning",
+      "action": "physics.penetration_cleaning",
+      "operation": "physics.penetration_cleaning",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_presence_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.penetration_cleaning",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "IDs",
+        "enabled": "bool"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "rig_state",
@@ -3079,22 +3292,31 @@
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": "action.rig_regenerate",
-      "action": "rig_regenerate",
-      "operation": "action.rig_regenerate",
+      "route": "rig.mode",
+      "action": "rig.mode",
+      "operation": "rig.mode",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "rig_generated_from_prototypes"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.mode",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {
+        "action": "regenerate"
+      }
     },
     {
       "id": "controller_point",
@@ -3418,8 +3640,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[camera_create]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3447,8 +3669,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[camera_aim]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3458,22 +3680,31 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "tool.ViewportsTool",
-      "action": "viewport",
-      "operation": "tool.ViewportsTool",
+      "route": "render.viewport_layout",
+      "action": "render.viewport_layout",
+      "operation": "render.viewport_layout",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "viewport_count_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.viewport_layout",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "count": "1|2|4"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "material",
@@ -3482,22 +3713,32 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "action.material",
-      "action": "material",
-      "operation": "action.material",
+      "route": "render.mesh_material",
+      "action": "render.mesh_material",
+      "operation": "render.mesh_material",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.mesh_material",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "viewport_state",
@@ -3524,8 +3765,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[viewport_state]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3553,8 +3794,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[camera_catalog]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3582,8 +3823,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[camera_view]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3611,8 +3852,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[camera_activate]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3640,8 +3881,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[light_point]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3669,8 +3910,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[light_spot]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3747,8 +3988,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[viewport_capture]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -3777,8 +4018,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[render_image]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -4071,8 +4312,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[view_mode]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -4100,8 +4341,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[undo]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -4129,8 +4370,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[redo]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -4197,14 +4438,14 @@
       "name": "CSC query",
       "source_url": "https://cascadeur.com/help/category/215",
       "license": "any",
-      "dependency": null,
+      "dependency": "Developer build with local developer_mode and generic_api policy",
       "route": "system.csc_query",
       "action": "csc_query",
       "operation": "system.csc_query",
       "mutation": false,
       "requires_scene": false,
-      "execution_mode": "Native",
-      "implementation_status": "implemented",
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
       "preconditions": [
         "compatible_version"
       ],
@@ -4226,14 +4467,14 @@
       "name": "CSC mutate",
       "source_url": "https://cascadeur.com/help/category/215",
       "license": "any",
-      "dependency": null,
+      "dependency": "Developer build with local developer_mode and generic_api policy",
       "route": "system.csc_mutate",
       "action": "csc_mutate",
       "operation": "system.csc_mutate",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Native",
-      "implementation_status": "implemented",
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
       "preconditions": [
         "compatible_version"
       ],
@@ -4256,14 +4497,14 @@
       "name": "Developer Python",
       "source_url": "https://cascadeur.com/help/category/215",
       "license": "any",
-      "dependency": null,
+      "dependency": "Developer build with local developer_mode and generic_api policy",
       "route": "system.developer_execute_python",
       "action": "developer_execute_python",
       "operation": "system.developer_execute_python",
       "mutation": true,
       "requires_scene": false,
-      "execution_mode": "Native",
-      "implementation_status": "implemented",
+      "execution_mode": "Gated",
+      "implementation_status": "dependency_gated",
       "preconditions": [
         "compatible_version"
       ],
@@ -4472,28 +4713,38 @@
       "since": "2026.1"
     },
     {
-      "id": "official_gap.autoposing_props",
+      "id": "autoposing_props",
       "family": "generation",
       "name": "AutoPosing props",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.autoposing_props",
+      "action": "rig.autoposing_props",
+      "operation": "rig.autoposing_props",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "autoposing_names_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.autoposing_props",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_ids": "IDs",
+        "enabled": "bool"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "official_gap.autophysics_freeze",
@@ -4520,508 +4771,724 @@
       "since": "2026.1"
     },
     {
-      "id": "official_gap.autophysics_priority_frames",
+      "id": "autophysics_priority_frames",
       "family": "physics",
       "name": "AutoPhysics Priority Frames",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.autophysics_priority_frames",
+      "action": "physics.autophysics_priority_frames",
+      "operation": "physics.autophysics_priority_frames",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.autophysics_priority_frames",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_corrector",
+      "id": "autophysics_corrector",
       "family": "physics",
       "name": "AutoPhysics Physics Corrector",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.autophysics_corrector",
+      "action": "physics.autophysics_corrector",
+      "operation": "physics.autophysics_corrector",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_presence_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.autophysics_corrector",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "IDs",
+        "enabled": "bool"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_smooth_trajectory",
+      "id": "autophysics_smooth_trajectory",
       "family": "physics",
       "name": "AutoPhysics Smooth Trajectory",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.autophysics_smooth_trajectory",
+      "action": "physics.autophysics_smooth_trajectory",
+      "operation": "physics.autophysics_smooth_trajectory",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.autophysics_smooth_trajectory",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_smooth_rotation",
+      "id": "autophysics_smooth_rotation",
       "family": "physics",
       "name": "AutoPhysics Smooth Rotation",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.autophysics_smooth_rotation",
+      "action": "physics.autophysics_smooth_rotation",
+      "operation": "physics.autophysics_smooth_rotation",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.autophysics_smooth_rotation",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_compensation_motion",
+      "id": "autophysics_compensation_motion",
       "family": "physics",
       "name": "AutoPhysics Compensation Motion",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.compensation_motion",
+      "action": "physics.compensation_motion",
+      "operation": "physics.compensation_motion",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.compensation_motion",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}",
+        "add_missing": "bool"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_separation_motion",
+      "id": "autophysics_separation_motion",
       "family": "physics",
       "name": "AutoPhysics Separation of Motion",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.separation_motion",
+      "action": "physics.separation_motion",
+      "operation": "physics.separation_motion",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.separation_motion",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}",
+        "add_missing": "bool"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_secondary_motion",
+      "id": "autophysics_secondary_motion",
       "family": "physics",
       "name": "AutoPhysics Secondary Motion",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.secondary_motion",
+      "action": "physics.secondary_motion",
+      "operation": "physics.secondary_motion",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.secondary_motion",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}",
+        "add_missing": "bool"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_restore_unbound",
+      "id": "autophysics_restore_unbound",
       "family": "physics",
       "name": "AutoPhysics Restore Unbound",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.autophysics_restore",
+      "action": "physics.autophysics_restore",
+      "operation": "physics.autophysics_restore",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "autophysics_values_restored"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.autophysics_restore",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "center_of_mass_id": "CoM ID",
+        "point_ids": "point IDs"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_point_settings",
+      "id": "autophysics_point_settings",
       "family": "physics",
       "name": "AutoPhysics per-point settings",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.autophysics_point_settings",
+      "action": "physics.autophysics_point_settings",
+      "operation": "physics.autophysics_point_settings",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.autophysics_point_settings",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.rig_element_delete",
+      "id": "rig_element_delete",
       "family": "rigging",
       "name": "Delete rig element",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.element_delete",
+      "action": "rig.element_delete",
+      "operation": "rig.element_delete",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "rig_elements_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.element_delete",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_ids": "IDs"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.joint_delete",
+      "id": "joint_delete",
       "family": "rigging",
       "name": "Delete standard joint",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.joint_delete",
+      "action": "rig.joint_delete",
+      "operation": "rig.joint_delete",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "joint_branch_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.joint_delete",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "joint_id": "standard rig joint"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.virtual_joint_create",
+      "id": "virtual_joint_create",
       "family": "rigging",
       "name": "Create virtual joint",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.virtual_joint",
+      "action": "rig.virtual_joint",
+      "operation": "rig.virtual_joint",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "virtual_joint_created"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.virtual_joint",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "joint_id": "parent joint"
+      },
+      "fixed_arguments": {
+        "action": "create"
+      }
     },
     {
-      "id": "official_gap.virtual_joint_delete",
+      "id": "virtual_joint_delete",
       "family": "rigging",
       "name": "Delete virtual joint",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.virtual_joint",
+      "action": "rig.virtual_joint",
+      "operation": "rig.virtual_joint",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "virtual_joint_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.virtual_joint",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "joint_id": "virtual joint"
+      },
+      "fixed_arguments": {
+        "action": "delete"
+      }
     },
     {
-      "id": "official_gap.snap_rig",
+      "id": "snap_rig",
       "family": "rigging",
       "name": "Snap Rig",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.snap",
+      "action": "rig.snap",
+      "operation": "rig.snap",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "snap_positions_equal"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.snap",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "id": "rig element"
+      },
+      "fixed_arguments": {
+        "mode": "rig_to_joint"
+      }
     },
     {
-      "id": "official_gap.snap_joint",
+      "id": "snap_joint",
       "family": "rigging",
       "name": "Snap Joint",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.snap",
+      "action": "rig.snap",
+      "operation": "rig.snap",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "snap_positions_equal"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.snap",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "id": "virtual joint"
+      },
+      "fixed_arguments": {
+        "mode": "joint_to_rig"
+      }
     },
     {
-      "id": "official_gap.prototype_mirror",
+      "id": "prototype_mirror",
       "family": "rigging",
       "name": "Mirror prototype",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.prototype_mirror",
+      "action": "rig.prototype_mirror",
+      "operation": "rig.prototype_mirror",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "mirrored_rig_elements_created"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.prototype_mirror",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_ids": "IDs",
+        "original_suffix": "_l",
+        "mirror_suffix": "_r",
+        "mirror_plane": "0-3"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.hinge_union",
+      "id": "hinge_union",
       "family": "rigging",
       "name": "Union hinges",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.hinge",
+      "action": "rig.hinge",
+      "operation": "rig.hinge",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "hinge_additional_points_coincide"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.hinge",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_ids": "two IDs"
+      },
+      "fixed_arguments": {
+        "action": "union"
+      }
     },
     {
-      "id": "official_gap.hinge_orthogonalize",
+      "id": "hinge_orthogonalize",
       "family": "rigging",
       "name": "Orthogonalize hinges",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.hinge",
+      "action": "rig.hinge",
+      "operation": "rig.hinge",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "hinge_additional_points_coincide"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.hinge",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_ids": "two IDs"
+      },
+      "fixed_arguments": {
+        "action": "orthogonalize"
+      }
     },
     {
-      "id": "official_gap.hinge_straighten",
+      "id": "hinge_straighten",
       "family": "rigging",
       "name": "Straighten hinges",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.hinge",
+      "action": "rig.hinge",
+      "operation": "rig.hinge",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "hinge_additional_points_coincide"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.hinge",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_ids": "two IDs"
+      },
+      "fixed_arguments": {
+        "action": "straighten"
+      }
     },
     {
-      "id": "official_gap.clear_animation_data",
+      "id": "clear_animation_data",
       "family": "rigging",
       "name": "Clear animation data",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.clear_animation_data",
+      "action": "rig.clear_animation_data",
+      "operation": "rig.clear_animation_data",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "preserved_data_empty"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.clear_animation_data",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.prototype_com_remove",
+      "id": "prototype_com_remove",
       "family": "rigging",
       "name": "Remove prototype CoM",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.proto_center_of_mass_remove",
+      "action": "rig.proto_center_of_mass_remove",
+      "operation": "rig.proto_center_of_mass_remove",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "proto_center_of_mass_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.proto_center_of_mass_remove",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "center_of_mass_ids": "IDs"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "official_gap.untwist",
@@ -5048,340 +5515,498 @@
       "since": "2026.1"
     },
     {
-      "id": "official_gap.prototype_fulcrum_groups",
+      "id": "prototype_fulcrum_groups",
       "family": "rigging",
       "name": "Prototype fulcrum groups",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.fulcrum_group",
+      "action": "rig.fulcrum_group",
+      "operation": "rig.fulcrum_group",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "fulcrum_group_present"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.fulcrum_group",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_ids": "IDs"
+      },
+      "fixed_arguments": {
+        "action": "create"
+      }
     },
     {
-      "id": "official_gap.root_constraint_add",
+      "id": "root_constraint_add",
       "family": "rigging",
       "name": "Add Root Constraint",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.root_constraint",
+      "action": "rig.root_constraint",
+      "operation": "rig.root_constraint",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "root_constraint_present"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.root_constraint",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "root_id": "ID",
+        "rig_element_id": "ID"
+      },
+      "fixed_arguments": {
+        "action": "add"
+      }
     },
     {
-      "id": "official_gap.root_constraint_remove",
+      "id": "root_constraint_remove",
       "family": "rigging",
       "name": "Remove Root Constraint",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.root_constraint",
+      "action": "rig.root_constraint",
+      "operation": "rig.root_constraint",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "root_constraint_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.root_constraint",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "constraint_id": "ID"
+      },
+      "fixed_arguments": {
+        "action": "remove"
+      }
     },
     {
-      "id": "official_gap.additional_controller_remove",
+      "id": "additional_controller_remove",
       "family": "rigging",
       "name": "Remove additional controller",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.additional_controller_remove",
+      "action": "rig.additional_controller_remove",
+      "operation": "rig.additional_controller_remove",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "additional_controller_absent"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.additional_controller_remove",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "kind": "point|box",
+        "controller_id": "ID"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.custom_additional_point_set",
+      "id": "custom_additional_point_set",
       "family": "rigging",
       "name": "Set custom additional point",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.technical_link",
+      "action": "rig.technical_link",
+      "operation": "rig.technical_link",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "technical_link_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.technical_link",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_id": "ID",
+        "target_id": "manual point"
+      },
+      "fixed_arguments": {
+        "kind": "user_additional_point",
+        "action": "set"
+      }
     },
     {
-      "id": "official_gap.custom_additional_point_remove",
+      "id": "custom_additional_point_remove",
       "family": "rigging",
       "name": "Remove custom additional point",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.technical_link",
+      "action": "rig.technical_link",
+      "operation": "rig.technical_link",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "technical_link_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.technical_link",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_id": "ID"
+      },
+      "fixed_arguments": {
+        "kind": "user_additional_point",
+        "action": "remove"
+      }
     },
     {
-      "id": "official_gap.additional_joint_attach",
+      "id": "additional_joint_attach",
       "family": "rigging",
       "name": "Attach additional joint",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.technical_link",
+      "action": "rig.technical_link",
+      "operation": "rig.technical_link",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "technical_link_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.technical_link",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_id": "ID",
+        "target_id": "joint"
+      },
+      "fixed_arguments": {
+        "kind": "additional_joint",
+        "action": "set"
+      }
     },
     {
-      "id": "official_gap.additional_joint_detach",
+      "id": "additional_joint_detach",
       "family": "rigging",
       "name": "Detach additional joint",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.technical_link",
+      "action": "rig.technical_link",
+      "operation": "rig.technical_link",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "technical_link_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.technical_link",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_id": "ID"
+      },
+      "fixed_arguments": {
+        "kind": "additional_joint",
+        "action": "remove"
+      }
     },
     {
-      "id": "official_gap.additional_parent",
+      "id": "additional_parent",
       "family": "rigging",
       "name": "Set additional parent",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.technical_link",
+      "action": "rig.technical_link",
+      "operation": "rig.technical_link",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "technical_link_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.technical_link",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_id": "ID",
+        "target_id": "rig element",
+        "action": "set|remove"
+      },
+      "fixed_arguments": {
+        "kind": "additional_parent"
+      }
     },
     {
-      "id": "official_gap.custom_rotation",
+      "id": "custom_rotation",
       "family": "rigging",
       "name": "Custom rotation",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.technical_link",
+      "action": "rig.technical_link",
+      "operation": "rig.technical_link",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "technical_link_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.technical_link",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "rig_element_id": "ID",
+        "target_id": "rig element",
+        "action": "set|remove"
+      },
+      "fixed_arguments": {
+        "kind": "custom_rotation"
+      }
     },
     {
-      "id": "official_gap.rig_json_import",
+      "id": "rig_json_import",
       "family": "rigging",
       "name": "Import rig JSON",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.json_import",
+      "action": "rig.json_import",
+      "operation": "rig.json_import",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "rig_prototypes_created_from_json"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.json_import",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "path": "rig .json",
+        "set_t_pose": "bool"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.rig_json_export",
+      "id": "rig_json_export",
       "family": "rigging",
       "name": "Export rig JSON",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.json_export",
+      "action": "rig.json_export",
+      "operation": "rig.json_export",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.json_export",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "path": "destination .json"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.character_mirror_plane",
+      "id": "character_mirror_plane",
       "family": "rigging",
       "name": "Character mirror plane",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.character_mirror_plane",
+      "action": "rig.character_mirror_plane",
+      "operation": "rig.character_mirror_plane",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "mirror_plane_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.character_mirror_plane",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "plane": "0 YZ|1 XZ|2 XY|3 undefined"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.generate_rig",
+      "id": "generate_rig",
       "family": "rigging",
       "name": "Generate rig",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.mode",
+      "action": "rig.mode",
+      "operation": "rig.mode",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "rig_generated_from_prototypes"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.mode",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {
+        "action": "off"
+      }
     },
     {
       "id": "official_gap.open_autosave",
@@ -5576,28 +6201,35 @@
       "since": "2026.1"
     },
     {
-      "id": "official_gap.fix_scene",
+      "id": "fix_scene",
       "family": "io",
       "name": "Fix Scene",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "scene.fix",
+      "action": "scene.fix",
+      "operation": "scene.fix",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "scene_valid_after_fix"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.fix",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {}
     },
     {
       "id": "official_gap.filament_environment_map",
@@ -5816,52 +6448,72 @@
       "since": "2026.1"
     },
     {
-      "id": "official_gap.point_light_properties",
+      "id": "point_light_properties",
       "family": "render",
       "name": "Point light properties",
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "render.point_light_properties",
+      "action": "render.point_light_properties",
+      "operation": "render.point_light_properties",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.point_light_properties",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.spot_light_properties",
+      "id": "spot_light_properties",
       "family": "render",
       "name": "Spot light properties",
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "render.spot_light_properties",
+      "action": "render.spot_light_properties",
+      "operation": "render.spot_light_properties",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.spot_light_properties",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "official_gap.material_textures",
@@ -5888,28 +6540,37 @@
       "since": "2026.1"
     },
     {
-      "id": "official_gap.viewport_layout",
+      "id": "viewport_layout",
       "family": "render",
       "name": "Viewport layout and visibility",
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
-      "mutation": false,
+      "route": "render.viewport_layout",
+      "action": "render.viewport_layout",
+      "operation": "render.viewport_layout",
+      "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "viewport_count_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.viewport_layout",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "count": "1|2|4"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "official_gap.camera_textures",
@@ -5936,28 +6597,38 @@
       "since": "2026.1"
     },
     {
-      "id": "official_gap.camera_settings",
+      "id": "camera_settings",
       "family": "render",
       "name": "Camera settings",
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
-      "mutation": false,
+      "route": "render.camera_settings",
+      "action": "render.camera_settings",
+      "operation": "render.camera_settings",
+      "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.camera_settings",
       "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
       "live_test_id": null,
       "fixture_id": null,
-      "since": "2026.1"
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     }
   ]
 }

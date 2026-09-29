@@ -18,7 +18,7 @@ def _folder_rows(domain, context):
     return sorted(rows, key=lambda item: item["id"])
 
 
-@handler("layer.folder")
+@handler("layer.folder", postconditions=("folder_structure_equals_requested",))
 def edit_folder(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
     action = str(arguments["action"])

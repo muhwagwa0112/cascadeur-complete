@@ -11,8 +11,26 @@ from cascadeur_complete.paths import RuntimePaths
 from cascadeur_complete.service import CascadeurService
 
 
+@pytest.fixture(autouse=True)
+def _no_real_ui(monkeypatch):
+    """Unit tests must never send keystrokes or read real Cascadeur windows."""
+
+    def refuse_cycle():
+        raise service_module.UIAutomationError("UI cycling is disabled in unit tests")
+
+    monkeypatch.setattr(service_module, "cycle_scene_tab", refuse_cycle)
+    monkeypatch.setattr(
+        service_module,
+        "active_scene_title",
+        lambda: FakeBridge.current.state.get("path") if FakeBridge.current else None,
+    )
+
+
 class FakeBridge:
+    current = None
+
     def __init__(self, snapshot_dir: Path):
+        FakeBridge.current = self
         self.snapshot_dir = snapshot_dir
         self.calls = []
         self.state = {
@@ -23,11 +41,34 @@ class FakeBridge:
             "objects": [{"id": "obj-1"}],
             "tools": ["AutoPosingTool", "Timeline"],
             "license": "Basic",
+            "name": "untitled.casc",
+            "path": "",
+            "tab_id": "tab-1",
         }
+
+    def lingering_until(self):
+        return None
 
     def execute(self, feature_id, operations, **kwargs):
         self.calls.append((feature_id, operations, kwargs))
         name = operations[0].name
+        if name == "scene.list":
+            return ResultEnvelope(
+                ok=True,
+                feature_id=feature_id,
+                execution_mode=ExecutionMode.NATIVE,
+                result=[{"tab_id": self.state["tab_id"], "active": True, "path": self.state["path"]}],
+            )
+        if name == "scene.new":
+            self.state.update(tab_id="tab-new", revision="rev-new")
+            return ResultEnvelope(
+                ok=True,
+                feature_id=feature_id,
+                execution_mode=ExecutionMode.NATIVE,
+                scene_id=self.state["scene_id"],
+                scene_revision=self.state["revision"],
+                result={"tab_id": "tab-new", "name": "untitled.casc", "path": ""},
+            )
         if name == "system.status":
             return ResultEnvelope(
                 ok=True,
@@ -102,7 +143,7 @@ def test_destructive_feature_requires_prepare_and_commit(tmp_path):
     assert "scene_new" not in svc.evidence_store.verified_features(svc._version_name)
 
 
-def test_refresh_live_binds_status_to_cached_scene_identity(tmp_path):
+def test_refresh_live_resynchronizes_instead_of_binding_to_stale_cache(tmp_path):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     bridge = FakeBridge(paths.snapshots)
     svc = CascadeurService(paths, client=bridge)
@@ -114,8 +155,8 @@ def test_refresh_live_binds_status_to_cached_scene_identity(tmp_path):
     assert result.ok
     _, operations, kwargs = bridge.calls[-1]
     assert operations[0].name == "system.status"
-    assert kwargs["scene_id"] == "scene-cached"
-    assert kwargs["expected_revision"] == "rev-cached"
+    assert kwargs["scene_id"] is None
+    assert kwargs["expected_revision"] is None
     assert svc._live_scene_id == "scene-1"
     assert svc._live_scene_revision == "rev-1"
 
@@ -138,12 +179,25 @@ def test_ui_only_feature_returns_exact_gate_without_bridge_dispatch(tmp_path):
     bridge = FakeBridge(paths.snapshots)
     svc = CascadeurService(paths, client=bridge)
 
-    result = svc.prepare_change("object_delete", "object.delete", {"ids": ["obj-1"]})
+    result = svc.prepare_change("grid", "tool.ViewGridTool", {})
 
     assert result["ok"] is False
     assert result["error_code"] == "UI_LOCKED"
-    assert "action.Delete_objects" in result["error_message"]
+    assert "tool.ViewGridTool" in result["error_message"]
     assert bridge.calls == []
+
+
+def test_shared_operation_features_cannot_override_fixed_arguments(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    bridge = FakeBridge(paths.snapshots)
+    svc = CascadeurService(paths, client=bridge)
+
+    refused = svc.prepare_change("hinge_union", "rig.hinge", {"action": "straighten", "rig_element_ids": ["a", "b"]})
+    prepared = svc.prepare_change("hinge_union", "rig.hinge", {"rig_element_ids": ["a", "b"]})
+
+    assert refused["ok"] is False and "fixes argument 'action'" in refused["error_message"]
+    assert prepared["ok"] is True
+    assert prepared["operation"]["arguments"] == {"rig_element_ids": ["a", "b"], "action": "union"}
 
 
 def test_viewport_capture_waits_for_nonempty_stable_output(tmp_path):
@@ -442,16 +496,39 @@ def test_open_scene_uses_bridge_path_and_native_window_postconditions(tmp_path, 
         scene_revision="rev-2",
         result={"path": str(destination), "loaded": True},
     )
+    bridge.state["path"] = str(destination)
     calls_before = len(bridge.calls)
-    monkeypatch.setattr(service_module, "cascadeur_window_titles", lambda: [f"{destination} - Cascadeur"])
 
     result = svc._wait_for_open_scene(initial, str(destination), 2)
 
     assert result.ok
     assert result.result["stable_observations"] == 2
-    assert result.result["window_title"].endswith(" - Cascadeur")
-    assert len(bridge.calls) == calls_before
+    assert result.result["ui_tab_cycles"] == 0
+    status_calls = [call for call in bridge.calls[calls_before:] if call[1][0].name == "system.status"]
+    assert len(status_calls) == 2
     assert any(item.kind == "host_window_postcondition" for item in result.evidence)
+    assert {"id": "stable_scene_path", "ok": True} in [
+        {"id": item["id"], "ok": item["ok"]} for item in result.postconditions
+    ]
+
+
+def test_open_scene_fails_when_ui_reverts_to_another_tab(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    bridge = FakeBridge(paths.snapshots)
+    svc = CascadeurService(paths, client=bridge)
+    destination = tmp_path / "walk.casc"
+    bridge.state["path"] = str(tmp_path / "other.casc")
+    initial = ResultEnvelope(
+        ok=True,
+        feature_id="scene_open",
+        execution_mode=ExecutionMode.NATIVE,
+        result={"path": str(destination), "loaded": True},
+    )
+
+    result = svc._wait_for_open_scene(initial, str(destination), 1)
+
+    assert not result.ok
+    assert result.error_code == ErrorCode.POSTCONDITION_FAILED
 
 
 def test_auto_physics_snap_completes_known_modal_and_verifies_revision(tmp_path, monkeypatch):
