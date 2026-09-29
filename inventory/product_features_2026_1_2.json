@@ -188,8 +188,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[inventory_refresh]",
+      "fixture_id": "fixture.none",
       "since": "2026.1"
     },
     {
@@ -819,22 +819,32 @@
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": "action.File.Import.Image",
-      "action": "import_image",
-      "operation": "action.File.Import.Image",
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "exact_file_dialog",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_image]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": "image"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "import_video",
@@ -843,22 +853,32 @@
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": "action.File.Import.Video",
-      "action": "import_video",
-      "operation": "action.File.Import.Video",
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "exact_file_dialog",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_video]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": "video"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "import_audio",
@@ -926,22 +946,35 @@
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": "tool.RenderToFile",
-      "action": "export_video",
-      "operation": "tool.RenderToFile",
+      "route": "render.video",
+      "action": "render.video",
+      "operation": "render.video",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.video",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_video]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": "absolute .mp4 path",
+        "width": "int",
+        "height": "int",
+        "samples": "int"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "object_search",
@@ -1171,8 +1204,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_duplicate]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "id": "object ID"
@@ -1204,8 +1237,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[object_delete]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs"
@@ -1469,8 +1502,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[key_list]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1498,8 +1531,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[key_add]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1527,8 +1560,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[key_delete]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1556,8 +1589,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[interpolation_set]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1585,8 +1618,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[tangent_set]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1614,8 +1647,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[graph_query]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1643,8 +1676,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[graph_edit]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_id": "layer GUID",
@@ -1681,8 +1714,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[timeline_get]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1710,8 +1743,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[timeline_set_frame]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1740,8 +1773,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[timeline_range]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1769,8 +1802,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[timeline_play]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {},
       "fixed_arguments": {
@@ -1802,8 +1835,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[timeline_stop]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {},
       "fixed_arguments": {
@@ -1835,8 +1868,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[layer_list]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1864,8 +1897,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[layer_create]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1893,8 +1926,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[layer_delete]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1922,8 +1955,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[layer_activate]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_id": "layer GUID"
@@ -1955,8 +1988,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[layer_visibility]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -1984,8 +2017,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[layer_lock]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2013,8 +2046,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[layer_folder]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2043,8 +2076,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[cycle_query]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2072,8 +2105,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[cycle]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_ids": "layer GUIDs (default: all)",
@@ -2109,8 +2142,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[stretch]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_ids": "layer GUIDs (default: all)",
@@ -2145,8 +2178,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[bake]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_ids": "layer GUIDs (default: all)",
@@ -2180,8 +2213,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[tween]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "ids": "point/controller IDs",
@@ -2217,8 +2250,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[mirror]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2246,8 +2279,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[copy_animation]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_ids": "layer GUIDs (default: all)",
@@ -2282,8 +2315,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[interval_edit]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_ids": "layer GUIDs (default: all)",
@@ -2300,22 +2333,31 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.TrajectoryTool",
-      "action": "trajectory",
-      "operation": "tool.TrajectoryTool",
+      "route": "view.trajectory",
+      "action": "view.trajectory",
+      "operation": "view.trajectory",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.trajectory",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[trajectory]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "ghost",
@@ -2324,22 +2366,32 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "tool.GhostTool",
-      "action": "ghost",
-      "operation": "tool.GhostTool",
+      "route": "view.ghost",
+      "action": "view.ghost",
+      "operation": "view.ghost",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.ghost",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[ghost]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first",
+        "mode": "keyframe|neighbor|next|previous|selected|disable"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "fixing",
@@ -2366,8 +2418,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[fixing]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "ids": "IDs",
@@ -2402,8 +2454,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[hiding]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs",
@@ -2436,8 +2488,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[generation_state]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -2465,8 +2517,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[auto_posing]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2476,22 +2528,31 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": "action.finger_auto_posing",
-      "action": "finger_auto_posing",
-      "operation": "action.finger_auto_posing",
+      "route": "view.fingers_drawing",
+      "action": "view.fingers_drawing",
+      "operation": "view.fingers_drawing",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.fingers_drawing",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[finger_auto_posing]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "inbetweening",
@@ -2552,8 +2613,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[root_motion]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2630,8 +2691,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[unbaking]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2659,8 +2720,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[fulcrum_cleaning]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_ids": "layer GUIDs (default: all)",
@@ -2698,8 +2759,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[key_reduction]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2727,8 +2788,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[physics_state]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -2756,8 +2817,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[center_of_mass]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -2786,8 +2847,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[ballistic]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2815,8 +2876,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[fulcrum]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "layer_ids": "layer GUIDs (default: all)",
@@ -2852,8 +2913,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[auto_physics_state]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -2882,8 +2943,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[auto_physics_enable]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2912,8 +2973,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[auto_physics]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2941,8 +3002,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[ragdoll]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -2977,8 +3038,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[constraint_point]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -3006,8 +3067,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[constraint_transform]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -3035,8 +3096,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[collision_create]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -3064,8 +3125,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[collision_delete]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -3093,8 +3154,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[collision_clean]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1",
       "arguments": {
         "ids": "IDs",
@@ -3129,8 +3190,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[penetration_clean]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "IDs",
@@ -3163,8 +3224,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rig_state]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -3193,8 +3254,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[constraint_drivers]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -3204,22 +3265,31 @@
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": "action.quick_rig",
-      "action": "quick_rig",
-      "operation": "action.quick_rig",
+      "route": "rig.quick_rig",
+      "action": "rig.quick_rig",
+      "operation": "rig.quick_rig",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "rig_prototypes_created_from_template"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.quick_rig",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[quick_rig]",
+      "fixture_id": "fixture.rigmode.ue5",
+      "since": "2026.1",
+      "arguments": {
+        "template_path": ".qrigcasc template (resources/autorig_templates)"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "manual_rig",
@@ -3249,8 +3319,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[manual_rig]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3281,8 +3351,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rig_create]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3310,8 +3380,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rig_regenerate]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {},
       "fixed_arguments": {
@@ -3343,8 +3413,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[controller_point]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3372,8 +3442,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[controller_box]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3402,8 +3472,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[joint]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3434,8 +3504,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rigid_body]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3464,8 +3534,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[ik]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -3496,8 +3566,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[spline_ik]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3527,8 +3597,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[twist]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3557,8 +3627,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[mass]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1"
     },
     {
@@ -3587,8 +3657,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rig_info]",
+      "fixture_id": "fixture.test.three_joints",
       "since": "2026.1"
     },
     {
@@ -3698,8 +3768,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[viewport]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "count": "1|2|4"
@@ -3713,9 +3783,9 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "render.mesh_material",
-      "action": "render.mesh_material",
-      "operation": "render.mesh_material",
+      "route": "render.material",
+      "action": "render.material",
+      "operation": "render.material",
       "mutation": true,
       "requires_scene": true,
       "execution_mode": "Native",
@@ -3726,13 +3796,13 @@
       "postconditions": [
         "behaviour_values_equal_request"
       ],
-      "adapter_id": "cascadeur_2026_1.render.mesh_material",
+      "adapter_id": "cascadeur_2026_1.render.material",
       "contract_test_ids": [
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[material]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -3921,22 +3991,29 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "tool.ViewGridTool",
-      "action": "grid",
-      "operation": "tool.ViewGridTool",
+      "route": "view.isometric_grid",
+      "action": "view.isometric_grid",
+      "operation": "view.isometric_grid",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.isometric_grid",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[grid]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {}
     },
     {
       "id": "composition",
@@ -3945,22 +4022,29 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "tool.CompositionTool",
-      "action": "composition",
-      "operation": "tool.CompositionTool",
+      "route": "view.composition",
+      "action": "view.composition",
+      "operation": "view.composition",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.composition",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[composition]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {}
     },
     {
       "id": "viewport_capture",
@@ -4029,22 +4113,35 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "tool.RenderToFile",
-      "action": "render_video",
-      "operation": "tool.RenderToFile",
+      "route": "render.video",
+      "action": "render.video",
+      "operation": "render.video",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.video",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[render_video]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": "absolute .mp4 path",
+        "width": "int",
+        "height": "int",
+        "samples": "int"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "unreal_livelink",
@@ -4197,22 +4294,31 @@
       "source_url": "https://cascadeur.com/help/interface",
       "license": "any",
       "dependency": null,
-      "route": "tool.ControlPicker",
-      "action": "control_picker",
-      "operation": "tool.ControlPicker",
+      "route": "view.control_picker",
+      "action": "view.control_picker",
+      "operation": "view.control_picker",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.control_picker",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[control_picker]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "state": "on|off"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "scene_linking",
@@ -4399,8 +4505,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[action_invoke]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -4428,8 +4534,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[ui_flow_run]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -4521,196 +4627,271 @@
       "since": "2026.1"
     },
     {
-      "id": "official_gap.silhouette",
+      "id": "silhouette",
       "family": "animation",
       "name": "Silhouette mode",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
-      "mutation": false,
+      "route": "view.silhouette",
+      "action": "view.silhouette",
+      "operation": "view.silhouette",
+      "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.silhouette",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[silhouette]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.trajectory_translation",
+      "id": "trajectory_translation",
       "family": "animation",
       "name": "Translation trajectory",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
-      "mutation": false,
+      "route": "view.trajectory_translate",
+      "action": "view.trajectory_translate",
+      "operation": "view.trajectory_translate",
+      "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.trajectory_translate",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[trajectory_translation]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.trajectory_rotation",
+      "id": "trajectory_rotation",
       "family": "animation",
       "name": "Rotation trajectory",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
-      "mutation": false,
+      "route": "view.trajectory_rotate",
+      "action": "view.trajectory_rotate",
+      "operation": "view.trajectory_rotate",
+      "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.trajectory_rotate",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[trajectory_rotation]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.trajectory_direction",
+      "id": "trajectory_direction",
       "family": "animation",
       "name": "Direction trajectory",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
-      "mutation": false,
+      "route": "view.trajectory_direction",
+      "action": "view.trajectory_direction",
+      "operation": "view.trajectory_direction",
+      "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.trajectory_direction",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[trajectory_direction]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.trajectory_tangents",
+      "id": "trajectory_tangents",
       "family": "animation",
       "name": "Trajectory tangents",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "view.trajectory_edit",
+      "action": "view.trajectory_edit",
+      "operation": "view.trajectory_edit",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.trajectory_edit",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[trajectory_tangents]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.node_editor",
+      "id": "node_editor",
       "family": "animation",
       "name": "Node Editor",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
-      "mutation": false,
+      "route": "view.node_editor",
+      "action": "view.node_editor",
+      "operation": "view.node_editor",
+      "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.node_editor",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[node_editor]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "state": "on|off"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.ballistic_ghosts",
+      "id": "ballistic_ghosts",
       "family": "animation",
       "name": "Ballistic Ghosts",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
-      "mutation": false,
+      "route": "view.ballistic_ghosts",
+      "action": "view.ballistic_ghosts",
+      "operation": "view.ballistic_ghosts",
+      "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.view.ballistic_ghosts",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[ballistic_ghosts]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "optional objects to select first"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.root_constraint",
+      "id": "root_constraint",
       "family": "generation",
       "name": "Root Constraint",
       "source_url": "https://cascadeur.com/help/tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.root_constraint",
+      "action": "rig.root_constraint",
+      "operation": "rig.root_constraint",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "root_constraint_present"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.root_constraint",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[root_constraint]",
+      "fixture_id": "fixture.rigmode.cascy",
+      "since": "2026.1",
+      "arguments": {
+        "root_id": "root joint",
+        "rig_element_id": "pelvis rig element"
+      },
+      "fixed_arguments": {
+        "action": "add"
+      }
     },
     {
       "id": "autoposing_props",
@@ -4737,8 +4918,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autoposing_props]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_ids": "IDs",
@@ -4747,28 +4928,35 @@
       "fixed_arguments": {}
     },
     {
-      "id": "official_gap.autophysics_freeze",
+      "id": "autophysics_freeze",
       "family": "physics",
       "name": "AutoPhysics Freeze Physics",
       "source_url": "https://cascadeur.com/help/tools/physics_tools/autophysics",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "physics.autophysics_freeze",
+      "action": "physics.autophysics_freeze",
+      "operation": "physics.autophysics_freeze",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "viewport_render_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.physics.autophysics_freeze",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_freeze]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {}
     },
     {
       "id": "autophysics_priority_frames",
@@ -4795,8 +4983,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_priority_frames]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -4829,8 +5017,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_corrector]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "IDs",
@@ -4863,8 +5051,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_smooth_trajectory]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -4897,8 +5085,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_smooth_rotation]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -4931,8 +5119,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_compensation_motion]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -4966,8 +5154,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_separation_motion]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -5001,8 +5189,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_secondary_motion]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -5036,8 +5224,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_restore_unbound]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "center_of_mass_id": "CoM ID",
@@ -5070,8 +5258,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[autophysics_point_settings]",
+      "fixture_id": "fixture.sample.cascy",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -5104,8 +5292,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rig_element_delete]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_ids": "IDs"
@@ -5137,8 +5325,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[joint_delete]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "joint_id": "standard rig joint"
@@ -5170,8 +5358,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[virtual_joint_create]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "joint_id": "parent joint"
@@ -5205,8 +5393,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[virtual_joint_delete]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "joint_id": "virtual joint"
@@ -5240,8 +5428,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[snap_rig]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "id": "rig element"
@@ -5310,8 +5498,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[prototype_mirror]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_ids": "IDs",
@@ -5346,8 +5534,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[hinge_union]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_ids": "two IDs"
@@ -5381,8 +5569,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[hinge_orthogonalize]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_ids": "two IDs"
@@ -5416,8 +5604,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[hinge_straighten]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_ids": "two IDs"
@@ -5451,8 +5639,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[clear_animation_data]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {},
       "fixed_arguments": {}
@@ -5482,8 +5670,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[prototype_com_remove]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "center_of_mass_ids": "IDs"
@@ -5491,28 +5679,40 @@
       "fixed_arguments": {}
     },
     {
-      "id": "official_gap.untwist",
+      "id": "untwist",
       "family": "rigging",
       "name": "Untwist",
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "rig.untwist",
+      "action": "rig.untwist",
+      "operation": "rig.untwist",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "untwist_dependencies_created"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.untwist",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[untwist]",
+      "fixture_id": "fixture.rigmode.cascy",
+      "since": "2026.1",
+      "arguments": {
+        "parent_element_id": "ID",
+        "target_element_id": "ID",
+        "child_element_id": "ID",
+        "axis": "0|1|2"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "prototype_fulcrum_groups",
@@ -5539,8 +5739,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[prototype_fulcrum_groups]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_ids": "IDs"
@@ -5574,8 +5774,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[root_constraint_add]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "root_id": "ID",
@@ -5610,8 +5810,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[root_constraint_remove]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "constraint_id": "ID"
@@ -5645,8 +5845,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[additional_controller_remove]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "kind": "point|box",
@@ -5679,8 +5879,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[custom_additional_point_set]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_id": "ID",
@@ -5716,8 +5916,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[custom_additional_point_remove]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_id": "ID"
@@ -5752,8 +5952,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[additional_joint_attach]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_id": "ID",
@@ -5789,8 +5989,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[additional_joint_detach]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_id": "ID"
@@ -5825,8 +6025,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[additional_parent]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_id": "ID",
@@ -5862,8 +6062,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[custom_rotation]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "rig_element_id": "ID",
@@ -5899,8 +6099,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rig_json_import]",
+      "fixture_id": "fixture.test.ded",
       "since": "2026.1",
       "arguments": {
         "path": "rig .json",
@@ -5934,8 +6134,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rig_json_export]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "path": "destination .json"
@@ -5967,13 +6167,46 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[character_mirror_plane]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {
         "plane": "0 YZ|1 XZ|2 XY|3 undefined"
       },
       "fixed_arguments": {}
+    },
+    {
+      "id": "rig_mode_on",
+      "family": "rigging",
+      "name": "Enter Rig Mode",
+      "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
+      "license": "any",
+      "dependency": null,
+      "route": "rig.mode",
+      "action": "rig.mode",
+      "operation": "rig.mode",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "rig_mode_active"
+      ],
+      "adapter_id": "cascadeur_2026_1.rig.mode",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rig_mode_on]",
+      "fixture_id": "fixture.rigmode.cascy",
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {
+        "action": "on"
+      }
     },
     {
       "id": "generate_rig",
@@ -6000,8 +6233,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[generate_rig]",
+      "fixture_id": "fixture.rigmode.cascy",
       "since": "2026.1",
       "arguments": {},
       "fixed_arguments": {
@@ -6009,196 +6242,274 @@
       }
     },
     {
-      "id": "official_gap.open_autosave",
+      "id": "open_autosave",
       "family": "io",
       "name": "Open Autosave",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "scene.open_autosave",
+      "action": "scene.open_autosave",
+      "operation": "scene.open_autosave",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "autosave_scene_loaded",
+        "stable_scene_path"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.open_autosave",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[open_autosave]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": "optional autosave .casc (default: newest)"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.save_as_new_version",
+      "id": "save_as_new_version",
       "family": "io",
       "name": "Save As New Version",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "scene.save_new_version",
+      "action": "scene.save_new_version",
+      "operation": "scene.save_new_version",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "new_version_file_saved"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.save_new_version",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[save_as_new_version]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.save_as_without_assets",
+      "id": "save_as_without_assets",
       "family": "io",
       "name": "Save As without assets",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "exact_file_dialog",
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[save_as_without_assets]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": ".casc"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.import_scene_to_current",
+      "id": "import_scene_to_current",
       "family": "io",
       "name": "Import Scene To Current",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "exact_file_dialog",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_scene_to_current]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": ".casc"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.selection_groups_import",
+      "id": "selection_groups_import",
       "family": "io",
       "name": "Import Selection Groups",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "io.selection_groups_import",
+      "action": "io.selection_groups_import",
+      "operation": "io.selection_groups_import",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "selection_groups_loaded"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.selection_groups_import",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[selection_groups_import]",
+      "fixture_id": "fixture.sample.cascy",
+      "since": "2026.1",
+      "arguments": {
+        "path": "selection groups file"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.selection_groups_export",
+      "id": "selection_groups_export",
       "family": "io",
       "name": "Export Selection Groups",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "exact_file_dialog",
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[selection_groups_export]",
+      "fixture_id": "fixture.sample.cascy",
+      "since": "2026.1",
+      "arguments": {
+        "path": "file"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.scene_parts_import",
+      "id": "scene_parts_import",
       "family": "io",
       "name": "Import Scene Parts",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "io.scene_parts_import",
+      "action": "io.scene_parts_import",
+      "operation": "io.scene_parts_import",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "scene_part_objects_created"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.scene_parts_import",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_parts_import]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": ".partscasc file"
+      },
+      "fixed_arguments": {}
     },
     {
-      "id": "official_gap.scene_parts_export",
+      "id": "scene_parts_export",
       "family": "io",
       "name": "Export Scene Parts",
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "exact_file_dialog",
+        "output_file",
+        "nonzero_bytes"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[scene_parts_export]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": ".partscasc"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "fix_scene",
@@ -6225,8 +6536,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[fix_scene]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {},
       "fixed_arguments": {}
@@ -6472,8 +6783,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[point_light_properties]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -6506,8 +6817,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[spot_light_properties]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",
@@ -6516,28 +6827,38 @@
       "fixed_arguments": {}
     },
     {
-      "id": "official_gap.material_textures",
+      "id": "material_textures",
       "family": "render",
       "name": "Material textures",
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "render.material_textures",
+      "action": "render.material_textures",
+      "operation": "render.material_textures",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "behaviour_values_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.render.material_textures",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[material_textures]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "ids": "object IDs (defaults to every owner of the behaviour)",
+        "values": "{property: value}"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "viewport_layout",
@@ -6564,8 +6885,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[viewport_layout]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "count": "1|2|4"
@@ -6573,28 +6894,38 @@
       "fixed_arguments": {}
     },
     {
-      "id": "official_gap.camera_textures",
+      "id": "camera_textures",
       "family": "render",
       "name": "Camera textures",
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": null,
-      "action": null,
-      "operation": null,
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "not_implemented",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_official_documentation_gaps_are_explicit"
+      "execution_mode": "UIA",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "exact_file_dialog",
+        "scene_revision_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[camera_textures]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "path": "image"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "camera_settings",
@@ -6621,8 +6952,8 @@
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[camera_settings]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs (defaults to every owner of the behaviour)",

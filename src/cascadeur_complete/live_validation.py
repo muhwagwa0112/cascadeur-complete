@@ -34,6 +34,12 @@ FIXTURES: dict[str, Path | None] = {
     "fixture.test.one_joint_rigged": CASCADEUR_ROOT / "resources/scripts/test_data/casc/one_joint_rigged.casc",
     "fixture.test.hinge": CASCADEUR_ROOT / "resources/scripts/test_data/casc/hinge_minimal_interpolation.casc",
     "fixture.test.legs": CASCADEUR_ROOT / "resources/scripts/test_data/casc/legs.casc",
+    # Same files opened again for Rig Mode groups: the earlier tabs were branched
+    # into working copies, so these load pristine fixtures.
+    "fixture.rigmode.cascy": CASCADEUR_ROOT / "samples" / "Cascy.casc",
+    "fixture.rigmode.spine": CASCADEUR_ROOT / "resources/scripts/test_data/casc/spine.casc",
+    "fixture.test.ded": CASCADEUR_ROOT / "resources/scripts/test_data/casc/Ded.casc",
+    "fixture.rigmode.ue5": CASCADEUR_ROOT / "samples" / "UE5_Manny.casc",
 }
 LIVE_TEST_TEMPLATE = "tests/live/test_live_features.py::test_live_feature[{feature_id}]"
 
@@ -116,6 +122,21 @@ class LiveSession:
     def layers(self) -> list[dict[str, Any]]:
         return self.read("layer_list", "layer.list")
 
+    def objects_of_type(self, type_name: str) -> list[dict[str, Any]]:
+        return [item for item in self.objects() if item["type"] == type_name]
+
+    def behaviour_names(self, ids: list[str]) -> dict[str, list[str]]:
+        rows = self.read("object_behaviors", "object.behaviors", {"ids": ids})["items"]
+        return {row["id"]: [item["name"] for item in row["behaviors"]] for row in rows}
+
+    def owners(self, behaviour: str, candidates: list[dict[str, Any]] | None = None) -> list[str]:
+        rows = candidates if candidates is not None else self.objects()
+        ids = [item["id"] for item in rows]
+        names: dict[str, list[str]] = {}
+        for start in range(0, len(ids), 200):
+            names.update(self.behaviour_names(ids[start : start + 200]))
+        return [item for item in ids if behaviour in names.get(item, [])]
+
     def verified(self, feature_id: str) -> bool:
         return feature_id in self.service.evidence_store.verified_features(
             self.service._version_name, license_name=self.service._license_name
@@ -162,4 +183,10 @@ def run_scenario(session: LiveSession, feature_id: str) -> dict[str, Any]:
     }
 
 
-from . import live_scenarios  # noqa: E402,F401  (registers SCENARIOS)
+from . import (  # noqa: E402,F401  (registers SCENARIOS)
+    live_scenarios,
+    live_scenarios_animation,
+    live_scenarios_extra,
+    live_scenarios_rig,
+    live_scenarios_scene,
+)

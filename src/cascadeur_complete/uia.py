@@ -127,6 +127,84 @@ def active_scene_title() -> str | None:
     return title[: -len(suffix)].lstrip("*").strip()
 
 
+def capture_window_sample(columns: int = 160, rows: int = 90) -> list[int] | None:
+    """Capture the main Cascadeur window and return a grayscale sample grid.
+
+    The window is brought to the foreground first so the screen copy shows the
+    rendered viewport and panels rather than an overlapping window.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    handles = _native_cascadeur_handles()
+    if not handles:
+        return None
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    handle = max(handles, key=lambda item: user32.GetWindowTextLengthW(item))
+    user32.ShowWindow(handle, 9)
+    user32.SetForegroundWindow(handle)
+    time.sleep(0.3)
+    rect = wintypes.RECT()
+    user32.GetWindowRect(handle, ctypes.byref(rect))
+    width, height = rect.right - rect.left, rect.bottom - rect.top
+    if width <= 0 or height <= 0:
+        return None
+    screen = user32.GetDC(0)
+    memory = gdi32.CreateCompatibleDC(screen)
+    bitmap = gdi32.CreateCompatibleBitmap(screen, width, height)
+    previous = gdi32.SelectObject(memory, bitmap)
+    try:
+        gdi32.BitBlt(memory, 0, 0, width, height, screen, rect.left, rect.top, 0x00CC0020)
+
+        class BitmapInfoHeader(ctypes.Structure):
+            _fields_ = [
+                ("biSize", wintypes.DWORD),
+                ("biWidth", wintypes.LONG),
+                ("biHeight", wintypes.LONG),
+                ("biPlanes", wintypes.WORD),
+                ("biBitCount", wintypes.WORD),
+                ("biCompression", wintypes.DWORD),
+                ("biSizeImage", wintypes.DWORD),
+                ("biXPelsPerMeter", wintypes.LONG),
+                ("biYPelsPerMeter", wintypes.LONG),
+                ("biClrUsed", wintypes.DWORD),
+                ("biClrImportant", wintypes.DWORD),
+            ]
+
+        header = BitmapInfoHeader()
+        header.biSize = ctypes.sizeof(BitmapInfoHeader)
+        header.biWidth = width
+        header.biHeight = -height
+        header.biPlanes = 1
+        header.biBitCount = 32
+        buffer = ctypes.create_string_buffer(width * height * 4)
+        gdi32.GetDIBits(memory, bitmap, 0, height, buffer, ctypes.byref(header), 0)
+    finally:
+        gdi32.SelectObject(memory, previous)
+        gdi32.DeleteObject(bitmap)
+        gdi32.DeleteDC(memory)
+        user32.ReleaseDC(0, screen)
+    raw = buffer.raw
+    sample = []
+    for row in range(rows):
+        y = int((row + 0.5) * height / rows)
+        for column in range(columns):
+            x = int((column + 0.5) * width / columns)
+            offset = (y * width + x) * 4
+            blue, green, red = raw[offset], raw[offset + 1], raw[offset + 2]
+            sample.append((red * 299 + green * 587 + blue * 114) // 1000)
+    return sample
+
+
+def sample_difference(before: list[int] | None, after: list[int] | None, threshold: int = 24) -> float:
+    """Return the fraction of sampled pixels whose brightness changed noticeably."""
+    if not before or not after or len(before) != len(after):
+        return 0.0
+    changed = sum(1 for left, right in zip(before, after, strict=True) if abs(left - right) > threshold)
+    return changed / len(before)
+
+
 def cycle_scene_tab() -> None:
     """Select the next scene tab through the UI (Ctrl+Tab).
 
@@ -578,7 +656,10 @@ def complete_file_dialog(
 
     dialog = owner_spec.child_window(title=expected_dialog_title, control_type="Window")
     if not dialog.exists(timeout=remaining(), retry_interval=0.05):
-        raise UIAutomationError(f"Expected file dialog did not appear: {expected_dialog_title}")
+        raise UIAutomationError(
+            f"Expected file dialog did not appear: {expected_dialog_title}; "
+            f"owned windows: {owned_window_titles()}"
+        )
     if dialog.window_text() != expected_dialog_title:
         raise UIAutomationError(f"Unexpected file dialog: {dialog.window_text()}")
     dialog_wrapper = dialog.wrapper_object()
@@ -711,6 +792,50 @@ def complete_file_dialog(
         file_type=selected_file_type,
         completed_at=time.time(),
     )
+
+
+def _owner_spec():
+    from pywinauto import Desktop
+
+    handles = _native_cascadeur_handles()
+    if not handles:
+        return None
+    desktop = Desktop(backend="uia")
+    owner = max(
+        (desktop.window(handle=handle).wrapper_object() for handle in handles),
+        key=lambda item: item.rectangle().width() * item.rectangle().height(),
+    )
+    return desktop.window(handle=owner.handle)
+
+
+def owned_window_titles() -> list[str]:
+    """List the titles of windows owned by the main Cascadeur window (dialogs, modals)."""
+    try:
+        spec = _owner_spec()
+        if spec is None:
+            return []
+        return [item.window_text() for item in spec.wrapper_object().children(control_type="Window")]
+    except Exception:  # pragma: no cover - diagnostics only
+        return []
+
+
+def cancel_owned_file_dialogs() -> list[str]:
+    """Cancel every owned native file dialog (identified by its Cancel button ID 2)."""
+    canceled: list[str] = []
+    try:
+        spec = _owner_spec()
+        if spec is None:
+            return canceled
+        for window in spec.wrapper_object().children(control_type="Window"):
+            buttons = [
+                item for item in window.descendants(control_type="Button") if item.element_info.automation_id == "2"
+            ]
+            if len(buttons) == 1:
+                buttons[0].click_input()
+                canceled.append(window.window_text())
+    except Exception:  # pragma: no cover - best effort recovery
+        pass
+    return canceled
 
 
 def cancel_file_flow(*, expected_dialog_title: str, options_title: str | None = None) -> bool:

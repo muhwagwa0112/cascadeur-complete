@@ -1,0 +1,128 @@
+"""File-level adapters that Cascadeur exposes through Python without a dialog."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from ..handler_registry import handler
+
+
+def _autosave_dir():
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        raise RuntimeError("LOCALAPPDATA is unavailable")
+    return (Path(local) / "Nekki Limited" / "Cascadeur" / "autosave").resolve()
+
+
+def _groups(context, view):
+    tool = context["csc"].app.get_application().get_tools_manager().get_tool("SelectionGroupsTool")
+    editor = tool.editor(view)
+    core = editor.core()
+    rows = {}
+    for index, group in dict(core.get_groups()).items():
+        objects = sorted(context["id_string"](item) for item in context["read_member"](group, "objects"))
+        rows[int(index)] = objects
+    return editor, rows
+
+
+@handler("io.selection_groups_import", postconditions=("selection_groups_loaded",))
+def selection_groups_import(_scene, arguments, _request, context):
+    path = Path(str(arguments["path"]))
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    view = context["scene_view"]()
+    editor, before = _groups(context, view)
+    editor.import_file(str(path).replace("\\", "/"))
+    _editor, after = _groups(context, view)
+    if not any(after.values()) or after == before:
+        raise AssertionError("POSTCONDITION_FAILED: selection groups were not loaded from the file")
+    return {"path": str(path), "groups": {str(key): len(value) for key, value in after.items()}}, []
+
+
+@handler("io.scene_parts_import", postconditions=("scene_part_objects_created",))
+def scene_parts_import(scene, arguments, _request, context):
+    path = Path(str(arguments["path"]))
+    if not path.is_file() or path.suffix.casefold() != ".partscasc":
+        raise ValueError("path must be an existing .partscasc file")
+    domain = context["domain_scene"](scene)
+    before = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
+    created = []
+
+    def insert(model, update, current_scene):
+        object_ids, _groups_ids = (
+            context["csc"]
+            .parts.Buffer.get()
+            .insert_objects_by_path(
+                str(path).replace("\\", "/"), update.root().group_id(), model, current_scene.assets_manager()
+            )
+        )
+        created.extend(context["id_string"](item) for item in object_ids)
+
+    domain.modify("Cascadeur Complete: import scene parts", insert)
+    after = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
+    new_ids = sorted(after - before)
+    if not new_ids:
+        raise AssertionError("POSTCONDITION_FAILED: scene parts import created no objects")
+    return {"path": str(path), "created_ids": new_ids, "reported_ids": sorted(created)}, []
+
+
+@handler("scene.open_autosave", postconditions=("autosave_scene_loaded",))
+def open_autosave(_scene, arguments, _request, context):
+    root = _autosave_dir()
+    candidates = sorted(root.glob("*.casc"), key=lambda item: item.stat().st_mtime, reverse=True)
+    if arguments.get("path"):
+        requested = Path(str(arguments["path"])).resolve()
+        if requested.parent != root or not requested.is_file():
+            raise ValueError("path must be an existing .casc file inside the Cascadeur autosave folder")
+        target = requested
+    elif candidates:
+        target = candidates[0]
+    else:
+        raise FileNotFoundError("The Cascadeur autosave folder has no scenes")
+    loaded = context["csc"].app.get_application().get_data_source_manager().load_scene(str(target))
+    current = context["scene_view"]()
+    observed = os.path.normcase(os.path.abspath(str(current.get_path_name()))) if current else ""
+    if observed != os.path.normcase(str(target)):
+        raise AssertionError("POSTCONDITION_FAILED: autosave scene is not the active document")
+    return {"path": str(target), "loaded": bool(loaded), "available": len(candidates)}, []
+
+
+@handler("scene.save_new_version", postconditions=("new_version_file_saved",))
+def save_new_version(_scene, _arguments, _request, context):
+    view = context["scene_view"]()
+    before = Path(str(view.get_path_name()))
+    if not before.is_file():
+        raise ValueError("Save As New Version needs a scene that was saved to a file")
+    siblings = {item.name for item in before.parent.glob("*.casc")}
+    context["csc"].app.get_application().get_action_manager().call_action("File.Save as new version")
+    after = Path(str(context["scene_view"]().get_path_name()))
+    created = sorted({item.name for item in before.parent.glob("*.casc")} - siblings)
+    if after == before or not after.is_file() or after.stat().st_size <= 0 or after.name not in created:
+        raise AssertionError("POSTCONDITION_FAILED: no new version file became the active document")
+    return {"previous_path": str(before), "path": str(after), "bytes": after.stat().st_size}, []
+
+
+@handler("render.video")
+def render_video(_scene, arguments, _request, context):
+    """Schedule a viewport video render; the host waits for a stable output file."""
+    path = Path(str(arguments["path"]))
+    if not path.is_absolute() or not path.parent.is_dir():
+        raise ValueError("An absolute output path in an existing directory is required")
+    width = int(arguments.get("width", 1280))
+    height = int(arguments.get("height", 720))
+    samples = int(arguments.get("samples", 16))
+    if not 16 <= width <= 8192 or not 16 <= height <= 8192 or not 1 <= samples <= 1024:
+        raise ValueError("width/height must be 16..8192 and samples 1..1024")
+    parameters = context["csc"].tools.RenderParameters()
+    parameters.width = width
+    parameters.height = height
+    parameters.samples = samples
+    view = context["scene_view"]()
+    renderer = context["csc"].app.get_application().get_tools_manager().get_tool("RenderToFile")
+    renderer.play_to_video_file(view, parameters, str(path))
+    return {
+        "path": str(path),
+        "scheduled": True,
+        "parameters": {"width": width, "height": height, "samples": samples},
+    }, []

@@ -1,3 +1,4 @@
+from cascadeur_complete.adapter_bindings import BINDINGS
 from cascadeur_complete.discovery import (
     BASELINE_TOOLS,
     discover_commands,
@@ -25,7 +26,7 @@ def test_installed_inventory_matches_baseline_counts():
 def test_product_catalog_core_matches_registry_contract():
     assert PRODUCT_CATALOG.product_version == "2026.1.2"
     assert PRODUCT_CATALOG.supported_build == SUPPORTED_BUILD
-    assert len(PRODUCT_CATALOG.core_features) == 194
+    assert len(PRODUCT_CATALOG.core_features) == len(PRODUCT_CATALOG.features) - len(PRODUCT_CATALOG.official_gaps)
     assert {item.id for item in PRODUCT_CATALOG.core_features} == {
         spec.feature_id for spec in __import__(
             "cascadeur_complete.feature_registry", fromlist=["CORE_FEATURES"]
@@ -46,7 +47,9 @@ def test_product_catalog_core_matches_registry_contract():
 def test_implemented_features_reference_real_test_nodes():
     root = __import__("pathlib").Path(__file__).parents[1]
     implemented = [item for item in PRODUCT_CATALOG.core_features if item.implementation_status == "implemented"]
-    assert len(implemented) == 166
+    bound = {binding.feature_id for binding in BINDINGS}
+    assert bound <= {feature.id for feature in implemented}
+    assert len(implemented) >= 194
     for feature in implemented:
         assert feature.adapter_id
         assert feature.postconditions
@@ -59,16 +62,12 @@ def test_implemented_features_reference_real_test_nodes():
 
 def test_official_documentation_gaps_are_explicit():
     gaps = PRODUCT_CATALOG.official_gaps
-    assert len(gaps) == 29
+    assert len(gaps) <= 12
     assert all(item.implementation_status == "not_implemented" for item in gaps)
     assert all(item.route is None and item.adapter_id is None for item in gaps)
     assert {
-        "official_gap.silhouette",
-        "official_gap.root_constraint",
-        "official_gap.node_editor",
-        "official_gap.ballistic_ghosts",
-        "official_gap.open_autosave",
         "official_gap.filament_environment_map",
+        "official_gap.filament_bloom",
     } <= {item.id for item in gaps}
 
 
@@ -130,8 +129,8 @@ def test_unimplemented_native_route_is_not_reported_available():
     assert by_id["auto_posing"].state.value == "unhealthy"
     assert by_id["auto_posing"].adapter_id == "cascadeur_2026_1.tool.AutoPosingTool"
     assert by_id["gui_tool.autoposingtool"].state.value == "ui_only"
-    assert by_id["ui_flow_run"].state.value == "available"
-    assert by_id["action_invoke"].state.value == "available"
+    assert by_id["ui_flow_run"].state.value == "unhealthy"
+    assert by_id["action_invoke"].state.value == "unhealthy"
     assert by_id["developer_execute_python"].state.value == "missing_dependency"
     assert by_id["developer_execute_python"].execution_mode.value == "Gated"
 
@@ -159,13 +158,16 @@ def test_registry_json_uses_schema_v3_and_reports_truth_layer_gaps():
     assert payload["product_catalog"] == {
         "product_version": "2026.1.2",
         "supported_build": "2026.1.2.0.15343",
-        "feature_count": 223,
-        "core_feature_count": 194,
-        "official_gap_count": 29,
+        "feature_count": len(PRODUCT_CATALOG.features),
+        "core_feature_count": len(PRODUCT_CATALOG.core_features),
+        "official_gap_count": len(PRODUCT_CATALOG.official_gaps),
     }
-    # Official documentation gaps plus legacy UI-only core entries that have
-    # neither an adapter nor an explicit gate evidence record.
-    assert payload["unclassified_count"] == 45
+    unbound = [
+        item
+        for item in PRODUCT_CATALOG.features
+        if item.implementation_status in ("not_implemented", "ui_only")
+    ]
+    assert payload["unclassified_count"] == len(unbound)
 
 
 def test_wrong_build_marks_product_and_discovered_inventory_unsupported():

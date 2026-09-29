@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from cascadeur_complete.adapter_bindings import BINDINGS, BY_FEATURE
 from cascadeur_complete.product_catalog import PRODUCT_CATALOG
+from cascadeur_complete.service import HOST_POSTCONDITIONS
 from tests.test_postcondition_contract import bridge  # noqa: F401  (fixture)
 
 
@@ -21,7 +22,8 @@ def test_catalog_rows_match_adapter_bindings():
 def test_every_binding_operation_has_a_bridge_handler(bridge):  # noqa: F811
     _runtime, registry = bridge
     registered = set(registry.registered_operations())
-    assert sorted({item.operation for item in BINDINGS} - registered) == []
+    host_only = {"system.ui_file_flow"} & set(HOST_POSTCONDITIONS)
+    assert sorted({item.operation for item in BINDINGS} - registered - host_only) == []
 
 
 def test_shared_operations_are_disambiguated_by_fixed_arguments():
@@ -29,13 +31,14 @@ def test_shared_operations_are_disambiguated_by_fixed_arguments():
     for binding in BINDINGS:
         by_operation.setdefault(binding.operation, []).append(binding)
     for operation, bindings in by_operation.items():
-        if len(bindings) < 2:
+        if len(bindings) < 2 or operation == "system.ui_file_flow":
+            # UI file flows are disambiguated by the per-feature dialog registry.
             continue
         signatures = {tuple(sorted(item.fixed_arguments.items())) for item in bindings}
-        same_contract = len({item.postconditions for item in bindings}) == 1 and not any(
-            item.fixed_arguments for item in bindings
-        )
-        assert len(signatures) == len(bindings) or same_contract, operation
+        # Features sharing an operation must differ in fixed arguments unless they
+        # are documented aliases with an identical contract (e.g. Root Constraint).
+        contracts = {(tuple(sorted(item.fixed_arguments.items())), item.postconditions) for item in bindings}
+        assert len(signatures) == len(contracts), operation
 
 
 def test_binding_lookup_is_complete():

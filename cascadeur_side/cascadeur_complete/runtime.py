@@ -1000,8 +1000,11 @@ def _run_operation(scene, operation, request):
         return {"schema": schema, "counts": counts}, []
     if name == "system.action_invoke":
         action_id = str(args["action_id"])
+        # Installed Python commands are registered with the ActionManager under
+        # the "Commands." menu prefix; native actions (Scene.Undo) are not.
+        dispatched = "Commands." + action_id if args.get("command") else action_id
         before = scene_state(scene)
-        result = csc.app.get_application().get_action_manager().call_action(action_id)
+        result = csc.app.get_application().get_action_manager().call_action(dispatched)
         after = scene_state(scene)
         postcondition = args.get("postcondition")
         if postcondition:
@@ -1010,6 +1013,7 @@ def _run_operation(scene, operation, request):
             raise AssertionError("POSTCONDITION_FAILED: action made no observable scene change")
         return {
             "action_id": action_id,
+            "dispatched_action_id": dispatched,
             "return_value": json_safe(result),
             "before": before["revision"],
             "after": after["revision"],
@@ -1463,7 +1467,25 @@ YIELDING_OPERATIONS = frozenset(
     {
         "render.viewport_capture",
         "render.image",
+        "render.video",
         "io.export_image",
+        "scene.open_autosave",
+        "timeline.playback",
+        "render.viewport_layout",
+        "view.silhouette",
+        "view.isometric_grid",
+        "view.composition",
+        "view.trajectory",
+        "view.trajectory_translate",
+        "view.trajectory_rotate",
+        "view.trajectory_direction",
+        "view.trajectory_edit",
+        "view.ballistic_ghosts",
+        "view.fingers_drawing",
+        "physics.autophysics_freeze",
+        "view.ghost",
+        "view.node_editor",
+        "view.control_picker",
         "physics.auto_enable",
         "physics.auto_snap",
         "system.action_dispatch",

@@ -194,11 +194,31 @@ def fix_scene(scene, _arguments, _request, context):
     before = context["scene_state"](context["scene_view"]() or scene)["revision"]
     fixer.run(domain)
     fixed = context["scene_state"](context["scene_view"]() or scene)["revision"]
-    fixer.run(domain)
-    again = context["scene_state"](context["scene_view"]() or scene)["revision"]
-    if fixed != again:
-        raise AssertionError("POSTCONDITION_FAILED: Fix Scene is not idempotent; the scene still needed repairs")
+    viewer = domain.model_viewer().behaviour_viewer()
+
+    def owners(name):
+        try:
+            return {viewer.get_behaviour_owner(item) for item in viewer.get_behaviours(name)}
+        except RuntimeError:
+            return set()
+
+    problems = []
+    material_owners = owners("Material")
+    problems += [
+        "MeshObject without Material: " + context["id_string"](item) for item in owners("MeshObject") - material_owners
+    ]
+    tpose_owners = owners("TPose")
+    problems += [
+        "controller without TPose: " + context["id_string"](item)
+        for item in (owners("BoxView") | owners("Point")) - tpose_owners
+    ]
+    for export in viewer.get_behaviours("FbxExport"):
+        if viewer.get_behaviour_data(export, "is_exported").is_null():
+            problems.append(
+                "FbxExport without is_exported: " + context["id_string"](viewer.get_behaviour_owner(export))
+            )
     report, _warnings = validate_scene(scene, {}, {}, context)
-    if not report["valid"]:
-        raise AssertionError("POSTCONDITION_FAILED: scene validation reports issues after Fix Scene")
+    problems += [str(item) for item in report["issues"]]
+    if problems:
+        raise AssertionError("POSTCONDITION_FAILED: Fix Scene left issues: " + "; ".join(problems[:10]))
     return {"changed": before != fixed, "before_revision": before, "after_revision": fixed}, []

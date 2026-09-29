@@ -55,9 +55,27 @@ def _property_value(behaviour_viewer, behaviour_id, property_name, property_type
     if not callable(getter):
         return None
     try:
-        return context["json_safe"](getter(behaviour_id, property_name))
+        raw = getter(behaviour_id, property_name)
+        if suffix in ("data", "setting") and not raw.is_null():
+            return {
+                "id": context["id_string"](raw),
+                "value": context["json_safe"](_current_value(raw, suffix, context)),
+            }
+        return context["json_safe"](raw)
     except Exception as exc:
         return {"unreadable": True, "error": str(exc)}
+
+
+def _current_value(identifier, suffix, context):
+    """Read a data value (static or at the current frame) or a setting value."""
+    domain = context["domain_scene"](context["scene_view"]())
+    viewer = domain.model_viewer().data_viewer()
+    if suffix == "setting":
+        return viewer.get_setting_value(identifier)
+    data = viewer.get_data(identifier)
+    if str(getattr(data.mode, "name", data.mode)) == "Static":
+        return viewer.get_data_value(identifier)
+    return viewer.get_data_value(identifier, int(domain.get_current_frame(False)))
 
 
 @handler("object.hierarchy", postconditions=("acyclic_parent_graph",))

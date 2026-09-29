@@ -76,7 +76,7 @@ def _reference_owner(domain, behaviour_id, name, context):
 # -- rig mode -------------------------------------------------------------------------
 
 
-@handler("rig.mode", postconditions=("rig_prototypes_present", "rig_generated_from_prototypes"))
+@handler("rig.mode", postconditions=("rig_mode_active", "rig_generated_from_prototypes"))
 def rig_mode(scene, arguments, _request, context):
     import rig_mode.off as rig_mode_off
     import rig_mode.on as rig_mode_on
@@ -87,23 +87,28 @@ def rig_mode(scene, arguments, _request, context):
         raise ValueError("rig mode action must be on, off or regenerate")
     before_links = _owners(domain, "TechnicalLinks", context)
     if action in ("on", "regenerate"):
+        if _owners(domain, "AnimationInfo", context):
+            raise ValueError("The scene is already in Rig Mode")
         rig_ids = _owners(domain, "RigInfo", context)
-        if len(rig_ids) != 1:
-            raise ValueError("Rig Mode needs exactly one RigInfo in the scene; found " + str(len(rig_ids)))
-        _select(domain, [context["object_id"](next(iter(rig_ids)))], context)
+        if len(rig_ids) > 1:
+            raise ValueError("Rig Mode needs at most one RigInfo in the scene; found " + str(len(rig_ids)))
+        if rig_ids:
+            _select(domain, [context["object_id"](next(iter(rig_ids)))], context)
         rig_mode_on.run_raw(domain, list(RIG_MODE_COLOR))
-        if not _owners(domain, "TechnicalLinks", context):
-            raise AssertionError("POSTCONDITION_FAILED: Rig Mode produced no rig element prototypes")
+        # Rig Mode keeps its preserved animation on AnimationInfo; Cascadeur's own
+        # commands use that behaviour to detect Rig Mode.
+        if not _owners(domain, "AnimationInfo", context):
+            raise AssertionError("POSTCONDITION_FAILED: Rig Mode did not become active")
     if action in ("off", "regenerate"):
         if not _owners(domain, "TechnicalLinks", context):
             raise ValueError("The scene has no rig element prototypes; enable Rig Mode first")
         rig_mode_off.run(domain, True)
-        if _owners(domain, "TechnicalLinks", context):
-            raise AssertionError("POSTCONDITION_FAILED: rig prototypes remain after generating the rig")
+        if _owners(domain, "TechnicalLinks", context) or _owners(domain, "AnimationInfo", context):
+            raise AssertionError("POSTCONDITION_FAILED: Rig Mode is still active after generating the rig")
         if not _owners(domain, "RigInfo", context):
             raise AssertionError("POSTCONDITION_FAILED: generated rig has no RigInfo")
     return {
-        "observed_postconditions": ["rig_prototypes_present"] if action == "on" else ["rig_generated_from_prototypes"],
+        "observed_postconditions": ["rig_mode_active"] if action == "on" else ["rig_generated_from_prototypes"],
         "action": action,
         "rig_elements_before": len(before_links),
         "rig_elements_after": len(_owners(domain, "TechnicalLinks", context)),
@@ -202,11 +207,19 @@ def prototype_mirror(scene, arguments, _request, context):
         .get_tool("RiggingToolWindowTool")
         .editor(context["scene_view"]())
     )
+    import rig_gen.rig_context_gen.structures as rig_structures
+
     plane = arguments.get("mirror_plane")
-    plane = editor.get_character_mirror_plane() if plane is None else int(plane)
+    plane = int(editor.get_character_mirror_plane()) if plane is None else int(plane)
     before = _owners(domain, "TechnicalLinks", context)
     _select(domain, ids, context)
-    mirror_actions.create_mirror(domain, original, mirrored, plane, context["csc"].rig.AddElementData().point_color)
+    mirror_actions.create_mirror(
+        domain,
+        original,
+        mirrored,
+        rig_structures.MirrorPlane(plane),
+        context["csc"].rig.AddElementData().point_color,
+    )
     created = sorted(_owners(domain, "TechnicalLinks", context) - before)
     if not created:
         raise AssertionError("POSTCONDITION_FAILED: no mirrored rig element was created")
@@ -600,11 +613,14 @@ def rig_json_import(scene, arguments, _request, context):
     path = Path(str(arguments["path"]))
     if not path.is_file():
         raise FileNotFoundError(path)
+    if not _owners(domain, "AnimationInfo", context):
+        raise ValueError("Rig JSON import runs in Rig Mode; enable Rig Mode first")
     before = _owners(domain, "TechnicalLinks", context)
+    joint_paths = context["csc"].model.PathName.get_path_names_by_behavior("Joint", domain.model_viewer())
     json_import.generate_proto_from_json(
         domain,
         str(path),
-        str(arguments.get("selected_path", "")),
+        joint_paths,
         context["csc"].rig.AddElementData().point_color,
         bool(arguments.get("set_t_pose", False)),
     )
@@ -612,3 +628,95 @@ def rig_json_import(scene, arguments, _request, context):
     if not created:
         raise AssertionError("POSTCONDITION_FAILED: rig JSON created no rig element prototypes")
     return {"path": str(path), "created_rig_element_ids": created}, []
+
+
+def _dynamic_names(domain, object_id):
+    import common.behavior_operations as behaviour_operations
+
+    viewer = _viewer(domain)
+    data = domain.model_viewer().data_viewer()
+    names = set()
+    for behaviour_id in viewer.get_behaviours(object_id):
+        if str(viewer.get_behaviour_name(behaviour_id)) in ("Dynamic", "DynamicBehaviour"):
+            try:
+                names.add(str(behaviour_operations.dynamic_behavior_name(viewer, data, behaviour_id)))
+            except Exception:
+                continue
+    return names
+
+
+@handler("rig.untwist", postconditions=("untwist_dependencies_created",))
+def untwist(scene, arguments, _request, context):
+    """Create a ProxyUntwist on the target rig element's box (parent -> target -> child chain)."""
+    import pycsc
+    from rig_gen.basic_objects.untwist.proxy_untwist import ProxyUntwist
+
+    domain = context["domain_scene"](scene)
+    parent, child, target = _require(
+        domain,
+        [
+            arguments.get("parent_element_id", ""),
+            arguments.get("child_element_id", ""),
+            arguments.get("target_element_id", ""),
+        ],
+        context,
+        "untwist rig elements",
+    )
+    viewer = _viewer(domain)
+    links = {item: _technical_links(domain, item, context) for item in (parent, child, target)}
+
+    def owner(item, field):
+        reference = viewer.get_behaviour_reference(links[item], field)
+        if reference.is_null():
+            raise ValueError(f"rig element has no {field}: " + context["id_string"](item))
+        return viewer.get_behaviour_owner(reference)
+
+    def parent_of(item):
+        return viewer.get_behaviour_object(viewer.get_behaviour_by_name(item, "Basic"), "parent")
+
+    if parent_of(target) != parent or parent_of(child) != target:
+        raise ValueError("Expected hierarchy parent -> target -> child between the rig elements")
+    parent_joint, child_joint, box = owner(parent, "joint"), owner(child, "joint"), owner(target, "box")
+    if "UntwistSettings" in _dynamic_names(domain, box):
+        raise ValueError("The target already has an Untwist")
+    axis = int(arguments.get("axis", 0))
+    if axis not in (0, 1, 2):
+        raise ValueError("axis must be 0, 1 or 2")
+    py_scene = pycsc.wrap(domain)
+
+    def create(current):
+        ProxyUntwist.set_by_joints_and_box(
+            pycsc.wrap(parent_joint, current).to(pycsc.objects.Joint),
+            pycsc.wrap(child_joint, current).to(pycsc.objects.Joint),
+            pycsc.wrap(box, current).to(pycsc.objects.ProxyBox),
+            bool(arguments.get("autocompute", True)),
+            axis,
+        )
+
+    if py_scene.edit("Cascadeur Complete: create untwist", create) is False:
+        raise RuntimeError("Untwist creation was rejected by Cascadeur")
+    names = _dynamic_names(domain, box)
+    if not {"UntwistSettings", "UntwistDependencies"} <= names:
+        raise AssertionError("POSTCONDITION_FAILED: untwist behaviours were not added to the target box")
+    return {"box_id": context["id_string"](box), "axis": axis}, []
+
+
+@handler("rig.quick_rig", postconditions=("rig_prototypes_created_from_template",))
+def quick_rig(scene, arguments, _request, context):
+    """Build Rig Mode prototypes from a Quick Rigging Tool template (.qrigcasc)."""
+    from pathlib import Path
+
+    domain = context["domain_scene"](scene)
+    if not _owners(domain, "AnimationInfo", context):
+        raise ValueError("Quick Rig runs in Rig Mode; enable Rig Mode first")
+    path = Path(str(arguments["template_path"]))
+    if not path.is_file() or path.suffix.casefold() != ".qrigcasc":
+        raise ValueError("template_path must be an existing .qrigcasc Quick Rig template")
+    view = context["scene_view"]()
+    editor = context["csc"].app.get_application().get_tools_manager().get_tool("RiggingToolWindowTool").editor(view)
+    before = _owners(domain, "TechnicalLinks", context)
+    result = editor.create_from_qrt_by_fileName(str(path).replace("\\", "/"))
+    created = sorted(_owners(domain, "TechnicalLinks", context) - before)
+    if not created:
+        raise AssertionError("POSTCONDITION_FAILED: the Quick Rig template created no rig element prototypes")
+    return {"template": str(path), "created_rig_element_ids": created, "return_value": context["json_safe"](result)}, []

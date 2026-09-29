@@ -200,9 +200,7 @@ def _object_rename(s: LiveSession) -> Any:
 
 @scenario("object_parent", CUBE)
 def _object_parent(s: LiveSession) -> Any:
-    return s.change(
-        "object_parent", "object.parent", {"ids": [_live_cube(s)], "parent_id": s.object_named("joint1")}
-    )
+    return s.change("object_parent", "object.parent", {"ids": [_live_cube(s)], "parent_id": s.object_named("joint1")})
 
 
 @scenario("object_unparent", CUBE)
@@ -292,19 +290,6 @@ def _export_image(s: LiveSession) -> Any:
 # -- file exchange --------------------------------------------------------------------
 
 
-@scenario("export_fbx", CUBE)
-def _export_fbx(s: LiveSession) -> Any:
-    result = s.change("export_fbx", "io.export_fbx", {"path": s.output("cube.fbx")})
-    s.exported_fbx = result["path"]
-    return result
-
-
-@scenario("import_fbx", CUBE)
-def _import_fbx(s: LiveSession) -> Any:
-    source = getattr(s, "exported_fbx", None) or _export_fbx(s)["path"]
-    return s.change("import_fbx", "io.import_fbx", {"path": source})
-
-
 @scenario("export_dae", CUBE)
 def _export_dae(s: LiveSession) -> Any:
     result = s.change("export_dae", "io.export_dae", {"path": s.output("cube.dae")})
@@ -316,6 +301,19 @@ def _export_dae(s: LiveSession) -> Any:
 def _import_dae(s: LiveSession) -> Any:
     source = getattr(s, "exported_dae", None) or _export_dae(s)["path"]
     return s.change("import_dae", "io.import_dae", {"path": source})
+
+
+@scenario("export_fbx", CUBE)
+def _export_fbx(s: LiveSession) -> Any:
+    result = s.change("export_fbx", "io.export_fbx", {"path": s.output("cube.fbx")})
+    s.exported_fbx = result["path"]
+    return result
+
+
+@scenario("import_fbx", CUBE)
+def _import_fbx(s: LiveSession) -> Any:
+    source = getattr(s, "exported_fbx", None) or _export_fbx(s)["path"]
+    return s.change("import_fbx", "io.import_fbx", {"path": source})
 
 
 @scenario("import_audio", CUBE)
@@ -342,6 +340,21 @@ def _import_usd(s: LiveSession) -> Any:
         _export_usd(s)
         source = s.exported_usd
     return _ui_flow(s, "import", "usd", source)
+
+
+@scenario("action_invoke", CUBE)
+def _action_invoke(s: LiveSession) -> Any:
+    # A bound installed Python command; the product dispatcher is proven by it.
+    return s.change(
+        "command.add.primitives.cube",
+        "system.action_invoke",
+        {"action_id": "Add.Primitives.Cube", "expect_change": True},
+    )
+
+
+@scenario("ui_flow_run", CUBE)
+def _ui_flow_run(s: LiveSession) -> Any:
+    return _ui_flow(s, "export", "glb", s.output("dispatcher.glb"))
 
 
 @scenario("export_glb", CUBE)
@@ -386,3 +399,11 @@ def _undo(s: LiveSession) -> Any:
 @scenario("redo", CUBE)
 def _redo(s: LiveSession) -> Any:
     return s.change("redo", "system.redo", {"expect_change": True})
+
+
+@scenario("inventory_refresh", NONE)
+def _inventory_refresh(s: LiveSession) -> Any:
+    result = s.service.refresh_inventory(timeout=180)
+    if not result.get("ok"):
+        raise LiveValidationError(f"inventory refresh failed: {result}")
+    return {"counts": result.get("counts"), "features": result.get("feature_count")}

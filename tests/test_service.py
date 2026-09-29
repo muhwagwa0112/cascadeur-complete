@@ -168,9 +168,10 @@ def test_product_coverage_does_not_count_discovery_or_contract_only_rows(tmp_pat
     status = svc.capabilities(live=False)
     searched = svc.feature_search("", limit=500)
 
-    assert status["product_coverage"]["catalog_count"] == 223
-    assert status["product_coverage"]["supported"] == 0
-    assert status["product_coverage"]["support_percent"] == 0
+    assert status["product_coverage"]["catalog_count"] == 224
+    # Only host-only contract features (feature search/describe) count without live evidence.
+    assert status["product_coverage"]["supported"] == 2
+    assert status["product_coverage"]["support_percent"] == round(2 / 224 * 100, 2)
     assert searched and all(item["truth_layer"] == "product" for item in searched)
 
 
@@ -179,11 +180,11 @@ def test_ui_only_feature_returns_exact_gate_without_bridge_dispatch(tmp_path):
     bridge = FakeBridge(paths.snapshots)
     svc = CascadeurService(paths, client=bridge)
 
-    result = svc.prepare_change("grid", "tool.ViewGridTool", {})
+    result = svc.prepare_change("settings_set", "action.Settings", {})
 
     assert result["ok"] is False
     assert result["error_code"] == "UI_LOCKED"
-    assert "tool.ViewGridTool" in result["error_message"]
+    assert "action.Settings" in result["error_message"]
     assert bridge.calls == []
 
 
@@ -300,7 +301,10 @@ def test_host_postcondition_exception_also_restores_snapshot(tmp_path, monkeypat
     destination = tmp_path / "frame.png"
     prepared = svc.prepare_change("render_image", "render.image", {"path": str(destination)})
     snapshot_id = Path(prepared["backup_path"]).stem
-    monkeypatch.setattr(svc, "_wait_for_output_file", lambda *_args: (_ for _ in ()).throw(RuntimeError("boom")))
+    def fail_output(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(svc, "_wait_for_output_file", fail_output)
     restored = ResultEnvelope(
         ok=True,
         feature_id="change_rollback",
@@ -417,13 +421,7 @@ def test_ui_export_flow_verifies_exact_dialog_and_stable_file(tmp_path, monkeypa
     prepared = svc.prepare_change(
         "export_usd",
         "system.ui_file_flow",
-        {
-            "action_id": "File.Export.Scene.Usd...",
-            "path": str(destination),
-            "dialog_title": "Export. preset: scene",
-            "file_type_extension": ".usd",
-            "output": True,
-        },
+        service_module.ui_file_flow_arguments("export", "usd", str(destination))[1],
     )
 
     result = svc.commit_change(prepared["confirmation_token"], timeout=2)
@@ -467,13 +465,7 @@ def test_ui_import_flow_requires_changed_scene_revision(tmp_path, monkeypatch):
     prepared = svc.prepare_change(
         "import_usd",
         "system.ui_file_flow",
-        {
-            "action_id": "File.Import.Scene.Usd...",
-            "path": str(source),
-            "dialog_title": "Import. preset: scene",
-            "file_type_extension": ".usd",
-            "input": True,
-        },
+        service_module.ui_file_flow_arguments("import", "usd", str(source))[1],
     )
 
     result = svc.commit_change(prepared["confirmation_token"], timeout=2)
@@ -787,3 +779,15 @@ def test_failed_job_can_retry_from_persisted_contract(tmp_path):
             break
         time.sleep(0.01)
     assert record is not None and record.status == "succeeded"
+
+
+def test_ui_flow_cannot_dispatch_an_unregistered_action(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+    arguments = service_module.ui_file_flow_arguments("export", "usd", str(tmp_path / "out.usd"))[1]
+    arguments["action_id"] = "Scene.Delete objects"
+
+    refused = svc.prepare_change("export_usd", "system.ui_file_flow", arguments)
+
+    assert refused["ok"] is False
+    assert refused["error_code"] == "INVALID_REQUEST"

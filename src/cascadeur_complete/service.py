@@ -33,12 +33,37 @@ from .uia import (
     UIAutomationError,
     active_scene_title,
     cancel_file_flow,
+    cancel_owned_file_dialogs,
+    capture_window_sample,
     complete_file_dialog,
     cycle_scene_tab,
     resolve_autophysics_snap_warning,
     resolve_optional_rig_mode_helper,
+    sample_difference,
 )
 from .verification import LiveEvidenceStore
+
+# View toggles only change what Cascadeur draws; the host proves the effect by
+# comparing captures of the Cascadeur window before and after the action.
+VIEW_OPERATIONS = frozenset(
+    {
+        "view.silhouette",
+        "view.isometric_grid",
+        "view.composition",
+        "view.trajectory",
+        "view.trajectory_translate",
+        "view.trajectory_rotate",
+        "view.trajectory_direction",
+        "view.trajectory_edit",
+        "view.ballistic_ghosts",
+        "view.fingers_drawing",
+        "physics.autophysics_freeze",
+        "view.ghost",
+        "view.node_editor",
+        "view.control_picker",
+    }
+)
+VIEW_CHANGE_FRACTION = 0.002
 
 # Operations whose success is a new or replaced file at arguments["path"].
 OUTPUT_OPERATIONS = frozenset(
@@ -59,6 +84,7 @@ OUTPUT_OPERATIONS = frozenset(
 HOST_POSTCONDITIONS = {
     **{operation: ("output_file", "nonzero_bytes") for operation in OUTPUT_OPERATIONS},
     "scene.open": ("stable_scene_path",),
+    "scene.open_autosave": ("stable_scene_path",),
     "scene.activate": ("stable_scene_path",),
     "scene.new": ("stable_scene_path",),
     "safety.rollback": ("stable_scene_path",),
@@ -74,6 +100,7 @@ HOST_POSTCONDITIONS = {
     "physics.auto_snap": ("scene_revision_changed",),
     "system.introspect": ("feature_registry",),
     "timeline.playback": ("playback_frames_advance", "playback_frame_stable"),
+    **{operation: ("viewport_render_changed",) for operation in VIEW_OPERATIONS},
 }
 
 MUTATION_VERBS = (
@@ -148,6 +175,98 @@ def ui_file_flow_arguments(
         "output": direction == "export",
         "allow_overwrite": allow_overwrite,
     }
+
+
+# Dialog-driven Cascadeur 2026.1.2 file flows beyond USD/GLB/GLTF/VRM. Each
+# feature is bound to one exact action id and owned dialog title; the host only
+# fills that dialog and verifies a file or scene postcondition afterwards.
+UI_FILE_FLOWS: dict[str, dict[str, Any]] = {
+    "save_as_without_assets": {
+        "action_id": "File.Save as (no assets)",
+        "dialog_title": "Save as (no assets)",
+        "extension": ".casc",
+        "direction": "export",
+    },
+    "import_scene_to_current": {
+        "action_id": "File.Import.Scene to current...",
+        "dialog_title": "Import scene to current",
+        "extension": ".casc",
+        "direction": "import",
+    },
+    "selection_groups_export": {
+        "action_id": "File.Export.Selection groups...",
+        "dialog_title": "Export selection groups",
+        "extension": ".json",
+        "direction": "export",
+    },
+    "scene_parts_export": {
+        "action_id": "File.Export.PartsCasc",
+        "dialog_title": "Export parts",
+        "extension": ".partscasc",
+        "direction": "export",
+    },
+    "import_image": {
+        "action_id": "View.Reference image",
+        "dialog_title": "Reference image",
+        "extension": None,
+        "direction": "import",
+    },
+    "import_video": {
+        "action_id": "View.Bind video",
+        "dialog_title": "Bind video",
+        "extension": None,
+        "direction": "import",
+    },
+    "camera_textures": {
+        "action_id": "View.Bind texture",
+        "dialog_title": "Bind texture",
+        "extension": None,
+        "direction": "import",
+    },
+}
+
+
+def dialog_flow_arguments(feature_id: str, path: str, allow_overwrite: bool = False) -> dict[str, Any]:
+    """Return the exact action/dialog contract for a registered dialog file flow."""
+    try:
+        flow = UI_FILE_FLOWS[feature_id]
+    except KeyError as exc:
+        raise ValueError(f"{feature_id} has no registered dialog file flow") from exc
+    extension = flow["extension"]
+    if extension and not path.casefold().endswith(extension):
+        raise ValueError(f"{feature_id} path must end with {extension}")
+    return {
+        "action_id": flow["action_id"],
+        "path": path,
+        "dialog_title": flow["dialog_title"],
+        "options_title": None,
+        "options_accept_title": None,
+        "file_type_extension": None,
+        "input": flow["direction"] == "import",
+        "output": flow["direction"] == "export",
+        "allow_overwrite": allow_overwrite,
+    }
+
+
+def _expected_ui_flow(feature_id: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
+    """Recompute the only allowed UI flow contract for a feature and path."""
+    path = str(arguments.get("path", ""))
+    if feature_id in UI_FILE_FLOWS:
+        return dialog_flow_arguments(feature_id, path, bool(arguments.get("allow_overwrite")))
+    direction, _, format_name = feature_id.partition("_")
+    if format_name not in ("usd", "glb", "gltf", "vrm"):
+        return None
+    presets = ("scene", "model", "animation") if format_name == "usd" else ("scene",)
+    for preset in presets:
+        try:
+            _feature, expected = ui_file_flow_arguments(
+                direction, format_name, path, preset, bool(arguments.get("allow_overwrite"))
+            )
+        except ValueError:
+            continue
+        if expected["action_id"] == arguments.get("action_id"):
+            return expected
+    return None
 
 
 def add_postconditions(result: ResultEnvelope, detail: str, *identifiers: str) -> None:
@@ -286,8 +405,14 @@ class CascadeurService:
         product_states: dict[str, int] = {}
         for item in product_features:
             product_states[item.state.value] = product_states.get(item.state.value, 0) + 1
+        # Supported: live evidence on this build, or a host-only feature (feature
+        # search/describe) that never reaches Cascadeur and is proven by contract.
         supported = sum(
-            item.verification.value == "verified_live" and item.state == CapabilityState.AVAILABLE
+            item.state == CapabilityState.AVAILABLE
+            and (
+                item.verification.value == "verified_live"
+                or (item.verification.value == "contract" and item.route.startswith("host."))
+            )
             for item in product_features
         )
         return {
@@ -303,7 +428,10 @@ class CascadeurService:
                 "supported": supported,
                 "support_percent": round((supported / len(product_features)) * 100, 2) if product_features else 0,
                 "states": product_states,
-                "definition": "dedicated adapter + exact postconditions + live evidence on this build",
+                "definition": (
+                    "dedicated adapter + exact postconditions + live evidence on this build "
+                    "(host-only features: contract evidence)"
+                ),
             },
             "discovered_inventory_count": len(self._features) - len(product_features),
             "states": states,
@@ -413,16 +541,13 @@ class CascadeurService:
             action_id = str(arguments.get("action_id", ""))
             return None if self.action_allowed(feature.id, action_id) else "Action id is not bound to this feature"
         if operation_name == "system.ui_file_flow":
-            ui_file_features = {
-                "import_usd",
-                "export_usd",
-                "import_glb",
-                "export_glb",
-                "import_gltf",
-                "export_gltf",
-                "import_vrm",
-            }
-            return None if feature.id in ui_file_features else "UI file flow is not bound to this feature"
+            expected = _expected_ui_flow(feature.id, arguments)
+            if expected is None:
+                return "UI file flow is not bound to this feature"
+            keys = ("action_id", "dialog_title", "options_title", "options_accept_title", "file_type_extension")
+            if any(arguments.get(key) != expected[key] for key in keys):
+                return "UI file flow arguments differ from the registered action and dialog for this feature"
+            return None
         if feature.id == "view_mode" and operation_name in {"system.view_mode_get", "system.view_mode_set"}:
             return None
         aliases = {
@@ -441,11 +566,13 @@ class CascadeurService:
         """Merge the arguments a feature fixes (shared operations are feature-specific)."""
         merged = dict(arguments or {})
         try:
-            fixed = self.feature(feature_id).fixed_arguments
+            feature = self.feature(feature_id)
         except KeyError:
             return merged
-        for name, value in fixed.items():
+        for name, value in feature.fixed_arguments.items():
             merged.setdefault(name, value)
+        if feature.route.startswith(("action_invoke:", "command.")):
+            merged["command"] = True  # dispatch through the Commands.* ActionManager id
         return merged
 
     def feature_search(
@@ -979,6 +1106,10 @@ class CascadeurService:
             return self._host_error(record.feature_id, ErrorCode.SCENE_CHANGED, str(exc))
         output_path = record.operation.arguments.get("path")
         before_output = self._file_signature(output_path) if output_path else None
+        before_view = None
+        if record.operation.name in VIEW_OPERATIONS:
+            self._wait_for_bridge_idle()
+            before_view = capture_window_sample()
         if record.operation.name == "system.ui_file_flow":
             result = self._execute_ui_file_flow(record, timeout, before_output)
         else:
@@ -1004,6 +1135,8 @@ class CascadeurService:
         try:
             if result.ok and record.operation.name == "scene.open":
                 result = self._wait_for_open_scene(result, str(record.operation.arguments["path"]), timeout)
+            if result.ok and record.operation.name == "scene.open_autosave":
+                result = self._wait_for_open_scene(result, str(result.result["path"]), timeout)
             if result.ok and record.operation.name in {"scene.activate", "scene.new"}:
                 payload = result.result if isinstance(result.result, dict) else {}
                 if not payload.get("tab_id"):
@@ -1018,6 +1151,15 @@ class CascadeurService:
                 result = self._wait_for_open_scene(result, str(working_path), timeout)
             if result.ok and record.operation.name == "physics.auto_snap":
                 result = self._complete_auto_physics_snap(result, timeout)
+            if result.ok and record.operation.name in VIEW_OPERATIONS:
+                self._wait_for_bridge_idle()
+                time.sleep(1.0)
+                changed = sample_difference(before_view, capture_window_sample())
+                if changed < VIEW_CHANGE_FRACTION:
+                    raise RuntimeError(f"the rendered window did not change after the view action ({changed:.4%})")
+                add_postconditions(
+                    result, f"{changed:.2%} of sampled window pixels changed", "viewport_render_changed"
+                )
             if result.ok and record.operation.name == "timeline.playback":
                 wants_play = record.operation.arguments.get("state") == "play"
                 moving = self._playback_moving()
@@ -1030,7 +1172,11 @@ class CascadeurService:
                 )
             if result.ok and record.operation.name in OUTPUT_OPERATIONS:
                 result = self._wait_for_output_file(
-                    result, str(record.operation.arguments["path"]), timeout, before_output
+                    result,
+                    str(record.operation.arguments["path"]),
+                    timeout,
+                    before_output,
+                    stable_seconds=3.0 if record.operation.name == "render.video" else 0.0,
                 )
         except Exception as exc:
             bridge_evidence = list(result.evidence)
@@ -1042,8 +1188,17 @@ class CascadeurService:
             )
             result.snapshot_id = Path(record.backup_path).stem if record.backup_path else None
             result.evidence = bridge_evidence
+        if result.ok and record.operation.name == "system.action_invoke":
+            add_postconditions(
+                result, "Host bound the action id to an installed command record", "registered_action_binding"
+            )
         if result.ok:
             self._record_live_evidence(record.feature_id, record.operation.name, result)
+            # The generic dispatchers are proven by any concrete bound dispatch.
+            if record.operation.name == "system.ui_file_flow":
+                self._record_live_evidence("ui_flow_run", record.operation.name, result)
+            if record.operation.name == "system.action_invoke" and record.feature_id.startswith("command."):
+                self._record_live_evidence("action_invoke", record.operation.name, result)
             self._rebuild_features()
             self._write_registry()
         elif record.backup_path:
@@ -1095,10 +1250,12 @@ class CascadeurService:
                 timeout=min(timeout, 30.0),
             )
         except Exception as exc:
-            cancel_file_flow(
+            if not cancel_file_flow(
                 expected_dialog_title=str(arguments["dialog_title"]),
                 options_title=arguments.get("options_title"),
-            )
+            ):
+                # Never leave an unexpected modal file dialog blocking Cascadeur.
+                cancel_owned_file_dialogs()
             worker.join(min(10.0, max(0.1, timeout)))
             is_uia = isinstance(exc, UIAutomationError)
             return self._host_error(
@@ -1179,6 +1336,9 @@ class CascadeurService:
         deadline = time.monotonic() + max(1.0, timeout)
         after = None
         while time.monotonic() < deadline:
+            # Let Cascadeur's event loop finish the asynchronous import between
+            # polls; a lingering drain would otherwise keep the UI thread busy.
+            self._wait_for_bridge_idle()
             after = self.refresh_live(timeout=min(20.0, max(1.0, deadline - time.monotonic())))
             if after.ok and after.scene_revision and after.scene_revision != before_revision:
                 break
@@ -1260,6 +1420,7 @@ class CascadeurService:
         deadline = time.monotonic() + max(1.0, timeout)
         latest = None
         while time.monotonic() < deadline:
+            self._wait_for_bridge_idle()
             latest = self.client.execute("auto_physics", [Operation(name="system.status")], timeout=15)
             if latest.ok and latest.scene_revision and latest.scene_revision != before_revision:
                 payload.update(
@@ -1324,17 +1485,22 @@ class CascadeurService:
         output_path: str,
         timeout: float,
         before_signature: tuple[int, int] | None,
+        *,
+        stable_seconds: float = 0.0,
     ) -> ResultEnvelope:
         path = Path(output_path)
         deadline = time.monotonic() + max(1.0, timeout)
         previous = None
         stable_observations = 0
+        stable_since = time.monotonic()
         while time.monotonic() < deadline:
             signature = self._file_signature(output_path)
             if signature is not None and signature[0] > 0 and signature != before_signature:
+                if signature != previous:
+                    stable_since = time.monotonic()
                 stable_observations = stable_observations + 1 if signature == previous else 1
                 previous = signature
-                if stable_observations >= 2:
+                if stable_observations >= 2 and time.monotonic() - stable_since >= stable_seconds:
                     payload = dict(initial.result) if isinstance(initial.result, dict) else {}
                     payload.update(
                         {

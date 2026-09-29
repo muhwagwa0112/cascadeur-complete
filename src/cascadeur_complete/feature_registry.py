@@ -346,8 +346,10 @@ ADAPTER_SPECS = dict(
     [
         _adapter("host.feature_search", requires_live=False),
         _adapter("host.feature_describe", requires_live=False),
-        _adapter("host.action_dispatcher", postconditions=("registered_action_binding",), requires_live=False),
-        _adapter("host.ui_flow_prepare", postconditions=("registered_uia_flow_token",), requires_live=False),
+        # Dispatchers reach Cascadeur: they need live evidence from a concrete
+        # bound command or UI file flow, not just the host binding contract.
+        _adapter("host.action_dispatcher", postconditions=("registered_action_binding",)),
+        _adapter("host.ui_flow_prepare", postconditions=("registered_uia_flow_token",)),
         _adapter("host.inventory_refresh", postconditions=("schema_counts", "feature_registry")),
         _adapter("system.status", postconditions=("scene_identity", "runtime_tools")),
         _adapter("system.logs", postconditions=("bounded_tail",), mode=ExecutionMode.NATIVE),

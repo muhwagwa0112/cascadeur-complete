@@ -63,6 +63,21 @@ BEHAVIOUR_FEATURES = {
         ("color", "use_color", "is_transparent", "is_both_side", "always_show_textures", "render_layer"),
         False,
     ),
+    # Filament material (Material behaviour); texture slots take image file paths.
+    "render.material": ("Material", None, False),
+    "render.material_textures": (
+        "Material",
+        (
+            "base_color_map",
+            "normal_map",
+            "emissive_color_map",
+            "roughness_map",
+            "metallic_map",
+            "reflectance_map",
+            "ambient_occlusion_map",
+        ),
+        False,
+    ),
     "objects.visibility": ("Basic", ("visibility",), False),
 }
 # Structural data that would corrupt a rig or camera if written directly.

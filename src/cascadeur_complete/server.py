@@ -8,7 +8,7 @@ from typing import Any, Literal
 from mcp.server import MCPServer
 
 from .models import ErrorCode, ExecutionMode, ResultEnvelope
-from .service import CascadeurService, ui_file_flow_arguments
+from .service import CascadeurService, dialog_flow_arguments, ui_file_flow_arguments
 
 mcp = MCPServer(
     "cascadeur-complete",
@@ -504,6 +504,29 @@ def ui_flow_prepare(
         allow_overwrite=allow_overwrite,
         ttl_seconds=ttl_seconds,
     )
+
+
+@mcp.tool()
+def file_dialog_prepare(
+    feature_id: Literal[
+        "save_as_without_assets",
+        "import_scene_to_current",
+        "selection_groups_export",
+        "scene_parts_export",
+        "import_image",
+        "import_video",
+        "camera_textures",
+    ],
+    path: str,
+    allow_overwrite: bool = False,
+    ttl_seconds: float = 300,
+) -> dict[str, Any]:
+    """Prepare a registered Cascadeur file dialog flow (exact action and owned dialog); commit with change_commit."""
+    try:
+        arguments = dialog_flow_arguments(feature_id, path, allow_overwrite)
+    except ValueError as exc:
+        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": str(exc)}
+    return service().prepare_change(feature_id, "system.ui_file_flow", arguments, ttl_seconds)
 
 
 @mcp.tool()

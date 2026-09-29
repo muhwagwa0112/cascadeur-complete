@@ -2,6 +2,7 @@ from . import (  # noqa: F401
     animation,
     behaviours,
     editing,
+    files,
     generation,
     io,
     layers,
@@ -14,12 +15,14 @@ from . import (  # noqa: F401
     system,
     timeline,
     timeline_edit,
+    view,
 )
 
 __all__ = [
     "animation",
     "behaviours",
     "editing",
+    "files",
     "generation",
     "io",
     "layers",
@@ -32,4 +35,5 @@ __all__ = [
     "system",
     "timeline",
     "timeline_edit",
+    "view",
 ]

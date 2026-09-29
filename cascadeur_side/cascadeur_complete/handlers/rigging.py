@@ -160,9 +160,15 @@ def constraint_drivers(scene, _arguments, _request, context):
         except Exception as exc:
             failures.append(str(exc))
 
-    before = context["scene_state"](context["scene_view"]() or scene)["revision"]
+    def structure():
+        # Model structure and behaviour/data links; evaluated transforms may
+        # legitimately settle when the update graph is opened for inspection.
+        state = context["scene_state"](context["scene_view"]() or scene)
+        return (state["model_data_fingerprint"], state["objects"], state["layers"])
+
+    before = structure()
     domain.modify("Cascadeur Complete: inspect constraint drivers", inspect_update)
-    after = context["scene_state"](context["scene_view"]() or scene)["revision"]
+    after = structure()
     if failures:
         raise RuntimeError("Constraint driver inspection failed: " + " | ".join(failures))
     if before != after:

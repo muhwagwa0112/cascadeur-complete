@@ -394,8 +394,26 @@ def constraint_transform(scene, arguments, _request, context):
     if driver_id == constrained_id:
         raise ValueError("driver_id and constrained_id must differ")
     domain = context["domain_scene"](scene)
-    behaviours = domain.model_viewer().behaviour_viewer()
-    before_count = len(_behaviour_ids(behaviours, "TransformConstraint")[0])
+
+    def constraint_count():
+        # constrain_ortho_transform records the link as a dynamic "Constraint"
+        # behaviour on the constrained object (plus a separate constraint object).
+        import common.behavior_operations as behaviour_operations
+
+        viewer = domain.model_viewer().behaviour_viewer()
+        data = domain.model_viewer().data_viewer()
+        count = 0
+        for behaviour_id in viewer.get_behaviours(constrained_id):
+            if str(viewer.get_behaviour_name(behaviour_id)) != "Dynamic":
+                continue
+            try:
+                if behaviour_operations.dynamic_behavior_name(viewer, data, behaviour_id) == "Constraint":
+                    count += 1
+            except Exception:
+                continue
+        return count
+
+    before_count = constraint_count()
     created = []
 
     def add_constraint(model, update, _scene, session):
@@ -404,12 +422,15 @@ def constraint_transform(scene, arguments, _request, context):
         if not constrained.has_input("Position"):
             raise ValueError("The constrained object does not support transform constraints")
         result = constrain_ortho_transform(domain, model, update, driver, constrained)
+        if result is None:
+            raise ValueError("The constrained object lacks Enforce Global; regenerate the rig first")
         created.append(context["id_string"](result.object_id()))
         session.take_selector().select({result.object_id()}, result.object_id())
 
     domain.modify_with_session("Cascadeur Complete: transform constraint", add_constraint)
-    after_count = len(_behaviour_ids(behaviours, "TransformConstraint")[0])
-    if after_count <= before_count or not created:
+    after_count = constraint_count()
+    existing = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
+    if after_count <= before_count or not created or created[0] not in existing:
         raise AssertionError("POSTCONDITION_FAILED: transform constraint was not created")
     return {
         "driver_id": str(arguments["driver_id"]),
