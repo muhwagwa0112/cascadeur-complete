@@ -42,7 +42,7 @@ Minimum width/height is 16 and samples must be positive. Use dimensions and samp
 
 ## Video output
 
-Describe `render_video` or `export_video` before attempting it. Both use the `RenderToFile` video adapter (`render.video`); the host waits for the file to stop growing before reporting `output_file`/`nonzero_bytes`. Do not loop or call developer Python.
+Use `file_dialog_prepare("export_video" or "render_video", path, width, height, quality)` then `change_commit`. Both drive File > Export > Video: the host verifies the Export video window's layout, fills folder/name/resolution/quality, starts rendering, waits for the rendered file of that name to stop growing (`output_file`/`nonzero_bytes`) and closes the completion screen. `path` is a folder plus file name without extension. Do not call `RenderToFile` from developer Python: it crashes Cascadeur 2026.1.
 
 The official 2026.1.2 notes mention a fix for video export with audio, but live adapter state still wins over documentation.
 

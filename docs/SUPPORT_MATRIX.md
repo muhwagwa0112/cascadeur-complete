@@ -60,6 +60,11 @@ Settings window and Scene Linking exist only in Cascadeur's QML UI. The build re
 Qt's accessibility tree for the main window cannot be enumerated reliably, so
 they stay `ui_only` rather than being driven by screen coordinates.
 
+Video export is not UI-only: File > Export > Video opens Cascadeur's own
+"Export video" form, which the host fills after verifying its layout, then waits
+for the rendered file (`export_video`, `render_video`). The `RenderToFile`
+Python route stays unused because it crashes 2026.1.
+
 Blend Shape sliders are the exception: an FBX imported with blend shapes stores
 each channel as an animated `<channel>_Weight` datum on a `Blendshape <name>`
 Dynamic behaviour (`common/mesh.py`), so `blend_shape` writes those weights on a

@@ -514,18 +514,30 @@ def file_dialog_prepare(
         "import_scene_to_current",
         "selection_groups_export",
         "scene_parts_export",
+        "scene_parts_import",
         "import_image",
         "import_video",
+        "export_video",
+        "render_video",
     ],
     path: str,
     allow_overwrite: bool = False,
     ttl_seconds: float = 300,
+    width: int = 320,
+    height: int = 180,
+    quality: Literal["LOW", "MEDIUM", "HIGH"] = "LOW",
 ) -> dict[str, Any]:
-    """Prepare a registered Cascadeur file dialog flow (exact action and owned dialog); commit with change_commit."""
+    """Prepare a registered Cascadeur file dialog flow (exact action and owned dialog); commit with change_commit.
+
+    export_video/render_video fill Cascadeur's Export video window: ``path`` is the output folder plus
+    file name without extension, and width/height/quality set the render.
+    """
     try:
         arguments = dialog_flow_arguments(feature_id, path, allow_overwrite)
     except ValueError as exc:
         return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": str(exc)}
+    if arguments.get("form") == "export_video":
+        arguments.update({"width": int(width), "height": int(height), "quality": quality})
     return service().prepare_change(feature_id, "system.ui_file_flow", arguments, ttl_seconds)
 
 

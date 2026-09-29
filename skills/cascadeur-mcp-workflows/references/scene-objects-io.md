@@ -57,9 +57,10 @@ Always call `feature_describe` for the exact format before choosing a route.
 | VRM import | `scene_exchange_prepare(format="vrm")` when available | Import route exists in 2026.1; validate skeleton/material result |
 | VRM export | Capability gate | Baseline is `unsupported_version`; do not rename GLB output to VRM |
 | Audio | `io_transfer(feature_id="import_audio", ...)` | Confirm timeline/media attachment afterward |
-| Reference image/video, camera texture | `file_dialog_prepare("import_image"/"import_video"/"camera_textures", path)` | Registered action + owned dialog only |
+| Reference image/video | `file_dialog_prepare("import_image"/"import_video", path)` | Registered action + owned dialog only |
+| Camera texture | `feature_prepare("camera_textures", {...})` | Native adapter; reads the texture paths back |
 | Still image | See render reference | Rendering/capture is a protected output operation |
-| Video | `feature_prepare("render_video" or "export_video", {"path", ...})` | Host waits for a stable file |
+| Video | `file_dialog_prepare("export_video" or "render_video", path, width, height, quality)` | Export video form; host waits for a stable file |
 
 For USD/GLB/GLTF/VRM, the dedicated prepare tool returns a protected file-flow token. Commit it with `change_commit`; do not separately invoke `io_transfer` for the same transfer.
 
