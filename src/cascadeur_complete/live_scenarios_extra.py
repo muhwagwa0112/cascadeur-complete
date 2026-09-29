@@ -62,8 +62,15 @@ def _import_image(s: LiveSession) -> Any:
 
 @scenario("camera_textures", CUBE)
 def _camera_textures(s: LiveSession) -> Any:
-    s.change("camera_create", "render.camera_create", {})
-    return _dialog(s, "camera_textures", _render_png(s))
+    created = s.change("camera_create", "render.camera_create", {})["created_ids"]
+    cameras = [
+        item for item in created if item in s.owners("Camera", [row for row in s.objects() if row["id"] in created])
+    ]
+    return s.change(
+        "camera_textures",
+        "render.camera_texture",
+        {"camera_id": cameras[0], "paths": [_render_png(s)], "start_frame": 0},
+    )
 
 
 @scenario("import_video", CUBE)

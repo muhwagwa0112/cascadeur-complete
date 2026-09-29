@@ -407,7 +407,7 @@ def constraint_transform(scene, arguments, _request, context):
             if str(viewer.get_behaviour_name(behaviour_id)) != "Dynamic":
                 continue
             try:
-                if behaviour_operations.dynamic_behavior_name(viewer, data, behaviour_id) == "Constraint":
+                if str(behaviour_operations.dynamic_behavior_name(viewer, data, behaviour_id)) == "Constraint":
                     count += 1
             except Exception:
                 continue
@@ -430,8 +430,13 @@ def constraint_transform(scene, arguments, _request, context):
     domain.modify_with_session("Cascadeur Complete: transform constraint", add_constraint)
     after_count = constraint_count()
     existing = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
-    if after_count <= before_count or not created or created[0] not in existing:
-        raise AssertionError("POSTCONDITION_FAILED: transform constraint was not created")
+    if not created or created[0] not in existing:
+        raise AssertionError("POSTCONDITION_FAILED: transform constraint object was not created")
+    if after_count <= before_count:
+        raise AssertionError(
+            "POSTCONDITION_FAILED: constrained object gained no Constraint behaviour "
+            f"(before={before_count}, after={after_count})"
+        )
     return {
         "driver_id": str(arguments["driver_id"]),
         "constrained_id": str(arguments["constrained_id"]),

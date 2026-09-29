@@ -115,6 +115,13 @@ def _cycles(domain, layer_id, context):
     ]
 
 
+CYCLE_ACTIONS = {
+    "none": "Timeline.Create cycle",
+    "position": "Timeline.Create cycle with position offset",
+    "position_rotation": "Timeline.Create cycle with position and rotation offsets",
+}
+
+
 @handler("timeline.cycle", postconditions=("cycle_present", "cycle_absent"))
 def cycle(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
@@ -129,16 +136,17 @@ def cycle(scene, arguments, _request, context):
     else:
         frame = int(arguments["frame"])
 
-    def edit(_model, _update, _scene_updater):
-        viewer = domain.layers_viewer()
-        for layer_id in layer_ids:
-            editor = context["csc"].layers.CyclesEditor(viewer.layer(layer_id))
-            if action == "create":
-                editor.create_cycle(first, last)
-            else:
-                editor.delete_cycle(frame)
-
-    domain.modify("Cascadeur Complete: cycle " + action, edit)
+    # The Timeline actions operate on the selected layers and interval, exactly
+    # like the Cycles menu; the result is read back through CyclesViewer.
+    if action == "create":
+        offset = str(arguments.get("offset", "none"))
+        if offset not in CYCLE_ACTIONS:
+            raise ValueError("cycle offset must be one of " + ", ".join(CYCLE_ACTIONS))
+        _select_interval(domain, layer_ids, first, last)
+        _call(context, CYCLE_ACTIONS[offset])
+    else:
+        _select_interval(domain, layer_ids, frame, frame)
+        _call(context, "Timeline.Remove cycles")
     observed = {context["id_string"](layer_id): _cycles(domain, layer_id, context) for layer_id in layer_ids}
     for layer_text, cycles in observed.items():
         if action == "create" and not any(start <= first and end >= last for start, end in cycles):
@@ -299,15 +307,23 @@ def stretch(scene, arguments, _request, context):
                 for data_id in animated
                 for frame in mapping
             }
-            sections = {frame: layer.section(frame) for frame in mapping}
+            # Same order as pycsc Timeline.move_frames: write the target section,
+            # then drop the source; walk away from the fixed first frame so a
+            # target never overwrites a key that has not moved yet.
             for frame in sorted(mapping, reverse=scale > 1):
-                if mapping[frame] != frame:
-                    editor.unset_section(frame, layer_id)
+                target = mapping[frame]
+                if target == frame:
+                    continue
+                section = layers_viewer.layer(layer_id).find_section(frame)
+                if section is None:
+                    raise ValueError(f"No section at key frame {frame}")
+                editor.set_section(section, target, layer_id)
+                editor.unset_section(frame, layer_id)
             for frame, target in mapping.items():
-                editor.set_section(sections[frame], target, layer_id)
                 for data_id in animated:
                     data_editor.set_data_value(data_id, target, values[(data_id, frame)])
                     changed.add(data_id)
+        editor.normalize_sections()
         scene_updater.generate_update()
         scene_updater.run_update(changed, domain.get_current_frame(False))
 
@@ -316,7 +332,7 @@ def stretch(scene, arguments, _request, context):
     for layer_id, mapping in plans.items():
         keys = _keys(domain, layer_id, first, max(last, new_last))
         if keys != sorted(mapping.values()):
-            raise AssertionError("POSTCONDITION_FAILED: retimed keys differ from plan")
+            raise AssertionError(f"POSTCONDITION_FAILED: retimed keys {keys} differ from plan {sorted(mapping.values())}")
         observed[context["id_string"](layer_id)] = keys
     del view
     return {"scale": scale, "keys": observed}, []
@@ -502,16 +518,17 @@ def activate_layer(scene, arguments, _request, context):
         session.take_layers_selector().set_full_selection_by_parts([layer_id], frame, frame)
 
     domain.modify_with_session("Cascadeur Complete: activate layer", apply)
-    observed = context["id_string"](domain.get_layers_selector().top_layer_id())
-    if observed != context["id_string"](layer_id):
+    selector = domain.get_layers_selector()
+    included = sorted(context["id_string"](item) for item in selector.all_included_layer_ids())
+    if included != [context["id_string"](layer_id)]:
         raise AssertionError("POSTCONDITION_FAILED: active layer differs from request")
-    return {"layer_id": observed, "frame": frame}, []
+    return {"layer_id": included[0], "frame": frame, "top_layer_id": context["id_string"](selector.top_layer_id())}, []
 
 
 SECTION_FIELDS = {
     "interpolation": ("interval", "interpolation", "Interpolation"),
     "tangents": ("key", "tangents", "Tangents"),
-    "ik_fk": ("interval.common", "ik_fk", "IkFk"),
+    "ik_fk": ("key.common", "ik_fk", "IkFk"),
     "fixation": ("key.common", "fixation", "Fixation"),
 }
 

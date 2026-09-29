@@ -446,6 +446,13 @@ BINDINGS: tuple[AdapterBinding, ...] = (
         arguments=VALUES,
         gap=True,
     ),
+    _b(
+        "camera_textures",
+        "render.camera_texture",
+        ("camera_texture_paths_equal_request",),
+        arguments={"camera_id": "camera object", "paths": "image files (one per frame)", "start_frame": "int"},
+        gap=True,
+    ),
     _b("camera_settings", "render.camera_settings", ("behaviour_values_equal_request",), arguments=VALUES, gap=True),
     _b("material", "render.material", ("behaviour_values_equal_request",), arguments=VALUES),
     _b(
@@ -524,7 +531,6 @@ BINDINGS: tuple[AdapterBinding, ...] = (
     ),
     _b("import_image", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": "image"}, mode=UIA),
     _b("import_video", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": "video"}, mode=UIA),
-    _b("camera_textures", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": "image"}, gap=True, mode=UIA),
 )
 
 BY_FEATURE = MappingProxyType({item.feature_id: item for item in BINDINGS})

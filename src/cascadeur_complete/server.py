@@ -515,7 +515,6 @@ def file_dialog_prepare(
         "scene_parts_export",
         "import_image",
         "import_video",
-        "camera_textures",
     ],
     path: str,
     allow_overwrite: bool = False,

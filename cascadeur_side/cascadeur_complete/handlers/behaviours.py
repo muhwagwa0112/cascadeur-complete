@@ -313,3 +313,63 @@ def autophysics_restore(scene, arguments, _request, context):
             raise AssertionError("POSTCONDITION_FAILED: " + name + " values differ between restored points")
         restored[name] = len(rows)
     return {"rotation_blending": _plain(blending), "restored_behaviours": restored}, []
+
+
+@handler("render.camera_texture", postconditions=("camera_texture_paths_equal_request",))
+def camera_texture(scene, arguments, _request, context):
+    """Point a camera's texture container at image files (camera background textures)."""
+    from pathlib import Path
+
+    csc = context["csc"]
+    domain = context["domain_scene"](scene)
+    camera = context["object_id"](arguments["camera_id"])
+    paths = [str(Path(str(item))).replace("\\", "/") for item in arguments.get("paths", [])]
+    if not paths or not all(Path(item).is_file() for item in paths):
+        raise ValueError("paths must list existing image files")
+    start_frame = int(arguments.get("start_frame", 0))
+    viewer = domain.model_viewer().behaviour_viewer()
+    camera_behaviour = viewer.get_behaviour_by_name(camera, "Camera")
+    if camera_behaviour.is_null():
+        raise ValueError("camera_id does not own a Camera behaviour")
+
+    def edit(model, update, _scene_updater):
+        editor = model.behaviour_editor()
+        group = update.get_object_by_id(camera).root_group()
+        container = viewer.get_behaviour_reference(camera_behaviour, "textures")
+        if container.is_null():
+            container = editor.add_behaviour(camera, "TextureContainer")
+            editor.set_behaviour_reference(camera_behaviour, "textures", container)
+        for data_id in list(viewer.get_behaviour_data_range(container, "texture_paths")):
+            editor.erase_behaviour_data_from_range(container, "texture_paths", data_id)
+        for index, path in enumerate(paths):
+            data_id = group.create_regular_data(f"Texture Path {index}", path, csc.model.DataMode.Static).data_id()
+            editor.add_behaviour_data_to_range(container, "texture_paths", data_id)
+        start_id = viewer.get_behaviour_data(container, "start_frame")
+        if start_id.is_null():
+            start_id = group.create_regular_data(
+                "Texture Start Frame", start_frame, csc.model.DataMode.Static
+            ).data_id()
+            editor.set_behaviour_data(container, "start_frame", start_id)
+        else:
+            model.data_editor().set_data_value(start_id, start_frame)
+
+    errors = []
+
+    def guarded(model, update, scene_updater):
+        try:
+            edit(model, update, scene_updater)
+        except Exception as exc:
+            errors.append(exc)
+
+    domain.modify("Cascadeur Complete: camera texture", guarded)
+    if errors:
+        raise errors[0]
+    viewer = domain.model_viewer().behaviour_viewer()
+    data = domain.model_viewer().data_viewer()
+    container = viewer.get_behaviour_reference(camera_behaviour, "textures")
+    if container.is_null():
+        raise AssertionError("POSTCONDITION_FAILED: camera has no texture container")
+    observed = [str(data.get_data_value(item)) for item in viewer.get_behaviour_data_range(container, "texture_paths")]
+    if observed != paths:
+        raise AssertionError("POSTCONDITION_FAILED: camera texture paths differ from request")
+    return {"camera_id": context["id_string"](camera), "paths": observed, "start_frame": start_frame}, []

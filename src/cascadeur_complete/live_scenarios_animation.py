@@ -14,6 +14,15 @@ def animated_layer(s: LiveSession, rank: int = 0) -> tuple[str, list[int]]:
     return layers[rank]["id"], sorted(layers[rank]["keys"])
 
 
+def layer_with_gap(s: LiveSession) -> tuple[str, list[int], int]:
+    for layer in sorted(s.layers(), key=lambda item: -len(item["keys"])):
+        keys = sorted(layer["keys"])
+        for left, right in zip(keys, keys[1:], strict=False):
+            if right - left > 1:
+                return layer["id"], keys, left + 1
+    raise LiveValidationError("no layer has a free frame between keys")
+
+
 def gap_frame(keys: list[int]) -> int:
     for left, right in zip(keys, keys[1:], strict=False):
         if right - left > 1:
@@ -89,9 +98,9 @@ def _key_list(s: LiveSession) -> Any:
 
 @scenario("key_add", BACKFLIP)
 def _key_add(s: LiveSession) -> Any:
-    layer, keys = animated_layer(s)
-    s.added_key = (layer, gap_frame(keys))
-    return s.change("key_add", "animation.key_add", {"layer_id": layer, "frame": s.added_key[1]})
+    layer, _keys, frame = layer_with_gap(s)
+    s.added_key = (layer, frame)
+    return s.change("key_add", "animation.key_add", {"layer_id": layer, "frame": frame})
 
 
 @scenario("key_delete", BACKFLIP)
@@ -111,31 +120,31 @@ def _graph_query(s: LiveSession) -> Any:
 
 @scenario("interpolation_set", BACKFLIP)
 def _interpolation_set(s: LiveSession) -> Any:
-    layer, keys = animated_layer(s)
+    layer, _keys, gap = layer_with_gap(s)
     return s.change(
         "interpolation_set",
         "animation.interpolation_set",
-        {"layer_id": layer, "frame": keys[1], "value": "LINEAR", "operation": "interpolation"},
+        {"layer_id": layer, "frame": gap - 1, "value": "LINEAR", "operation": "interpolation"},
     )
 
 
 @scenario("tangent_set", BACKFLIP)
 def _tangent_set(s: LiveSession) -> Any:
-    layer, keys = animated_layer(s)
+    layer, _keys, gap = layer_with_gap(s)
     return s.change(
         "tangent_set",
         "animation.tangent_set",
-        {"layer_id": layer, "frame": keys[2], "value": "UserDefined", "operation": "tangent"},
+        {"layer_id": layer, "frame": gap - 1, "value": "UserDefined", "operation": "tangent"},
     )
 
 
 @scenario("graph_edit", BACKFLIP)
 def _graph_edit(s: LiveSession) -> Any:
-    layer, keys = animated_layer(s)
+    layer, _keys, gap = layer_with_gap(s)
     return s.change(
         "graph_edit",
         "animation.section_edit",
-        {"layer_id": layer, "frame": keys[3], "interpolation": "STEP", "ik_fk": "FK"},
+        {"layer_id": layer, "frame": gap - 1, "interpolation": "STEP", "ik_fk": "FK"},
     )
 
 
@@ -257,9 +266,9 @@ def _mirror(s: LiveSession) -> Any:
 
 @scenario("tween", BACKFLIP)
 def _tween(s: LiveSession) -> Any:
-    _layer, keys = animated_layer(s)
+    _layer, _keys, frame = layer_with_gap(s)
     points = [item["id"] for item in s.objects_of_type("Point")][:6]
-    return s.change("tween", "editing.tween", {"ids": points, "mode": "Average", "frame": gap_frame(keys)})
+    return s.change("tween", "editing.tween", {"ids": points, "mode": "Average", "frame": frame})
 
 
 @scenario("fixing", BACKFLIP)

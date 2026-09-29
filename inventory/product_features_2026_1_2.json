@@ -6891,21 +6891,20 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "system.ui_file_flow",
-      "action": "system.ui_file_flow",
-      "operation": "system.ui_file_flow",
+      "route": "render.camera_texture",
+      "action": "render.camera_texture",
+      "operation": "render.camera_texture",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "UIA",
+      "execution_mode": "Native",
       "implementation_status": "implemented",
       "preconditions": [
         "compatible_version"
       ],
       "postconditions": [
-        "exact_file_dialog",
-        "scene_revision_changed"
+        "camera_texture_paths_equal_request"
       ],
-      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
+      "adapter_id": "cascadeur_2026_1.render.camera_texture",
       "contract_test_ids": [
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
@@ -6914,7 +6913,9 @@
       "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
-        "path": "image"
+        "camera_id": "camera object",
+        "paths": "image files (one per frame)",
+        "start_frame": "int"
       },
       "fixed_arguments": {}
     },

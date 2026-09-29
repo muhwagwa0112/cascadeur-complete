@@ -105,6 +105,18 @@ HOST_POSTCONDITIONS = {
     **{operation: ("viewport_render_changed",) for operation in VIEW_OPERATIONS},
 }
 
+# Operations whose "path" argument names an existing file to read, not an output.
+INPUT_PATH_OPERATIONS = frozenset(
+    {
+        "scene.open",
+        "scene.open_autosave",
+        "io.selection_groups_import",
+        "io.scene_parts_import",
+        "rig.json_import",
+        "rig.quick_rig",
+    }
+)
+
 MUTATION_VERBS = (
     "add",
     "apply",
@@ -185,13 +197,13 @@ def ui_file_flow_arguments(
 UI_FILE_FLOWS: dict[str, dict[str, Any]] = {
     "save_as_without_assets": {
         "action_id": "File.Save as (no assets)",
-        "dialog_title": "Save as (no assets)",
+        "dialog_title": "Save Scene *",
         "extension": ".casc",
         "direction": "export",
     },
     "import_scene_to_current": {
         "action_id": "File.Import.Scene to current...",
-        "dialog_title": "Import scene to current",
+        "dialog_title": "Import scene",
         "extension": ".casc",
         "direction": "import",
     },
@@ -203,25 +215,19 @@ UI_FILE_FLOWS: dict[str, dict[str, Any]] = {
     },
     "scene_parts_export": {
         "action_id": "File.Export.PartsCasc",
-        "dialog_title": "Export parts",
+        "dialog_title": "Export to parts file: *",
         "extension": ".partscasc",
         "direction": "export",
     },
     "import_image": {
         "action_id": "View.Reference image",
-        "dialog_title": "Reference image",
+        "dialog_title": "Load image",
         "extension": None,
         "direction": "import",
     },
     "import_video": {
         "action_id": "View.Bind video",
-        "dialog_title": "Bind video",
-        "extension": None,
-        "direction": "import",
-    },
-    "camera_textures": {
-        "action_id": "View.Bind texture",
-        "dialog_title": "Bind texture",
+        "dialog_title": "Load video",
         "extension": None,
         "direction": "import",
     },
@@ -997,7 +1003,7 @@ class CascadeurService:
         if destination:
             path_policy = self._path_policy()
             if (
-                operation_name == "scene.open"
+                operation_name in INPUT_PATH_OPERATIONS
                 or operation_name.startswith("io.import_")
                 or bool(arguments.get("input"))
             ):

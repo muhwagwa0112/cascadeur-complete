@@ -114,7 +114,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | Feature | Name | Operation | Arguments | Fixed | Postconditions |
 |---|---|---|---|---|---|
 | `camera_settings` | Camera settings | `render.camera_settings` | `ids`: object IDs (defaults to every owner of the behaviour), `values`: {property: value} | — | `behaviour_values_equal_request` |
-| `camera_textures` | Camera textures | `system.ui_file_flow` | `path`: image | — | `exact_file_dialog`, `scene_revision_changed` |
+| `camera_textures` | Camera textures | `render.camera_texture` | `camera_id`: camera object, `paths`: image files (one per frame), `start_frame`: int | — | `camera_texture_paths_equal_request` |
 | `composition` | Composition | `view.composition` | — | — | `viewport_render_changed` |
 | `grid` | Grid | `view.isometric_grid` | — | — | `viewport_render_changed` |
 | `material` | Filament Material | `render.material` | `ids`: object IDs (defaults to every owner of the behaviour), `values`: {property: value} | — | `behaviour_values_equal_request` |

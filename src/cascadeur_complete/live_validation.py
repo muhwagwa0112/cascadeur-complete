@@ -75,12 +75,19 @@ class LiveSession:
         return result["result"]
 
     def change(self, feature_id: str, operation: str, arguments: dict[str, Any] | None = None, *, timeout=240):
-        prepared = _dump(self.service.prepare_change(feature_id, operation, arguments or {}, 900))
-        if not prepared.get("ok"):
-            raise LiveValidationError(
-                f"prepare {feature_id} failed: {prepared.get('error_code')}: {prepared.get('error_message')}"
-            )
-        committed = _dump(self.service.commit_change(prepared["confirmation_token"], timeout))
+        # A scene that is still settling (a just-opened fixture, a lingering
+        # tab switch) can move its revision between prepare and commit. The
+        # commit refuses that token untouched, so prepare again once.
+        for attempt in range(2):
+            prepared = _dump(self.service.prepare_change(feature_id, operation, arguments or {}, 900))
+            if not prepared.get("ok"):
+                raise LiveValidationError(
+                    f"prepare {feature_id} failed: {prepared.get('error_code')}: {prepared.get('error_message')}"
+                )
+            committed = _dump(self.service.commit_change(prepared["confirmation_token"], timeout))
+            if committed.get("error_code") != "SCENE_CHANGED" or attempt:
+                break
+            time.sleep(2.0)
         if not committed.get("ok"):
             raise LiveValidationError(
                 f"commit {feature_id} failed: {committed.get('error_code')}: {committed.get('error_message')}"

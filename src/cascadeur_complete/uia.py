@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -654,13 +655,23 @@ def complete_file_dialog(
             raise UIAutomationError(f"Expected options button did not appear: {options_title} > {options_accept_title}")
         accept_options.click_input()
 
-    dialog = owner_spec.child_window(title=expected_dialog_title, control_type="Window")
+    # A trailing "*" pins a title prefix: some 2026.1.2 dialogs append the scene
+    # name ("Save Scene <name>"). Everything before it must still match exactly.
+    prefix = expected_dialog_title[:-1] if expected_dialog_title.endswith("*") else None
+    dialog = (
+        owner_spec.child_window(title_re=re.escape(prefix) + ".*", control_type="Window")
+        if prefix is not None
+        else owner_spec.child_window(title=expected_dialog_title, control_type="Window")
+    )
     if not dialog.exists(timeout=remaining(), retry_interval=0.05):
         raise UIAutomationError(
             f"Expected file dialog did not appear: {expected_dialog_title}; "
             f"owned windows: {owned_window_titles()}"
         )
-    if dialog.window_text() != expected_dialog_title:
+    observed_title = dialog.window_text()
+    if (prefix is None and observed_title != expected_dialog_title) or (
+        prefix is not None and not observed_title.startswith(prefix)
+    ):
         raise UIAutomationError(f"Unexpected file dialog: {dialog.window_text()}")
     dialog_wrapper = dialog.wrapper_object()
     dialog_rectangle = dialog_wrapper.rectangle()
@@ -757,7 +768,7 @@ def complete_file_dialog(
     # existing filename has been entered. Resolve it after setting the path.
     accept = descendant(automation_id="1", control_type="Button")
     if accept is None:
-        if expected_dialog_title.startswith("Import. preset:"):
+        if expected_dialog_title.startswith("Import. preset:") or prefix is not None:
             # Windows 11 may keep the Open button out of the UIA tree even
             # after a valid path is entered. Enter invokes the verified
             # dialog's default action without relying on localized text.
@@ -857,7 +868,11 @@ def cancel_file_flow(*, expected_dialog_title: str, options_title: str | None = 
     for title in (expected_dialog_title, options_title):
         if not title:
             continue
-        window = owner_spec.child_window(title=title, control_type="Window")
+        window = (
+            owner_spec.child_window(title_re=re.escape(title[:-1]) + ".*", control_type="Window")
+            if title.endswith("*")
+            else owner_spec.child_window(title=title, control_type="Window")
+        )
         if not window.exists(timeout=0.2, retry_interval=0.05):
             continue
         wrapper = window.wrapper_object()
