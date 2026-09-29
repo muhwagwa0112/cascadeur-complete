@@ -371,7 +371,15 @@ def _load_scene_verified(path, *, prefer_other_open=False, close_previous=False)
 
 
 def _license_state(app):
-    """Use Cascadeur's own current-session license log; keep feature availability separate."""
+    """Report the license tier that gates Pro features.
+
+    Cascadeur's own ``is_pro_features_available`` decides the tier. The log's
+    "Actual license type" is a license term ("perpetual", "basic"), not a tier,
+    so it is only a fallback when the application API is unavailable.
+    """
+    if app is not None:
+        with suppress(Exception):
+            return "Pro" if bool(app.is_pro_features_available()) else "Basic"
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         log_path = Path(local_app_data) / "Nekki Limited" / "Cascadeur" / "logs" / "cascadeur_log.log"
