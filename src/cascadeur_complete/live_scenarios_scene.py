@@ -208,20 +208,27 @@ def _ik(s: LiveSession) -> Any:
     point_rows = s.objects_of_type("Point")
     points = {item["name"]: item["id"] for item in point_rows}
     attraction = set(s.owners("AttractionPoint", point_rows))
-    connection = set(s.owners("ConnectionPointTwoBody", point_rows))
     reasons = []
     for side in ("_l", "_r"):
-        names = [f"hand_MainPoint{side}", f"forearm_MainPoint{side}", f"arm_MainPoint{side}"]
+        # 2026.1.3 Cascy: the arm's AttractionPoint ends are the hand and
+        # clavicle additional points, linked through forearm and arm.
+        names = [
+            f"hand_AdditionalPoint{side}",
+            f"forearm_MainPoint{side}",
+            f"arm_MainPoint{side}",
+            f"clavicle_AdditionalPoint{side}",
+        ]
         chain = [points.get(name) for name in names]
         if not all(chain):
             reasons.append(f"{side}: missing {[n for n, i in zip(names, chain, strict=True) if not i]}")
             continue
-        # Like Cascadeur's add_ik, a middle link needs exactly one ConnectionPointTwoBody.
-        middle = s.behaviour_names([chain[1]])[chain[1]].count("ConnectionPointTwoBody")
-        if chain[0] in attraction and chain[-1] in attraction and chain[1] in connection and middle == 1:
+        # Like Cascadeur's add_ik, each middle link needs exactly one ConnectionPointTwoBody.
+        counts = s.behaviour_names(chain[1:-1])
+        middles = [counts[item].count("ConnectionPointTwoBody") for item in chain[1:-1]]
+        if chain[0] in attraction and chain[-1] in attraction and all(count == 1 for count in middles):
             return s.change("ik", "rig.ik_chain_create", {"ordered_ids": chain})
         reasons.append(
-            f"{side}: ends attraction={chain[0] in attraction}/{chain[-1] in attraction}, middle connections={middle}"
+            f"{side}: ends attraction={chain[0] in attraction}/{chain[-1] in attraction}, middle connections={middles}"
         )
     raise LiveValidationError("fixture has no IK-capable arm chain: " + "; ".join(reasons))
 

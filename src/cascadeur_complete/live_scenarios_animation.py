@@ -270,7 +270,14 @@ def _inbetweening(s: LiveSession) -> Any:
 
 @scenario("auto_posing", BACKFLIP)
 def _auto_posing(s: LiveSession) -> Any:
-    box = next(item["id"] for item in s.objects_of_type("Box") if "hand" in item["name"])
+    # AutoPosing re-solves controllers that carry an AutoPosingLink, so move a
+    # hand controller without one (a free input for the AutoPosing update).
+    candidates = [item for item in s.objects_of_type("Box") + s.objects_of_type("Point") if "hand" in item["name"]]
+    behaviours = s.behaviour_names([item["id"] for item in candidates])
+    free = [item["id"] for item in candidates if "AutoPosingLink" not in behaviours[item["id"]]]
+    if not free:
+        raise LiveValidationError("every hand controller is driven by AutoPosing")
+    box = free[0]
     current = s.read("transform_get", "animation.transform_get", {"ids": [box], "space": "global"})[0]["position"]
     s.change("selection_set", "selection.set", {"ids": [box]})
     moved = [current[0] + 0.2, current[1] + 0.2, current[2]]
