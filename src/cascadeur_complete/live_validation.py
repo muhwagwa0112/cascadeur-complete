@@ -105,9 +105,23 @@ class LiveSession:
         assert path is not None
         if not path.is_file():
             raise LiveValidationError(f"Fixture file is missing: {path}")
+        self.close_inactive_tabs()
         self.change("scene_open", "scene.open", {"path": str(path)})
         self.current_fixture = fixture_id
         return self.status()
+
+    def close_inactive_tabs(self, keep: int = 1) -> int:
+        """Keep Cascadeur's tab bar short; every protected change branches a working tab."""
+        tabs = self.read("scene_list", "scene.list")
+        inactive = [item for item in tabs if not item["active"]]
+        closed = 0
+        for item in inactive[: max(0, len(inactive) - keep)]:
+            try:
+                self.change("scene_close", "scene.close", {"tab_id": item["tab_id"]})
+                closed += 1
+            except LiveValidationError:
+                continue
+        return closed
 
     # -- scene helpers ----------------------------------------------------
     def objects(self) -> list[dict[str, Any]]:

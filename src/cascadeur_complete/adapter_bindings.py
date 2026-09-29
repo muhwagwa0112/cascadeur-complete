@@ -73,7 +73,7 @@ BINDINGS: tuple[AdapterBinding, ...] = (
         "hiding",
         "objects.visibility",
         ("behaviour_values_equal_request",),
-        arguments={"ids": "object IDs", "values": '{"visibility": bool}'},
+        arguments={"ids": "object IDs", "values": '{"visibility": ObjectVisibility enum int}'},
     ),
     _b(
         "tween",
@@ -483,8 +483,6 @@ BINDINGS: tuple[AdapterBinding, ...] = (
         arguments={"path": ".partscasc file"},
         gap=True,
     ),
-    _b("render_video", "render.video", ("output_file", "nonzero_bytes"), arguments=VIDEO),
-    _b("export_video", "render.video", ("output_file", "nonzero_bytes"), arguments=VIDEO),
     # -- view toggles (whitelisted action, host-verified rendered change) ----------
     _b("silhouette", "view.silhouette", VIEW, arguments=SELECT, gap=True, mode=UIA),
     _b("grid", "view.isometric_grid", VIEW, mode=UIA),
@@ -506,6 +504,15 @@ BINDINGS: tuple[AdapterBinding, ...] = (
     ),
     _b("node_editor", "view.node_editor", VIEW, arguments={"state": "on|off"}, gap=True, mode=UIA),
     _b("control_picker", "view.control_picker", VIEW, arguments={"state": "on|off"}, mode=UIA),
+    # -- external DCC (target application verifies the import) ---------------------
+    _b(
+        "blender_export",
+        "io.export_fbx",
+        ("output_file", "nonzero_bytes", "target_import_verified"),
+        fixed={"target": "blender"},
+        arguments={"path": "absolute .fbx path"},
+        mode=ExecutionMode.EXTERNAL,
+    ),
     # -- dialog file flows (exact action + owned dialog, host-verified result) -----
     _b("save_as_without_assets", "system.ui_file_flow", DIALOG_EXPORT, arguments={"path": ".casc"}, gap=True, mode=UIA),
     _b("selection_groups_export", "system.ui_file_flow", DIALOG_EXPORT, arguments={"path": "file"}, gap=True, mode=UIA),

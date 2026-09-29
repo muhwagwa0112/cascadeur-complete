@@ -101,28 +101,3 @@ def save_new_version(_scene, _arguments, _request, context):
     if after == before or not after.is_file() or after.stat().st_size <= 0 or after.name not in created:
         raise AssertionError("POSTCONDITION_FAILED: no new version file became the active document")
     return {"previous_path": str(before), "path": str(after), "bytes": after.stat().st_size}, []
-
-
-@handler("render.video")
-def render_video(_scene, arguments, _request, context):
-    """Schedule a viewport video render; the host waits for a stable output file."""
-    path = Path(str(arguments["path"]))
-    if not path.is_absolute() or not path.parent.is_dir():
-        raise ValueError("An absolute output path in an existing directory is required")
-    width = int(arguments.get("width", 1280))
-    height = int(arguments.get("height", 720))
-    samples = int(arguments.get("samples", 16))
-    if not 16 <= width <= 8192 or not 16 <= height <= 8192 or not 1 <= samples <= 1024:
-        raise ValueError("width/height must be 16..8192 and samples 1..1024")
-    parameters = context["csc"].tools.RenderParameters()
-    parameters.width = width
-    parameters.height = height
-    parameters.samples = samples
-    view = context["scene_view"]()
-    renderer = context["csc"].app.get_application().get_tools_manager().get_tool("RenderToFile")
-    renderer.play_to_video_file(view, parameters, str(path))
-    return {
-        "path": str(path),
-        "scheduled": True,
-        "parameters": {"width": width, "height": height, "samples": samples},
-    }, []

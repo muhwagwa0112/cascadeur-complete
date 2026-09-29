@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from cascadeur_complete.adapter_bindings import BINDINGS, BY_FEATURE
 from cascadeur_complete.product_catalog import PRODUCT_CATALOG
 from cascadeur_complete.service import HOST_POSTCONDITIONS
@@ -20,10 +22,13 @@ def test_catalog_rows_match_adapter_bindings():
 
 
 def test_every_binding_operation_has_a_bridge_handler(bridge):  # noqa: F811
-    _runtime, registry = bridge
+    runtime, registry = bridge
     registered = set(registry.registered_operations())
     host_only = {"system.ui_file_flow"} & set(HOST_POSTCONDITIONS)
-    assert sorted({item.operation for item in BINDINGS} - registered - host_only) == []
+    inline = {
+        item.operation for item in BINDINGS if f'name == "{item.operation}"' in Path(runtime.__file__).read_text()
+    }
+    assert sorted({item.operation for item in BINDINGS} - registered - host_only - inline) == []
 
 
 def test_shared_operations_are_disambiguated_by_fixed_arguments():

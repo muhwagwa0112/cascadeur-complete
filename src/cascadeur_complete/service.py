@@ -13,6 +13,7 @@ from .atomic_queue import atomic_write_json
 from .bridge_client import BridgeClient
 from .build_profile import DEVELOPER_BUILD
 from .discovery import BASELINE_TOOLS, discover_commands, discover_installation, load_csc_schema
+from .external import available_dependencies, verify_blender_fbx
 from .feature_registry import build_registry, registry_json
 from .jobs import JobStore
 from .models import (
@@ -99,6 +100,7 @@ HOST_POSTCONDITIONS = {
     "system.action_invoke": ("registered_action_binding",),
     "physics.auto_snap": ("scene_revision_changed",),
     "system.introspect": ("feature_registry",),
+    "io.export_fbx": ("output_file", "nonzero_bytes", "target_import_verified"),
     "timeline.playback": ("playback_frames_advance", "playback_frame_stable"),
     **{operation: ("viewport_render_changed",) for operation in VIEW_OPERATIONS},
 }
@@ -295,6 +297,7 @@ class CascadeurService:
         self._scene_available = False
         self._live_scene_id: str | None = None
         self._live_scene_revision: str | None = None
+        self._dependencies = available_dependencies()
         self._features = []
         self._rebuild_features()
         self._write_registry()
@@ -316,6 +319,7 @@ class CascadeurService:
                 license_name=self._license_name,
             ),
             developer_enabled=self._developer_policy(),
+            available_dependencies=self._dependencies,
         )
 
     def _write_registry(self) -> None:
@@ -849,6 +853,7 @@ class CascadeurService:
             scene_id=result.scene_id,
             evidence=[item.model_dump(mode="json") for item in result.evidence],
             license_name=self._license_name,
+            dependencies={product.dependency: True} if product.dependency in self._dependencies else None,
             observed_postconditions=observed,
             fixture_id=product.fixture_id,
             test_id=product.live_test_id,
@@ -1151,6 +1156,17 @@ class CascadeurService:
                 result = self._wait_for_open_scene(result, str(working_path), timeout)
             if result.ok and record.operation.name == "physics.auto_snap":
                 result = self._complete_auto_physics_snap(result, timeout)
+            if result.ok and record.feature_id == "blender_export":
+                report = verify_blender_fbx(str(record.operation.arguments["path"]))
+                if report["armatures"] < 1 or not report["actions"]:
+                    raise RuntimeError(f"Blender imported no armature/animation: {report}")
+                result.result = {**(result.result if isinstance(result.result, dict) else {}), "blender": report}
+                add_postconditions(
+                    result,
+                    f"Blender {report['blender']} imported {report['armatures']} armature(s), "
+                    f"{report['bones']} bones and {len(report['actions'])} action(s)",
+                    "target_import_verified",
+                )
             if result.ok and record.operation.name in VIEW_OPERATIONS:
                 self._wait_for_bridge_idle()
                 time.sleep(1.0)
@@ -1598,7 +1614,9 @@ class CascadeurService:
         """
         deadline = time.monotonic() + max(5.0, timeout)
         tab_cycles = 0
-        max_tab_cycles = 40
+        listed = self.client.execute("scene_list", [Operation(name="scene.list")], timeout=30)
+        tab_count = len(listed.result) if listed.ok and isinstance(listed.result, list) else 40
+        max_tab_cycles = tab_count + 2
         stable = 0
         latest = None
         while time.monotonic() < deadline:

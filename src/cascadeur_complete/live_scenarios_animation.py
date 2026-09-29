@@ -290,3 +290,8 @@ def _auto_physics_enable(s: LiveSession) -> Any:
 @scenario("auto_physics", BACKFLIP)
 def _auto_physics(s: LiveSession) -> Any:
     return s.change("auto_physics", "physics.auto_snap", {}, timeout=300)
+
+
+@scenario("blender_export", BACKFLIP)
+def _blender_export(s: LiveSession) -> Any:
+    return s.change("blender_export", "io.export_fbx", {"path": s.output("blender.fbx")}, timeout=360)

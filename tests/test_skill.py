@@ -32,3 +32,14 @@ def test_skill_entrypoint_links_resolve_inside_skill():
 
     assert local_links
     assert all((SKILL / link).is_file() for link in local_links)
+
+
+def test_adapter_feature_reference_matches_bindings():
+    spec = importlib.util.spec_from_file_location(
+        "render_feature_reference", ROOT / "scripts" / "render_feature_reference.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.TARGET.read_text(encoding="utf-8") == module.render()

@@ -6,7 +6,10 @@ The project is pre-1.0 and provides a **verified subset** of Cascadeur automatio
 it does not claim that every user-facing Cascadeur feature is implemented.
 
 The host uses MCP over stdio. A Python 3.11-compatible command package runs in
-Cascadeur and drains the Local AppData request queue on the UI thread. Capability
+Cascadeur and drains the Local AppData request queue on the UI thread. One UI
+trigger drains a whole burst of requests: the bridge lingers briefly for
+follow-up requests and yields to Cascadeur's event loop after rendering, file
+dialogs, scene loads and view toggles. Capability
 discovery is not counted as feature support: a feature is supported only when a
 dedicated adapter, exact postcondition, and version-matched live evidence exist.
 
@@ -18,8 +21,9 @@ dedicated adapter, exact postcondition, and version-matched live evidence exist.
 - License/dependency/UI gates are reported as gates, not successful execution
 - Arbitrary developer Python is disabled by the production policy
 
-See [the support matrix](docs/SUPPORT_MATRIX.md) for the current evidence rules
-and limitations. The generated feature registry remains the runtime source of
+See [the support matrix](docs/SUPPORT_MATRIX.md) for the evidence rules and
+limitations, and [the support status](docs/SUPPORT_STATUS.md) for the per-feature
+result of the latest live validation run. The generated feature registry remains the runtime source of
 truth; neither tool count nor discovered Python symbols imply support.
 
 ## Install an official release

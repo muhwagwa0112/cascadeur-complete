@@ -26,22 +26,6 @@ def _dialog(s: LiveSession, feature_id: str, path: str) -> Any:
     return s.change(feature_id, "system.ui_file_flow", dialog_flow_arguments(feature_id, path), timeout=240)
 
 
-@scenario("render_video", CUBE)
-def _render_video(s: LiveSession) -> Any:
-    result = s.change(
-        "render_video", "render.video", {"path": s.output("video.mp4"), "width": 320, "height": 240, "samples": 2}
-    )
-    s.extra_video = result["path"]
-    return result
-
-
-@scenario("export_video", CUBE)
-def _export_video(s: LiveSession) -> Any:
-    return s.change(
-        "export_video", "render.video", {"path": s.output("export.mp4"), "width": 320, "height": 240, "samples": 2}
-    )
-
-
 @scenario("save_as_without_assets", CUBE)
 def _save_as_without_assets(s: LiveSession) -> Any:
     result = _dialog(s, "save_as_without_assets", s.output("no-assets.casc"))
@@ -84,8 +68,10 @@ def _camera_textures(s: LiveSession) -> Any:
 
 @scenario("import_video", CUBE)
 def _import_video(s: LiveSession) -> Any:
-    video = getattr(s, "extra_video", None) or _render_video(s)["path"]
-    return _dialog(s, "import_video", video)
+    video = s.service.paths.root / "live-fixtures" / "reference.mp4"
+    if not video.is_file():
+        raise LiveValidationError("place a short reference.mp4 in live-fixtures to validate video import")
+    return _dialog(s, "import_video", str(video))
 
 
 @scenario("save_as_new_version", CUBE)
@@ -205,3 +191,13 @@ def _control_picker(s: LiveSession) -> Any:
     on = s.change("control_picker", "view.control_picker", {"state": "on"})
     off = s.change("control_picker", "view.control_picker", {"state": "off"})
     return {"on": on, "off": off}
+
+
+@scenario("import_vrm", CUBE)
+def _import_vrm(s: LiveSession) -> Any:
+    from .live_scenarios import _ui_flow
+
+    source = s.service.paths.root / "live-fixtures" / "VRM1_Constraint_Twist_Sample.vrm"
+    if not source.is_file():
+        raise LiveValidationError("run scripts/fetch_live_fixtures.py to download the VRM sample")
+    return _ui_flow(s, "import", "vrm", str(source))

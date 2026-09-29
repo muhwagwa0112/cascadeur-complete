@@ -39,7 +39,7 @@ Use `object_write` for:
 - `parent` and `unparent`: exact object and parent IDs;
 - `duplicate` and `delete`: only when the current feature state provides a verified adapter.
 
-Creation, duplication, parenting changes, and deletion are protected. Prefer `object_delete_prepare` for deletion; if it returns the exact `UI_LOCKED` gate, report that deletion is manual for this adapter rather than calling a guessed action. The 2026.1.2 baseline likewise identifies duplicate through `CopierTool` as UI-only unless live capability data says otherwise.
+Creation, duplication, parenting changes, and deletion are protected. Use `object_delete_prepare` (or `feature_prepare("object_delete")`) for deletion; constraints are cleaned like Cascadeur's Delete command. Duplicate with `feature_prepare("object_duplicate", {"id": ...})`.
 
 After hierarchy changes, re-read `object_read(action="hierarchy")`; after property/name changes, re-read properties and search results. Never infer success from selection changes alone.
 
@@ -57,9 +57,9 @@ Always call `feature_describe` for the exact format before choosing a route.
 | VRM import | `scene_exchange_prepare(format="vrm")` when available | Import route exists in 2026.1; validate skeleton/material result |
 | VRM export | Capability gate | Baseline is `unsupported_version`; do not rename GLB output to VRM |
 | Audio | `io_transfer(feature_id="import_audio", ...)` | Confirm timeline/media attachment afterward |
-| Reference image/video | Capability search, then exact UI flow if registered | Baseline may be UI-only; do not automate an unknown dialog |
+| Reference image/video, camera texture | `file_dialog_prepare("import_image"/"import_video"/"camera_textures", path)` | Registered action + owned dialog only |
 | Still image | See render reference | Rendering/capture is a protected output operation |
-| Video | See render reference | 2026.1.2 baseline is UI-only for the safe MCP adapter |
+| Video | `feature_prepare("render_video" or "export_video", {"path", ...})` | Host waits for a stable file |
 
 For USD/GLB/GLTF/VRM, the dedicated prepare tool returns a protected file-flow token. Commit it with `change_commit`; do not separately invoke `io_transfer` for the same transfer.
 

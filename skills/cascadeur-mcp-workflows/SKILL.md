@@ -18,7 +18,8 @@ Read only the references needed for the current task:
 | Quick/manual rigging, controllers, joints, rigid bodies, IK/Spline IK, twist, mass, constraints, collision, ballistics, AutoPhysics, Ragdoll | [physics-rigging.md](references/physics-rigging.md) |
 | Cameras, viewports, Filament lights/materials, still/video output, Unreal Live Link, Blender/Unity/Daz/Roblox | [render-external.md](references/render-external.md) |
 | Capability states, protected changes, jobs, errors, low-level calls, rollback, diagnosis | [safety-diagnostics.md](references/safety-diagnostics.md) |
-| Exact catalog of all 70 production MCP tools | [tool-routing.md](references/tool-routing.md) |
+| Exact catalog of all 73 production MCP tools | [tool-routing.md](references/tool-routing.md) |
+| Every adapter-bound feature id, operation, arguments and postconditions (generated) | [adapter-features.md](references/adapter-features.md) |
 | Version facts and source links | [official-sources.md](references/official-sources.md) |
 
 For a multi-stage production workflow, read every domain reference that participates in the requested output. Do not load unrelated references merely because they exist.

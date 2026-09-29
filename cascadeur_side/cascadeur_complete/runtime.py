@@ -1467,7 +1467,6 @@ YIELDING_OPERATIONS = frozenset(
     {
         "render.viewport_capture",
         "render.image",
-        "render.video",
         "io.export_image",
         "scene.open_autosave",
         "timeline.playback",

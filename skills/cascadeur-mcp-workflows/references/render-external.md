@@ -10,7 +10,7 @@ Use this reference for viewports, cameras, lights, Filament presentation, still/
 4. Use the camera activation/update actions with explicit camera ID, position, target, and camera type; pass the latest scene revision.
 5. Re-read viewport/camera state and affected object transforms.
 
-Use `viewport_mode` to read or set a registered visualizer mode and verify the observed mode. Multiple-viewport layout, grid, composition, materials, and some Filament controls may be UI-only; search/describe the specific feature instead of assuming a generic viewport action can set it.
+Use `viewport_mode` to read or set a registered visualizer mode and verify the observed mode. Viewport layout (1/2/4), grid, composition, silhouette, Material and texture maps, light and camera settings are adapter-bound. Filament environment, shadows, dynamic lights, ambient occlusion and bloom live only in Cascadeur's QML render panel and remain UI-only.
 
 ## Filament presentation
 
@@ -23,7 +23,7 @@ Cascadeur 2026.1 uses Filament for scene visualization and supports lights/mater
 - grid/composition overlays;
 - render/output settings.
 
-Create and verify the native objects the MCP supports. For Material, Composition, Grid, or multi-viewport features that are `ui_only`, return the exact route and a manual handoff. Do not claim the final look is configured from a camera or light change alone.
+Create and verify the native objects the MCP supports. For Filament render-panel features that are `ui_only`, return the exact route and a manual handoff. Do not claim the final look is configured from a camera or light change alone.
 
 ## Still capture and render
 
@@ -42,7 +42,7 @@ Minimum width/height is 16 and samples must be positive. Use dimensions and samp
 
 ## Video output
 
-Describe `render_video` or `export_video` before attempting it. In the verified 2026.1.2 MCP baseline, the safe route is `ui_only` through `RenderToFile`; the native adapter is intentionally not exposed. Return the manual UI route and retain the snapshot. Do not loop, call developer Python, or treat the product's general video support as proof that the MCP can safely automate it.
+Describe `render_video` or `export_video` before attempting it. Both use the `RenderToFile` video adapter (`render.video`); the host waits for the file to stop growing before reporting `output_file`/`nonzero_bytes`. Do not loop or call developer Python.
 
 The official 2026.1.2 notes mention a fix for video export with audio, but live adapter state still wins over documentation.
 

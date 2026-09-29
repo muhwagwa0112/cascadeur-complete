@@ -15,7 +15,7 @@ Do not infer a usable rig merely because joints or a mesh exist. Cascadeur's Aut
 
 ## Rig-mode safety
 
-Entering Rig Mode can replace an existing rig with prototype objects, reset the character to its model pose, and temporarily make animation/timeline unavailable. Always protect the scene first and identify which character is being rigged. Do not enter or regenerate a rig through a generic UI action when the baseline reports `ui_only`.
+Entering Rig Mode can replace an existing rig with prototype objects, reset the character to its model pose, and temporarily make animation/timeline unavailable. Always protect the scene first and identify which character is being rigged. Enter Rig Mode with `rig_mode_on`, generate with `generate_rig`, or do both with `rig_regenerate`; never through a generic UI action.
 
 For every rig mutation:
 
@@ -42,7 +42,7 @@ Use this dependency order, skipping only elements that are already verified:
 
 `rig_elements_create_prepare(feature="rigid_body")` requires actual rigid bodies; the adapter rejects `only_box_controller=true`. Use a clear direction Joint for each pair rather than guessing from selection order.
 
-Quick Rig, rig regeneration, Blend Shapes, and some advanced prototype actions may be UI-only. Return their capability route and manual prerequisite. Do not fall back to mass-creating approximate rig elements and call that Quick Rig.
+Rig Mode prototype tooling (delete element, hinges, mirror, virtual/standard joints, snaps, root constraints, fulcrum groups, additional joints/parents/points, custom rotation, untwist, AutoPosing props, rig JSON, Quick Rig from a `.qrigcasc` template, Generate rig) is adapter-bound; see [adapter-features.md](adapter-features.md). Blend Shapes remain UI-only. Do not fall back to mass-creating approximate rig elements and call that Quick Rig.
 
 ## Center of Mass
 
@@ -76,7 +76,7 @@ Use `collision_create_prepare(shape, ids, options)` with one supported shape:
 
 Use `collision_delete_prepare(ids)` to remove supported collision behaviors from exact targets. Re-read physics state and object behaviors after both operations.
 
-Collision Penetration Cleaning and the legacy collision-cleaning UI tool can be UI-only. Old scenes may require rig regeneration before 2026.1 penetration cleaning works. If regeneration or cleaning lacks a verified adapter, report the manual sequence and keep the snapshot; do not invoke an unverified UI action.
+Collision Penetration Cleaning (`penetration_clean`) and collision cleaning (`collision_clean`) are adapter-bound. Old scenes may require rig regeneration before 2026.1 penetration cleaning works. If regeneration or cleaning lacks a verified adapter, report the manual sequence and keep the snapshot; do not invoke an unverified UI action.
 
 ## Ballistic motion
 
@@ -86,7 +86,7 @@ Ballistics requires a Center of Mass and an interval spanning takeoff through la
 2. Select explicit animation layers/range.
 3. Call `ballistic_create_prepare(center_of_mass_id, first_frame, last_frame, layer_ids)`.
 4. Commit and verify that the ballistic trajectory persists in `physics_state`.
-5. Inspect root/CoM positions and key contact frames. Ballistic Ghosts and Angular Momentum visualizers may remain UI-only visualization aids.
+5. Inspect root/CoM positions and key contact frames. Ballistic Ghosts are toggled by `ballistic_ghosts` (verified on screen).
 
 Do not use a ballistic curve as proof that the character pose or landing contact is correct.
 
@@ -105,7 +105,7 @@ Do not call snap repeatedly when readiness is false. A warning dialog or timeout
 
 ## Ragdoll, fulcrums, and cleanup
 
-Ragdoll, Fulcrum tools, Fulcrum Motion Cleaning, and penetration cleaning are distinct capabilities. Search and describe each one. The 2026.1.2 baseline may report them as UI-only even though the product supports them.
+Ragdoll, Fulcrum tools, Fulcrum Motion Cleaning, and penetration cleaning are distinct capabilities. Search and describe each one. They are adapter-bound: `ragdoll`, `fulcrum`, `fulcrum_cleaning`, `penetration_clean`, plus the AutoPhysics settings rows in [adapter-features.md](adapter-features.md).
 
 For manual handoff, provide:
 

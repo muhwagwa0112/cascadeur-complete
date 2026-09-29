@@ -784,8 +784,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[import_vrm]",
+      "fixture_id": "fixture.sample.cube",
       "since": "2026.1"
     },
     {
@@ -946,34 +946,23 @@
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": "render.video",
-      "action": "render.video",
-      "operation": "render.video",
+      "route": "tool.RenderToFile",
+      "action": "tool.RenderToFile",
+      "operation": "tool.RenderToFile",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Native",
-      "implementation_status": "implemented",
-      "preconditions": [
-        "compatible_version"
-      ],
-      "postconditions": [
-        "output_file",
-        "nonzero_bytes"
-      ],
-      "adapter_id": "cascadeur_2026_1.render.video",
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
       "contract_test_ids": [
-        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
-        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
       ],
-      "live_test_id": "tests/live/test_live_features.py::test_live_feature[export_video]",
-      "fixture_id": "fixture.sample.cube",
+      "live_test_id": null,
+      "fixture_id": null,
       "since": "2026.1",
-      "arguments": {
-        "path": "absolute .mp4 path",
-        "width": "int",
-        "height": "int",
-        "samples": "int"
-      },
+      "arguments": {},
       "fixed_arguments": {}
     },
     {
@@ -2459,7 +2448,7 @@
       "since": "2026.1",
       "arguments": {
         "ids": "object IDs",
-        "values": "{\"visibility\": bool}"
+        "values": "{\"visibility\": ObjectVisibility enum int}"
       },
       "fixed_arguments": {}
     },
@@ -4113,34 +4102,23 @@
       "source_url": "https://cascadeur.com/help/category/311",
       "license": "any",
       "dependency": null,
-      "route": "render.video",
-      "action": "render.video",
-      "operation": "render.video",
+      "route": "tool.RenderToFile",
+      "action": "tool.RenderToFile",
+      "operation": "tool.RenderToFile",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Native",
-      "implementation_status": "implemented",
-      "preconditions": [
-        "compatible_version"
-      ],
-      "postconditions": [
-        "output_file",
-        "nonzero_bytes"
-      ],
-      "adapter_id": "cascadeur_2026_1.render.video",
+      "execution_mode": "Gated",
+      "implementation_status": "ui_only",
+      "preconditions": [],
+      "postconditions": [],
+      "adapter_id": null,
       "contract_test_ids": [
-        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
-        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
       ],
-      "live_test_id": "tests/live/test_live_features.py::test_live_feature[render_video]",
-      "fixture_id": "fixture.sample.cube",
+      "live_test_id": null,
+      "fixture_id": null,
       "since": "2026.1",
-      "arguments": {
-        "path": "absolute .mp4 path",
-        "width": "int",
-        "height": "int",
-        "samples": "int"
-      },
+      "arguments": {},
       "fixed_arguments": {}
     },
     {
@@ -4270,22 +4248,35 @@
       "source_url": "https://cascadeur.com/help/interface",
       "license": "any",
       "dependency": "Blender integration",
-      "route": "external.blender",
-      "action": "blender_export",
-      "operation": "external.blender",
+      "route": "io.export_fbx",
+      "action": "io.export_fbx",
+      "operation": "io.export_fbx",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "dependency_gated",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "External",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "output_file",
+        "nonzero_bytes",
+        "target_import_verified"
+      ],
+      "adapter_id": "cascadeur_2026_1.io.export_fbx",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[blender_export]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "path": "absolute .fbx path"
+      },
+      "fixed_arguments": {
+        "target": "blender"
+      }
     },
     {
       "id": "control_picker",

@@ -33,7 +33,7 @@ Use `layer_list` before every layer-targeted operation. IDs, not names, are the 
 - `timeline_select_interval(first_frame, last_frame, layer_ids)`: select the exact interval required by generation or physics tools.
 - `animation_curve(action="query")`: inspect curve sections before changing them.
 - `animation_curve` interpolation/tangent actions: set an exact mode at an exact frame/layer and re-query.
-- `cycle_list`: inspect normalized cycles. Cycle creation/editing and track stretching are UI-only in the baseline unless live capability data reports a verified route.
+- `cycle_list`: inspect normalized cycles. Create cycles with `feature_prepare("cycle")` and retime keys with `feature_prepare("stretch")`; both verify the resulting cycles/keys.
 
 Do not edit a hidden or locked layer accidentally. State the active/target layers and frame range in the plan.
 
@@ -55,7 +55,7 @@ Animation Unbaking is staged:
 
 Call `animation_unbaking_prepare(step=...)` for one documented stage at a time. Verify keys/interpolation after each stage rather than treating the three stages as an opaque batch.
 
-Trajectory display, Ghost, Fixing/Hiding, Tween, Interval Edit, Copy Animation, graph UI editing, and bake/stretch/playback controls may be UI-only. Use `feature_describe`; return the exact gate instead of simulating unknown mouse flows or action IDs.
+Trajectory display and modes, Ghost, Fixing, Hiding, Tween, Interval Edit, Copy Animation, Graph edit, Bake, Stretch, fulcrum marking and playback are adapter-bound (see [adapter-features.md](adapter-features.md)). View toggles are verified by a rendered-window change, playback by sampling the playhead. Still check `feature_describe`: a feature without live evidence on this build reports `unhealthy`.
 
 ## Mirror and cycles
 
@@ -66,7 +66,7 @@ Use `mirror_prepare` with explicit Box-controller IDs and either:
 
 The default mirror plane is normal `[1, 0, 0]` through origin `[0, 0, 0]`. Override it only when the character/world plane is known. Commit and compare paired controllers at key frames.
 
-Use `cycle_list` to diagnose existing cycles. If cycle editing is `ui_only`, report the route and leave a manual step; do not approximate a cycle by silently duplicating keys unless the user requested that alternate result.
+Use `cycle_list` to diagnose existing cycles and `feature_prepare("cycle", {"layer_ids", "first_frame", "last_frame"})` to create one. Do not approximate a cycle by duplicating keys.
 
 ## AutoPosing
 
@@ -78,7 +78,7 @@ For a protected AutoPosing add/update, use:
 2. inspect snapshot/impact and commit the token;
 3. re-read controller transforms and generation state.
 
-The 2026.1 line improves quadruped AutoPosing and integrates Point Constraints. Finger AutoPosing remains a separate capability and may be UI-only.
+The 2026.1 line improves quadruped AutoPosing and integrates Point Constraints. Finger AutoPosing display is toggled by `finger_auto_posing` (a view toggle verified on screen).
 
 ## Inbetweening
 

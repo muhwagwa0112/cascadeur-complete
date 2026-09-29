@@ -635,6 +635,7 @@ def _record(
     version_name: str,
     verified_features: set[str],
     developer_enabled: bool,
+    available_dependencies: set[str] = frozenset(),
 ) -> FeatureRecord:
     adapter = ADAPTER_SPECS.get(spec.route)
     product = PRODUCT_CATALOG.by_id.get(spec.feature_id)
@@ -642,7 +643,10 @@ def _record(
     command_missing = (
         spec.route.startswith("command.") and spec.route.removeprefix("command.") not in available_commands
     )
-    dependency = spec.dependency
+    required_dependency = spec.dependency
+    # A dependency detected on this machine no longer gates the adapter; the
+    # record still names it so callers know what the route relies on.
+    dependency = None if required_dependency in available_dependencies else required_dependency
     if spec.feature_id == "developer_execute_python" and developer_enabled and DEVELOPER_BUILD:
         dependency = None
     if version_name != PRODUCT_CATALOG.supported_build or spec.feature_id == "export_vrm":
@@ -717,7 +721,7 @@ def _record(
         requires_scene=spec.requires_scene,
         destructive=product.mutation if product else spec.destructive,
         license=spec.license,  # type: ignore[arg-type]
-        dependency=dependency,
+        dependency=required_dependency if dependency is None and required_dependency else dependency,
         source=product.source_url if product else "https://cascadeur.com/help/tools",
         source_url=product.source_url if product else None,
         public_action=product.action if product else None,
@@ -867,6 +871,7 @@ def build_registry(
     version_name: str = "2026.1.2.0.15343",
     verified_features: Iterable[str] = (),
     developer_enabled: bool = False,
+    available_dependencies: Iterable[str] = (),
 ) -> list[FeatureRecord]:
     tool_set = set(tools)
     command_list = list(commands)
@@ -882,6 +887,7 @@ def build_registry(
             version_name,
             verified_set,
             developer_enabled,
+            set(available_dependencies),
         )
         for spec in CORE_FEATURES
     ]
