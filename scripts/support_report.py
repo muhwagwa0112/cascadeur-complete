@@ -27,8 +27,29 @@ GATE_REASON = {
 }
 
 
+def _evidence_license(service: CascadeurService) -> str | None:
+    """License tier of the newest evidence recorded for the installed build."""
+    records = service.evidence_store._load()["records"]
+    current = [
+        item
+        for item in records
+        if isinstance(item, dict) and (item.get("binding") or {}).get("cascadeur_version") == service._version_name
+    ]
+    if not current:
+        return None
+    newest = max(current, key=lambda item: float(item.get("verified_at") or 0))
+    return str(newest["binding"].get("license") or "").title() or None
+
+
 def main() -> int:
     service = CascadeurService()
+    # Evidence is bound to the license tier; offline the service assumes Basic.
+    live = service.refresh_live(timeout=20)
+    if not live.ok:
+        license_name = _evidence_license(service)
+        if license_name:
+            service._license_name = license_name
+            service._rebuild_features()
     status = service.capabilities(live=False)
     coverage = status["product_coverage"]
     product = [item for item in service.features if item.truth_layer == "product"]
