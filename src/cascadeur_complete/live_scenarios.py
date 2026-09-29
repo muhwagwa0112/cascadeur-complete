@@ -339,9 +339,11 @@ def _export_usd(s: LiveSession) -> Any:
 @scenario("import_usd", CUBE)
 def _import_usd(s: LiveSession) -> Any:
     source = getattr(s, "exported_usd", None)
-    if not source:
-        _export_usd(s)
-        source = s.exported_usd
+    if not source or not Path(source).is_file():
+        # USD export can be license-gated; import a Blender-built USD instead.
+        source = str(s.service.paths.root / "live-fixtures" / "cube.usd")
+        if not Path(source).is_file():
+            raise LiveValidationError("run scripts/fetch_live_fixtures.py to build the USD fixture")
     return _ui_flow(s, "import", "usd", source)
 
 

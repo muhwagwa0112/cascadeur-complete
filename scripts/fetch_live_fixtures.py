@@ -51,6 +51,16 @@ for point in key.data:
 bpy.ops.export_scene.fbx(filepath=out, use_selection=False, bake_anim=False)
 """
 
+# A plain cube exported as USD (import fixture independent of USD export).
+USD_SCRIPT = r"""
+import bpy, sys
+out = sys.argv[sys.argv.index("--") + 1]
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=2)
+bpy.context.active_object.name = "UsdCube"
+bpy.ops.wm.usd_export(filepath=out)
+"""
+
 FIXTURES = {
     "VRM1_Constraint_Twist_Sample.vrm": (
         "https://raw.githubusercontent.com/pixiv/three-vrm/dev/packages/three-vrm/examples/models/"
@@ -94,6 +104,16 @@ def main() -> int:
         )
     if blend_shapes.is_file():
         print(blend_shapes.name, blend_shapes.stat().st_size)
+    usd = root / "cube.usd"
+    if not usd.is_file() and blender is not None:
+        subprocess.run(
+            [str(blender), "--background", "--factory-startup", "--python-expr", USD_SCRIPT, "--", str(usd)],
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+    if usd.is_file():
+        print(usd.name, usd.stat().st_size)
     return 0
 
 
