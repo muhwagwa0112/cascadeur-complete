@@ -10,12 +10,37 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 import traceback
 from pathlib import Path
 
+from cascadeur_complete.discovery import discover_installation
 from cascadeur_complete.live_validation import FIXTURES, SCENARIOS, LiveSession, run_scenario
+from cascadeur_complete.uia import _native_cascadeur_handles
+
+
+def ensure_cascadeur(session: LiveSession, restart_wait: float = 240.0) -> bool:
+    """Relaunch Cascadeur after a crash so one crashing scenario cannot fail the rest.
+
+    Returns True when a restart happened. Waits until the bridge answers and the
+    license has been applied (the first seconds after start report Basic).
+    """
+    if _native_cascadeur_handles():
+        return False
+    subprocess.Popen([discover_installation()["executable"]], close_fds=True)
+    deadline = time.monotonic() + restart_wait
+    ready_since = None
+    while time.monotonic() < deadline:
+        time.sleep(5)
+        status = session.service.refresh_live(timeout=30)
+        if status.ok:
+            ready_since = ready_since or time.monotonic()
+            if session.service._license_name == "Pro" or time.monotonic() - ready_since > 30:
+                break
+    session.current_fixture = None
+    return True
 
 
 def main() -> int:
@@ -50,6 +75,8 @@ def main() -> int:
         if args.skip_verified and session.verified(feature_id):
             report.append({"feature_id": feature_id, "verified": True, "skipped": True})
             continue
+        if ensure_cascadeur(session):
+            print(f"RESTARTED Cascadeur after a crash (before {feature_id})", flush=True)
         started = time.monotonic()
         try:
             row = run_scenario(session, feature_id)
@@ -63,6 +90,8 @@ def main() -> int:
                 "seconds": round(time.monotonic() - started, 1),
             }
             session.current_fixture = None
+            if not _native_cascadeur_handles():
+                row["error"] = "CASCADEUR CRASHED during this scenario; " + row["error"]
         report.append(row)
         mark = "PASS" if row.get("verified") else "FAIL"
         print(f"{mark} {feature_id:28} {row.get('seconds', 0):6}s {row.get('error', '')[:300]}", flush=True)
