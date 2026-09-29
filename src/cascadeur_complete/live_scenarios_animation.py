@@ -156,17 +156,20 @@ def _cycle_query(s: LiveSession) -> Any:
 
 @scenario("cycle", BACKFLIP)
 def _cycle(s: LiveSession) -> Any:
-    # Like a cycle made in the Timeline: every layer of the character, bounded
-    # by frames that are keys on all of them.
+    # Like a cycle made in the Timeline: as many layers as share both bounding
+    # keyframes (Backflip's layers do not all key the same frames).
     layers = [item for item in s.layers() if item["keys"]]
-    common = sorted(set.intersection(*(set(item["keys"]) for item in layers))) if layers else []
-    if len(common) < 2:
-        raise LiveValidationError("no two keyframes are shared by every layer")
-    return s.change(
-        "cycle",
-        "timeline.cycle",
-        {"layer_ids": [item["id"] for item in layers], "first_frame": common[0], "last_frame": common[1]},
-    )
+    best = None
+    for layer in layers:
+        keys = sorted(layer["keys"])
+        for first, last in zip(keys, keys[2:], strict=False):
+            sharing = [item["id"] for item in layers if first in item["keys"] and last in item["keys"]]
+            if best is None or len(sharing) > len(best[2]):
+                best = (first, last, sharing)
+    if best is None:
+        raise LiveValidationError("no layer has three keyframes")
+    first, last, sharing = best
+    return s.change("cycle", "timeline.cycle", {"layer_ids": sharing, "first_frame": first, "last_frame": last})
 
 
 @scenario("bake", BACKFLIP)

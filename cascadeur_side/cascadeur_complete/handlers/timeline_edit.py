@@ -105,14 +105,35 @@ def _fingerprint(domain, object_ids, frame, context):
 
 def _assert_scene_saves(context, label):
     """Cascadeur checks its layer invariants when saving; a timeline edit that
-    breaks them (e.g. "checkAnimatedSettings") only surfaces as a failed save and
-    a later crash. Saving the working copy proves the edited scene is valid."""
+    breaks them (e.g. "checkAnimatedSettings") only surfaces as "Saving scene
+    failed!" in its log and a later crash. The save must rewrite the file and
+    log no failure."""
+    import os
+    import time
+    from pathlib import Path
+
+    view = context["scene_view"]()
+    path = Path(str(view.get_path_name()))
+    before = path.stat().st_mtime_ns if path.is_file() else None
+    log = Path(os.environ.get("LOCALAPPDATA", "")) / "Nekki Limited" / "Cascadeur" / "logs" / "cascadeur_log.log"
+    log_offset = log.stat().st_size if log.is_file() else 0
+    started = time.time()
     try:
-        context["save_current_scene"](context["scene_view"]())
+        context["save_current_scene"](view)
     except RuntimeError as exc:
+        raise AssertionError(f"POSTCONDITION_FAILED: Cascadeur cannot save the scene after {label}: {exc}") from exc
+    failure = None
+    if log.is_file():
+        with log.open("rb") as stream:
+            stream.seek(log_offset)
+            tail = stream.read().decode("utf-8", errors="replace")
+        failure = next((line for line in tail.splitlines() if "Saving scene failed" in line), None)
+    rewritten = path.is_file() and path.stat().st_mtime_ns != before and path.stat().st_mtime >= started - 2.0
+    if failure or not rewritten:
         raise AssertionError(
-            f"POSTCONDITION_FAILED: Cascadeur cannot save the scene after {label} (layer invariants): {exc}"
-        ) from exc
+            f"POSTCONDITION_FAILED: Cascadeur cannot save the scene after {label} (layer invariants): "
+            + (failure.split("] ", 1)[-1][:200] if failure else "the scene file was not rewritten")
+        )
 
 
 # -- cycles -------------------------------------------------------------------------
@@ -320,11 +341,12 @@ def stretch(scene, arguments, _request, context):
         for layer_id, mapping in plans.items():
             layer = layers_viewer.layer(layer_id)
             object_ids = set(layer.obj_ids)
+            # Same as pycsc Layer.get_all_datas: every non-static datum of the layer's objects.
             animated = [
                 data_id
-                for data_id in data_viewer.get_all_data_id()
-                if data_viewer.get_data(data_id).object_id in object_ids
-                and str(getattr(data_viewer.get_data(data_id).mode, "name", "")) == "Animation"
+                for object_id in object_ids
+                for data_id in data_viewer.get_all_data_id(object_id)
+                if data_viewer.get_data(data_id).mode != context["csc"].model.DataMode.Static
             ]
             values = {
                 (data_id, frame): data_viewer.get_data_value(data_id, frame)
@@ -347,7 +369,7 @@ def stretch(scene, arguments, _request, context):
                 for data_id in animated:
                     data_editor.set_data_value(data_id, target, values[(data_id, frame)])
                     changed.add(data_id)
-        editor.normalize_sections()
+        editor.normalize_sections(domain)  # shipped scripts pass the scene; the API doc omits it
         scene_updater.generate_update()
         scene_updater.run_update(changed, domain.get_current_frame(False))
 
@@ -541,12 +563,14 @@ def activate_layer(scene, arguments, _request, context):
     domain = context["domain_scene"](scene)
     layer_id = _layers(domain, [arguments["layer_id"]], context)[0]
     frame = int(domain.get_current_frame(False))
+    # Activating a layer selects its whole track (a one-frame part is rejected).
+    last = max(0, int(domain.layers_viewer().frames_count()) - 1)
 
     accepted = []
 
     def apply(_model, _update, _scene, session):
         # The session changer is the one pycsc uses; it reports acceptance.
-        accepted.append(session.take_layers_selector().set_full_selection_by_parts([layer_id], frame, frame))
+        accepted.append(session.take_layers_selector().set_full_selection_by_parts([layer_id], 0, last))
 
     transact(domain.modify_with_session, "Cascadeur Complete: activate layer", apply)
     if accepted and accepted[0] is False:
