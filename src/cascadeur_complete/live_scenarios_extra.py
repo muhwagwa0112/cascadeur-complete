@@ -135,6 +135,10 @@ def _grid(s: LiveSession) -> Any:
 
 @scenario("composition", BACKFLIP)
 def _composition(s: LiveSession) -> Any:
+    # Composition guides frame a camera: look through a scene camera first.
+    from .live_scenarios import _camera_activate
+
+    _camera_activate(s)
     return _toggle(s, "composition", "view.composition")
 
 
@@ -145,6 +149,8 @@ def _trajectory(s: LiveSession) -> Any:
 
 @scenario("trajectory_translation", BACKFLIP)
 def _trajectory_translation(s: LiveSession) -> Any:
+    # Translation is the default trajectory mode; leave it first so choosing it is a change.
+    s.change("trajectory_rotation", "view.trajectory_rotate", {"ids": _points(s)})
     return s.change("trajectory_translation", "view.trajectory_translate", {"ids": _points(s)})
 
 
@@ -155,6 +161,7 @@ def _trajectory_rotation(s: LiveSession) -> Any:
 
 @scenario("trajectory_direction", BACKFLIP)
 def _trajectory_direction(s: LiveSession) -> Any:
+    s.change("trajectory_translation", "view.trajectory_translate", {"ids": _points(s)})
     return s.change("trajectory_direction", "view.trajectory_direction", {"ids": _points(s)})
 
 
