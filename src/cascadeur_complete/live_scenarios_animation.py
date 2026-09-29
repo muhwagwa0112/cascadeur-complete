@@ -156,10 +156,17 @@ def _cycle_query(s: LiveSession) -> Any:
 
 @scenario("cycle", BACKFLIP)
 def _cycle(s: LiveSession) -> Any:
-    layer, keys = animated_layer(s)
-    if len(keys) < 3:
-        raise LiveValidationError("layer needs three keys for a cycle")
-    return s.change("cycle", "timeline.cycle", {"layer_ids": [layer], "first_frame": keys[0], "last_frame": keys[2]})
+    # Like a cycle made in the Timeline: every layer of the character, bounded
+    # by frames that are keys on all of them.
+    layers = [item for item in s.layers() if item["keys"]]
+    common = sorted(set.intersection(*(set(item["keys"]) for item in layers))) if layers else []
+    if len(common) < 2:
+        raise LiveValidationError("no two keyframes are shared by every layer")
+    return s.change(
+        "cycle",
+        "timeline.cycle",
+        {"layer_ids": [item["id"] for item in layers], "first_frame": common[0], "last_frame": common[1]},
+    )
 
 
 @scenario("bake", BACKFLIP)

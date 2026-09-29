@@ -103,6 +103,18 @@ def _fingerprint(domain, object_ids, frame, context):
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
+def _assert_scene_saves(context, label):
+    """Cascadeur checks its layer invariants when saving; a timeline edit that
+    breaks them (e.g. "checkAnimatedSettings") only surfaces as a failed save and
+    a later crash. Saving the working copy proves the edited scene is valid."""
+    try:
+        context["save_current_scene"](context["scene_view"]())
+    except RuntimeError as exc:
+        raise AssertionError(
+            f"POSTCONDITION_FAILED: Cascadeur cannot save the scene after {label} (layer invariants): {exc}"
+        ) from exc
+
+
 # -- cycles -------------------------------------------------------------------------
 
 
@@ -159,6 +171,7 @@ def cycle(scene, arguments, _request, context):
             raise AssertionError("POSTCONDITION_FAILED: cycle missing on layer " + layer_text)
         if action == "delete" and any(start <= frame <= end for start, end in cycles):
             raise AssertionError("POSTCONDITION_FAILED: cycle remains on layer " + layer_text)
+    _assert_scene_saves(context, "cycle")
     return {
         "observed_postconditions": ["cycle_present"] if action == "create" else ["cycle_absent"],
         "action": action,
@@ -186,6 +199,7 @@ def bake(scene, arguments, _request, context):
     for layer_id in layer_ids:
         if _keys(domain, layer_id, first, last) != expected:
             raise AssertionError("POSTCONDITION_FAILED: baked interval is missing keys")
+    _assert_scene_saves(context, "bake")
     return {
         "layer_ids": [context["id_string"](item) for item in layer_ids],
         "first_frame": first,
@@ -260,6 +274,7 @@ def interval_edit(scene, arguments, _request, context):
     keys_moved = before_keys != after_keys
     if not shifted and not keys_moved:
         raise AssertionError("POSTCONDITION_FAILED: interval edit changed neither frames nor keys")
+    _assert_scene_saves(context, "interval edit")
     return {
         "action": action,
         "action_id": actions[action],
@@ -346,6 +361,7 @@ def stretch(scene, arguments, _request, context):
             )
         observed[context["id_string"](layer_id)] = keys
     del view
+    _assert_scene_saves(context, "stretch")
     return {"scale": scale, "keys": observed}, []
 
 
@@ -376,6 +392,7 @@ def copy_interval(scene, arguments, _request, context):
     for layer_text, offsets in source.items():
         if not set(offsets) <= set(observed[layer_text]):
             raise AssertionError("POSTCONDITION_FAILED: pasted interval misses source keys on " + layer_text)
+    _assert_scene_saves(context, "interval copy")
     return {"source_offsets": source, "destination_offsets": observed, "target_frame": target}, []
 
 
