@@ -44,10 +44,13 @@ def _spot_light_properties(s: LiveSession) -> Any:
 
 
 def _mesh(s: LiveSession) -> str:
+    # Earlier import scenarios add meshes to the shared scene; use one that
+    # carries a Material, as the fixture's own cube does.
     meshes = s.objects_of_type("Mesh Object")
     if not meshes:
         raise LiveValidationError("fixture has no mesh object")
-    return meshes[0]["id"]
+    with_material = s.owners("Material", meshes)
+    return with_material[0] if with_material else meshes[0]["id"]
 
 
 def behaviour_values(s: LiveSession, object_id: str, behaviour: str) -> dict[str, Any]:
