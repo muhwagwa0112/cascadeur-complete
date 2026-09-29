@@ -630,21 +630,6 @@ def rig_json_import(scene, arguments, _request, context):
     return {"path": str(path), "created_rig_element_ids": created}, []
 
 
-def _dynamic_names(domain, object_id):
-    import common.behavior_operations as behaviour_operations
-
-    viewer = _viewer(domain)
-    data = domain.model_viewer().data_viewer()
-    names = set()
-    for behaviour_id in viewer.get_behaviours(object_id):
-        if str(viewer.get_behaviour_name(behaviour_id)) in ("Dynamic", "DynamicBehaviour"):
-            try:
-                names.add(str(behaviour_operations.dynamic_behavior_name(viewer, data, behaviour_id)))
-            except Exception:
-                continue
-    return names
-
-
 @handler("rig.untwist", postconditions=("untwist_dependencies_created",))
 def untwist(scene, arguments, _request, context):
     """Create a ProxyUntwist on the target rig element's box (parent -> target -> child chain)."""
@@ -677,13 +662,17 @@ def untwist(scene, arguments, _request, context):
     if parent_of(target) != parent or parent_of(child) != target:
         raise ValueError("Expected hierarchy parent -> target -> child between the rig elements")
     parent_joint, child_joint, box = owner(parent, "joint"), owner(child, "joint"), owner(target, "box")
-    if "UntwistSettings" in _dynamic_names(domain, box):
+    py_scene = pycsc.wrap(domain)
+
+    def has_untwist():
+        # The Untwist behaviours live on the box's update node (ProxyUntwist.has_fn).
+        return bool(ProxyUntwist.has_fn(py_scene, pycsc.wrap(box, py_scene)))
+
+    if has_untwist():
         raise ValueError("The target already has an Untwist")
     axis = int(arguments.get("axis", 0))
     if axis not in (0, 1, 2):
         raise ValueError("axis must be 0, 1 or 2")
-    py_scene = pycsc.wrap(domain)
-
     def create(current):
         ProxyUntwist.set_by_joints_and_box(
             pycsc.wrap(parent_joint, current).to(pycsc.objects.Joint),
@@ -695,8 +684,8 @@ def untwist(scene, arguments, _request, context):
 
     if py_scene.edit("Cascadeur Complete: create untwist", create) is False:
         raise RuntimeError("Untwist creation was rejected by Cascadeur")
-    names = _dynamic_names(domain, box)
-    if not {"UntwistSettings", "UntwistDependencies"} <= names:
+    py_scene = pycsc.wrap(domain)
+    if not has_untwist():
         raise AssertionError("POSTCONDITION_FAILED: untwist behaviours were not added to the target box")
     return {"box_id": context["id_string"](box), "axis": axis}, []
 
