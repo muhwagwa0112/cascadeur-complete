@@ -187,7 +187,9 @@ def _virtual_joint_delete(s: LiveSession) -> Any:
 @scenario("joint_delete", RIGMODE)
 def _joint_delete(s: LiveSession) -> Any:
     ensure_rig_mode(s)
-    created = s.change("joint", "rig.joint_create", {})["created_id"]
+    # Delete removes standard rig joints: create one under an existing joint first.
+    parent = s.objects_of_type("Joint")[0]["id"]
+    created = s.change("joint", "rig.joint_create", {"parent_joint_id": parent})["created_id"]
     return s.change("joint_delete", "rig.joint_delete", {"joint_id": created})
 
 

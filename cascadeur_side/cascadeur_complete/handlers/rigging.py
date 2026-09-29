@@ -178,13 +178,24 @@ def constraint_drivers(scene, _arguments, _request, context):
 
 
 @handler("rig.joint_create", postconditions=("joint_count_increased_by_one", "created_joint_selected"))
-def joint_create(scene, _arguments, _request, context):
+def joint_create(scene, arguments, _request, context):
     from commands.add import add_joint
 
     domain = context["domain_scene"](scene)
     behaviours = domain.model_viewer().behaviour_viewer()
     before_owners = _behaviour_owner_set(behaviours, "Joint", context)
-    add_joint.run(domain)
+    parent_id = str(arguments.get("parent_joint_id") or "")
+    if parent_id:
+        # Rig Mode "Add joint": a standard rig joint as a child of the given joint.
+        from prototypes.rig_joint_actions import standard
+
+        parent = _require_existing_objects(domain, [parent_id], context, "parent_joint_id")[0]
+        if behaviours.get_behaviour_by_name(parent, "Joint").is_null():
+            raise ValueError("parent_joint_id does not own Joint: " + parent_id)
+        _select_exact(domain, [parent])
+        standard.add_standard_joint(domain)
+    else:
+        add_joint.run(domain)
     after_owners = _behaviour_owner_set(behaviours, "Joint", context)
     created = sorted(after_owners - before_owners)
     if len(created) != 1:
@@ -197,8 +208,17 @@ def joint_create(scene, _arguments, _request, context):
     }
     if created[0] not in selected:
         raise AssertionError("POSTCONDITION_FAILED: created Joint was not selected")
+    if parent_id:
+        from prototypes.rig_joint_actions import standard
+
+        if standard.get_rig_joint_behaviour(domain, created_id).is_null():
+            raise AssertionError("POSTCONDITION_FAILED: created joint is not a standard rig joint")
+        parent_of = behaviours.get_behaviour_object(behaviours.get_behaviour_by_name(created_id, "Basic"), "parent")
+        if context["id_string"](parent_of) != parent_id:
+            raise AssertionError("POSTCONDITION_FAILED: created rig joint has another parent")
     return {
         "created_id": created[0],
+        "parent_joint_id": parent_id or None,
         "name": str(domain.model_viewer().get_object_name(created_id)),
         "before_joint_count": len(before_owners),
         "after_joint_count": len(after_owners),
