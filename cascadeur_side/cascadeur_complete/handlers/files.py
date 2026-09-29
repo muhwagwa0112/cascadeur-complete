@@ -52,8 +52,14 @@ def selection_groups_import(scene, arguments, _request, context):
     observed = {index: sorted(names.get(item, item) for item in after.get(index, [])) for index in expected}
     present = set(names.values())
     for index, wanted in expected.items():
-        if sorted(name for name in wanted if name in present) != observed[index]:
-            raise AssertionError(f"POSTCONDITION_FAILED: selection group {index} does not match the file")
+        # Names can repeat in a scene, so compare the sets of names.
+        missing = sorted({name for name in wanted if name in present} - set(observed[index]))
+        extra = sorted(set(observed[index]) - set(wanted))
+        if missing or extra:
+            raise AssertionError(
+                f"POSTCONDITION_FAILED: selection group {index} does not match the file "
+                f"(missing {missing[:5]}, extra {extra[:5]})"
+            )
     return {"path": str(path), "groups": {str(key): len(value) for key, value in observed.items()}}, []
 
 
