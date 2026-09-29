@@ -133,3 +133,32 @@ def test_confirmation_token_can_be_consumed_exactly_once_concurrently(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as executor:
         outcomes = list(executor.map(lambda _index: consume(), range(2)))
     assert sorted(outcomes) == [False, True]
+
+
+def test_only_playback_tokens_may_omit_the_scene_revision(tmp_path):
+    manager = ChangeManager(RuntimePaths.discover(tmp_path / "runtime"), secret=b"p" * 32)
+    playback = manager.prepare(
+        feature_id="timeline_stop",
+        scene_id="scene",
+        scene_revision=None,
+        selection_fingerprint="selection",
+        operation=Operation(name="timeline.playback", arguments={}),
+        impact={},
+        backup_path=None,
+    )
+    # The playhead moves during playback, so any revision of the same scene is accepted.
+    manager.consume(playback.token, scene_id="scene", scene_revision="moving", selection_fingerprint="selection")
+
+    edit = manager.prepare(
+        feature_id="object_rename",
+        scene_id="scene",
+        scene_revision=None,
+        selection_fingerprint="selection",
+        operation=Operation(name="objects.rename", arguments={"name": "x"}),
+        impact={},
+        backup_path=None,
+    )
+    with pytest.raises(SafetyError, match="revision"):
+        manager.consume(edit.token, scene_id="scene", scene_revision="r1", selection_fingerprint="selection")
+    with pytest.raises(SafetyError):
+        manager.consume(playback.token, scene_id="other", scene_revision="moving", selection_fingerprint="selection")

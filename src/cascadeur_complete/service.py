@@ -108,6 +108,9 @@ HOST_POSTCONDITIONS = {
     **{operation: ("viewport_render_changed",) for operation in VIEW_OPERATIONS},
 }
 
+# Operations that only move the playhead (part of the revision) and edit no data.
+PLAYHEAD_ONLY_OPERATIONS = frozenset({"timeline.playback"})
+
 # Operations whose "path" argument names an existing file to read, not an output.
 INPUT_PATH_OPERATIONS = frozenset(
     {
@@ -1073,7 +1076,10 @@ class CascadeurService:
         working_id = str(uuid.uuid4())
         backup_path = None
         working_path = None
-        if state.get("scene_id"):
+        # Playback only moves the playhead and edits no scene data, while the
+        # playhead is part of the revision; bind it to the scene identity only.
+        playhead_only = operation_name in PLAYHEAD_ONLY_OPERATIONS
+        if state.get("scene_id") and not playhead_only:
             snapshot = self.client.execute(
                 "snapshot",
                 [
@@ -1118,7 +1124,7 @@ class CascadeurService:
         record = self.changes.prepare(
             feature_id=feature_id,
             scene_id=state.get("scene_id"),
-            scene_revision=state.get("revision"),
+            scene_revision=None if playhead_only else state.get("revision"),
             selection_fingerprint=state.get("selection_fingerprint"),
             operation=Operation(name=operation_name, arguments=arguments),
             impact=impact,

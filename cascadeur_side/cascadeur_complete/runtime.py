@@ -238,7 +238,12 @@ def _verify_confirmation(root, request, before):
         raise BridgeAuthenticationError("Confirmation token expired")
     if record.get("feature_id") != request.get("feature_id"):
         raise BridgeAuthenticationError("Confirmation token feature binding differs")
-    if record.get("scene_id") != before.get("scene_id") or record.get("scene_revision") != before.get("revision"):
+    approved_name = str((record.get("operation") or {}).get("name", ""))
+    # Playback only moves the playhead (part of the revision): identity binding only.
+    playhead_only = record.get("scene_revision") is None and approved_name == "timeline.playback"
+    if record.get("scene_id") != before.get("scene_id") or (
+        not playhead_only and record.get("scene_revision") != before.get("revision")
+    ):
         raise BridgeAuthenticationError("Confirmation token scene binding differs")
     if record.get("selection_fingerprint") != before.get("selection_fingerprint"):
         raise BridgeAuthenticationError("Confirmation token selection binding differs")

@@ -188,12 +188,21 @@ class ChangeManager:
             raise SafetyError("Unknown confirmation token")
         return self._verify_record(nonce, signature, path)
 
+    @staticmethod
+    def _scene_matches(record: ChangeToken, scene_id: str | None, scene_revision: str | None) -> bool:
+        if record.scene_id != scene_id:
+            return False
+        if record.scene_revision is None:
+            # Only playhead-only operations are bound to the scene identity alone.
+            return record.operation.name == "timeline.playback"
+        return record.scene_revision == scene_revision
+
     def consume(
         self, token: str, *, scene_id: str | None, scene_revision: str | None, selection_fingerprint: str | None
     ) -> ChangeToken:
         nonce, signature = self._parts(token)
         record = self.load(token)
-        if record.scene_id != scene_id or record.scene_revision != scene_revision:
+        if not self._scene_matches(record, scene_id, scene_revision):
             raise SafetyError("Scene identity or revision changed after preparation")
         if record.selection_fingerprint != selection_fingerprint:
             raise SafetyError("Selection changed after preparation")
@@ -215,7 +224,7 @@ class ChangeManager:
             raise SafetyError("Confirmation token was already claimed") from exc
         try:
             record = self._verify_record(nonce, signature, claimed)
-            if record.scene_id != scene_id or record.scene_revision != scene_revision:
+            if not self._scene_matches(record, scene_id, scene_revision):
                 raise SafetyError("Scene identity or revision changed during token claim")
             if record.selection_fingerprint != selection_fingerprint:
                 raise SafetyError("Selection changed during token claim")
