@@ -209,19 +209,21 @@ def _ik(s: LiveSession) -> Any:
     points = {item["name"]: item["id"] for item in point_rows}
     attraction = set(s.owners("AttractionPoint", point_rows))
     connection = set(s.owners("ConnectionPointTwoBody", point_rows))
+    reasons = []
     for side in ("_l", "_r"):
-        chain = [
-            points.get(f"hand_MainPoint{side}"),
-            points.get(f"forearm_MainPoint{side}"),
-            points.get(f"arm_MainPoint{side}"),
-        ]
-        if all(chain) and chain[0] in attraction and chain[-1] in attraction and chain[1] in connection:
+        names = [f"hand_MainPoint{side}", f"forearm_MainPoint{side}", f"arm_MainPoint{side}"]
+        chain = [points.get(name) for name in names]
+        if not all(chain):
+            reasons.append(f"{side}: missing {[n for n, i in zip(names, chain, strict=True) if not i]}")
+            continue
+        # Like Cascadeur's add_ik, a middle link needs exactly one ConnectionPointTwoBody.
+        middle = s.behaviour_names([chain[1]])[chain[1]].count("ConnectionPointTwoBody")
+        if chain[0] in attraction and chain[-1] in attraction and chain[1] in connection and middle == 1:
             return s.change("ik", "rig.ik_chain_create", {"ordered_ids": chain})
-    ends = sorted(attraction)
-    middles = sorted(connection - attraction)
-    if len(ends) < 2 or not middles:
-        raise LiveValidationError("fixture has no IK-capable point chain")
-    return s.change("ik", "rig.ik_chain_create", {"ordered_ids": [ends[0], middles[0], ends[1]]})
+        reasons.append(
+            f"{side}: ends attraction={chain[0] in attraction}/{chain[-1] in attraction}, middle connections={middle}"
+        )
+    raise LiveValidationError("fixture has no IK-capable arm chain: " + "; ".join(reasons))
 
 
 def autophysics_points(s: LiveSession) -> list[str]:

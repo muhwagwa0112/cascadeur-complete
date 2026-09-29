@@ -295,6 +295,14 @@ def ik_chain_create(scene, arguments, _request, context):
     missing_links = [item for item in ordered_ids[1:-1] if item not in connection_owners]
     if missing_links:
         raise ValueError("IK middle links lack ConnectionPointTwoBody behaviour: " + ", ".join(missing_links))
+    ambiguous = [
+        item
+        for item in ordered_ids[1:-1]
+        if len(list(behaviours.get_behaviours_by_name(context["object_id"](item), "ConnectionPointTwoBody"))) != 1
+    ]
+    if ambiguous:
+        # Cascadeur's own add_ik reads a single ConnectionPointTwoBody per link.
+        raise ValueError("IK middle links own several ConnectionPointTwoBody behaviours: " + ", ".join(ambiguous))
 
     before_owners = _behaviour_owner_set(behaviours, "ChainIK", context)
     py_scene = pycsc.wrap(domain)
