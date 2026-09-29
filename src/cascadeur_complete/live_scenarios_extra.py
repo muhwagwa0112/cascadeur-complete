@@ -236,8 +236,12 @@ def _retargeting(s: LiveSession) -> Any:
     before = {item["id"]: item for item in s.objects()}
     _dialog(s, "import_scene_to_current", str(FIXTURES["fixture.sample.cascy"]))
     created = [item for item in s.objects() if item["id"] not in before]
-    targets = {item["name"]: item["id"] for item in created if item["type"] == "Point"}
-    sources = {item["name"]: item["id"] for item in before.values() if item["type"] == "Point"}
+    # "Import scene to current" adds a namespace to the imported names.
+    def base(name: str) -> str:
+        return name.replace("|", ":").rsplit(":", 1)[-1]
+
+    targets = {base(item["name"]): item["id"] for item in created if item["type"] == "Point"}
+    sources = {base(item["name"]): item["id"] for item in before.values() if item["type"] == "Point"}
     shared = sorted(set(targets) & set(sources))
     if not shared:
         raise LiveValidationError("the imported character shares no point names with the animated one")
