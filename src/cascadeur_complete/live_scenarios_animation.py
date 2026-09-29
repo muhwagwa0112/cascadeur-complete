@@ -156,8 +156,10 @@ def _cycle_query(s: LiveSession) -> Any:
 
 @scenario("cycle", BACKFLIP)
 def _cycle(s: LiveSession) -> Any:
-    layer, _keys = animated_layer(s)
-    return s.change("cycle", "timeline.cycle", {"layer_ids": [layer], "first_frame": 0, "last_frame": 20})
+    layer, keys = animated_layer(s)
+    if len(keys) < 3:
+        raise LiveValidationError("layer needs three keys for a cycle")
+    return s.change("cycle", "timeline.cycle", {"layer_ids": [layer], "first_frame": keys[0], "last_frame": keys[2]})
 
 
 @scenario("bake", BACKFLIP)
@@ -170,7 +172,8 @@ def _bake(s: LiveSession) -> Any:
 def _stretch(s: LiveSession) -> Any:
     for layer in s.layers():
         keys = sorted(layer["keys"])
-        for first, last, following in zip(keys, keys[1:], keys[2:], strict=False):
+        # Walk from the end: the cycle scenario occupies the first keys.
+        for first, last, following in reversed(list(zip(keys, keys[1:], keys[2:], strict=False))):
             if following - last >= 4:
                 return s.change(
                     "stretch",

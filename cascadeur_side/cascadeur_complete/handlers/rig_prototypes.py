@@ -8,7 +8,7 @@ explicit inputs first, selects exactly those objects, calls the bundled action
 
 from __future__ import annotations
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 RIG_MODE_COLOR = [0.0, 0.5, 0.0]
 
@@ -45,7 +45,7 @@ def _select(domain, object_ids, context):
             set(object_ids), object_ids[0] if object_ids else context["csc"].model.ObjectId.null()
         )
 
-    domain.modify_with_session("Cascadeur Complete: select prototype objects", apply)
+    transact(domain.modify_with_session, "Cascadeur Complete: select prototype objects", apply)
 
 
 def _technical_links(domain, object_id, context):
@@ -175,7 +175,7 @@ def hinge(scene, arguments, _request, context):
         scene_updater.generate_update()
         scene_updater.run_update(actual, 0)
 
-    domain.modify_update("Cascadeur Complete: hinge " + action, edit)
+    transact(domain.modify_update, "Cascadeur Complete: hinge " + action, edit)
     left = _global_position(domain, points[context["id_string"](parent)])
     right = _global_position(domain, points[context["id_string"](child)])
     if not _close(left, right):
@@ -342,7 +342,7 @@ def root_constraint(scene, arguments, _request, context):
         def edit(model, update, _scene_updater):
             main_actions.add_proto_root_constraint_beh(model, update, domain, root, element)
 
-        domain.modify("Cascadeur Complete: add root constraint", edit)
+        transact(domain.modify, "Cascadeur Complete: add root constraint", edit)
         created = sorted(_owners(domain, "ProtoRootConstraint", context) - before)
         if len(created) != 1:
             raise AssertionError("POSTCONDITION_FAILED: exactly one root constraint was not created")
@@ -377,7 +377,7 @@ def fulcrum_group(scene, arguments, _request, context):
         def edit(model, update, _scene_updater):
             main_actions.create_fulcrum_group_beh(model, update, domain, ids, arguments.get("name") or None)
 
-        domain.modify("Cascadeur Complete: create fulcrum group", edit)
+        transact(domain.modify, "Cascadeur Complete: create fulcrum group", edit)
         created = sorted(_owners(domain, "ProtoFulcrumGroup", context) - before)
         if len(created) != 1:
             raise AssertionError("POSTCONDITION_FAILED: exactly one fulcrum group was not created")
@@ -514,7 +514,7 @@ def technical_link(scene, arguments, _request, context):
             py_scene.set_modifiers(model, update)
             prototype_pub.update_interpolation_controller(pycsc.wrap(links, py_scene))
 
-    domain.modify("Cascadeur Complete: " + kind + " " + action, edit)
+    transact(domain.modify, "Cascadeur Complete: " + kind + " " + action, edit)
     observed = _viewer(domain).get_behaviour_reference(links, field)
     if (action == "set" and observed != reference) or (action == "remove" and not observed.is_null()):
         raise AssertionError("POSTCONDITION_FAILED: " + field + " differs from request")
@@ -539,7 +539,7 @@ def autoposing_props(scene, arguments, _request, context):
             for name in names:
                 editor.set_data_value(_viewer(domain).get_behaviour_data(info, name), value)
 
-    domain.modify("Cascadeur Complete: AutoPosing props", edit)
+    transact(domain.modify, "Cascadeur Complete: AutoPosing props", edit)
     data = domain.data_viewer()
     for object_id in ids:
         info = _viewer(domain).get_behaviour_by_name(object_id, "AutoPosingInfo")
@@ -560,7 +560,7 @@ def clear_animation_data(scene, _arguments, _request, context):
         tool.erase_preserved_data(session)
         tool.erase_preserved_setting(session)
 
-    domain.modify_with_session("Cascadeur Complete: clear additional animation data", clear)
+    transact(domain.modify_with_session, "Cascadeur Complete: clear additional animation data", clear)
     remaining = tool.get_preserved_data()
     if remaining:
         raise AssertionError("POSTCONDITION_FAILED: preserved animation data remains")

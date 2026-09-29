@@ -36,6 +36,21 @@ if cube:
 bpy.ops.render.render(animation=True)
 """
 
+# A cube with one "Stretch" shape key exported as FBX (blend shape fixture).
+BLEND_SHAPE_SCRIPT = r"""
+import bpy, sys
+out = sys.argv[sys.argv.index("--") + 1]
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=20)
+cube = bpy.context.active_object
+cube.name = "BlendCube"
+cube.shape_key_add(name="Basis")
+key = cube.shape_key_add(name="Stretch")
+for point in key.data:
+    point.co.z *= 2.0
+bpy.ops.export_scene.fbx(filepath=out, use_selection=False, bake_anim=False)
+"""
+
 FIXTURES = {
     "VRM1_Constraint_Twist_Sample.vrm": (
         "https://raw.githubusercontent.com/pixiv/three-vrm/dev/packages/three-vrm/examples/models/"
@@ -68,6 +83,17 @@ def main() -> int:
         )
     if video.is_file():
         print(video.name, video.stat().st_size)
+    blend_shapes = root / "blendshape_cube.fbx"
+    if not blend_shapes.is_file() and blender is not None:
+        subprocess.run(
+            [str(blender), "--background", "--factory-startup", "--python-expr", BLEND_SHAPE_SCRIPT, "--"]
+            + [str(blend_shapes)],
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+    if blend_shapes.is_file():
+        print(blend_shapes.name, blend_shapes.stat().st_size)
     return 0
 
 

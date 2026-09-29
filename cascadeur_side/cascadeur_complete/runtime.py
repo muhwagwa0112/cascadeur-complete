@@ -17,7 +17,7 @@ from pathlib import Path
 import csc
 
 from . import handlers as _handlers  # noqa: F401
-from .handler_registry import declared_postconditions
+from .handler_registry import declared_postconditions, transact
 from .handler_registry import dispatch as dispatch_registered
 
 PROTOCOL_VERSION = "2.0"
@@ -1033,7 +1033,7 @@ def _run_operation(scene, operation, request):
         def set_frame(_model, _update, _scene, session):
             session.set_current_frame(frame)
 
-        domain.modify_with_session("Cascadeur Complete: set frame", set_frame)
+        transact(domain.modify_with_session, "Cascadeur Complete: set frame", set_frame)
         observed = int(domain.get_current_frame(False))
         if observed != frame:
             raise AssertionError("POSTCONDITION_FAILED: frame is " + str(observed))
@@ -1111,7 +1111,7 @@ def _run_operation(scene, operation, request):
             scene_updater.generate_update()
             scene_updater.run_update(changed, frame)
 
-        domain.modify_update("Cascadeur Complete: set transform", set_transforms)
+        transact(domain.modify_update, "Cascadeur Complete: set transform", set_transforms)
         observed = _read_transforms(domain, ids, frame, space)
         for item in observed:
             if "position" in provided and any(
@@ -1170,7 +1170,7 @@ def _run_operation(scene, operation, request):
         def change_selection(_model, _update, _scene, session):
             session.take_selector().select(object_ids, pivot)
 
-        domain.modify_with_session("Cascadeur Complete: " + name, change_selection)
+        transact(domain.modify_with_session, "Cascadeur Complete: " + name, change_selection)
         observed = set(scene_state(_scene_view() or scene)["selection"])
         if observed != target:
             raise AssertionError("POSTCONDITION_FAILED: selection differs")
@@ -1215,7 +1215,7 @@ def _run_operation(scene, operation, request):
             elif name == "animation.key_delete":
                 editor.unset_section(int(args["frame"]), layer_id)
 
-        domain.modify("Cascadeur Complete: " + name, edit_layers)
+        transact(domain.modify, "Cascadeur Complete: " + name, edit_layers)
         state = scene_state(_scene_view() or scene)
         if name == "layer.create":
             created_id = _id_string(created[0])

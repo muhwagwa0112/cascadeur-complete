@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 
 def _folder_rows(domain, context):
@@ -29,10 +29,7 @@ def edit_folder(scene, arguments, _request, context):
         viewer = scene_updater.layers_viewer()
         if action == "create":
             if not bool(arguments.get("with_default_layer", True)):
-                raise ValueError(
-                    "Cascadeur 2026.1.2 does not persist an empty folder; "
-                    "with_default_layer must be true"
-                )
+                raise ValueError("Cascadeur 2026.1.2 does not persist an empty folder; with_default_layer must be true")
             parent = context["guid"](arguments["parent_id"]) if arguments.get("parent_id") else viewer.root_id()
             changed.append(
                 editor.create_folder(
@@ -54,7 +51,7 @@ def edit_folder(scene, arguments, _request, context):
         else:
             raise ValueError("Unsupported folder action: " + action)
 
-    domain.modify("Cascadeur Complete: layer folder " + action, edit)
+    transact(domain.modify, "Cascadeur Complete: layer folder " + action, edit)
     folders = _folder_rows(domain, context)
     changed_id = context["id_string"](changed[0])
     observed = next((item for item in folders if item["id"] == changed_id), None)

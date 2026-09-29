@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 
 def _parent_id(behaviour_viewer, object_id, context):
@@ -160,7 +160,7 @@ def rename_object(scene, arguments, _request, context):
     def rename(model, _update, _scene_updater):
         model.set_object_name(object_id, requested_name)
 
-    domain.modify("Cascadeur Complete: rename object", rename)
+    transact(domain.modify, "Cascadeur Complete: rename object", rename)
     observed = str(domain.model_viewer().get_object_name(object_id))
     if observed != requested_name:
         raise AssertionError("POSTCONDITION_FAILED: object name differs")

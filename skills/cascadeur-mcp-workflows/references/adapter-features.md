@@ -82,6 +82,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | `additional_joint_attach` | Attach additional joint | `rig.technical_link` | `rig_element_id`: ID, `target_id`: joint | `kind=additional_joint`, `action=set` | `technical_link_equals_request` |
 | `additional_joint_detach` | Detach additional joint | `rig.technical_link` | `rig_element_id`: ID | `kind=additional_joint`, `action=remove` | `technical_link_equals_request` |
 | `additional_parent` | Set additional parent | `rig.technical_link` | `rig_element_id`: ID, `target_id`: rig element, `action`: set\|remove | `kind=additional_parent` | `technical_link_equals_request` |
+| `blend_shape` | Blend Shape | `mesh.blend_shape_weight` | `object_id`: mesh object imported with Blendshapes, `blend_shape`: optional blend shape name (required when the mesh has several), `weights`: {channel: weight in [-100, 100]}, `frame`: optional frame (default: current) | — | `blend_shape_weights_equal_request` |
 | `character_mirror_plane` | Character mirror plane | `rig.character_mirror_plane` | `plane`: 0 YZ\|1 XZ\|2 XY\|3 undefined | — | `mirror_plane_equals_request` |
 | `clear_animation_data` | Clear animation data | `rig.clear_animation_data` | — | — | `preserved_data_empty` |
 | `custom_additional_point_remove` | Remove custom additional point | `rig.technical_link` | `rig_element_id`: ID | `kind=user_additional_point`, `action=remove` | `technical_link_equals_request` |
@@ -136,7 +137,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | `save_as_new_version` | Save As New Version | `scene.save_new_version` | — | — | `new_version_file_saved` |
 | `save_as_without_assets` | Save As without assets | `system.ui_file_flow` | `path`: .casc | — | `exact_file_dialog`, `output_file`, `nonzero_bytes` |
 | `scene_parts_export` | Export Scene Parts | `system.ui_file_flow` | `path`: .partscasc | — | `exact_file_dialog`, `output_file`, `nonzero_bytes` |
-| `scene_parts_import` | Import Scene Parts | `io.scene_parts_import` | `path`: .partscasc file | — | `scene_part_objects_created` |
+| `scene_parts_import` | Import Scene Parts | `system.ui_file_flow` | `path`: .partscasc | — | `exact_file_dialog`, `scene_revision_changed` |
 | `selection_groups_export` | Export Selection Groups | `system.ui_file_flow` | `path`: file | — | `exact_file_dialog`, `output_file`, `nonzero_bytes` |
 | `selection_groups_import` | Import Selection Groups | `io.selection_groups_import` | `path`: selection groups file | — | `selection_groups_loaded` |
 

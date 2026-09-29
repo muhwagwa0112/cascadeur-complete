@@ -23,6 +23,7 @@ GATE_REASON = {
     "ui_only": "only reachable through Cascadeur's QML UI; no action id or Python API exists in 2026.1.2",
     "not_implemented": "no adapter yet",
     "unhealthy": "adapter present, no current live evidence on this machine",
+    "needs_scene": "adapter present, no current live evidence on this machine",
 }
 
 
@@ -34,7 +35,8 @@ def main() -> int:
     supported = [
         item
         for item in product
-        if item.state.value == "available"
+        # "needs_scene" only means no scene is open while the report runs.
+        if item.state.value in ("available", "needs_scene")
         and (item.verification.value == "verified_live" or item.route.startswith("host."))
     ]
     lines = [

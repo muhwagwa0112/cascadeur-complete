@@ -768,27 +768,12 @@ def complete_file_dialog(
     # existing filename has been entered. Resolve it after setting the path.
     accept = descendant(automation_id="1", control_type="Button")
     if accept is None:
-        if expected_dialog_title.startswith("Import. preset:") or prefix is not None:
-            # Windows 11 may keep the Open button out of the UIA tree even
-            # after a valid path is entered. Enter invokes the verified
-            # dialog's default action without relying on localized text.
-            filename.type_keys("{ENTER}")
-            accept_automation_id = "ENTER(default action)"
-        else:
-            buttons = [
-                (
-                    item.element_info.automation_id,
-                    item.control_id(),
-                    item.window_text(),
-                )
-                for item in owner.descendants(control_type="Button")
-                if item.is_visible()
-                and item.rectangle().left >= dialog_rectangle.left
-                and item.rectangle().right <= dialog_rectangle.right
-                and item.rectangle().top >= dialog_rectangle.top
-                and item.rectangle().bottom <= dialog_rectangle.bottom
-            ]
-            raise UIAutomationError(f"File dialog does not expose accept Button ID 1; observed_buttons={buttons}")
+        # Windows 11 may keep the Open button out of the UIA tree even after a
+        # valid path is entered. The dialog title and owner are verified above,
+        # so Enter in the filename field invokes its default action without
+        # relying on localized button text.
+        filename.type_keys("{ENTER}")
+        accept_automation_id = "ENTER(default action)"
     else:
         accept.click_input()
         accept_automation_id = "1"

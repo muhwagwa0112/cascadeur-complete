@@ -185,10 +185,18 @@ def _constraint_point(s: LiveSession) -> Any:
 
 @scenario("constraint_transform", CASCY)
 def _constraint_transform(s: LiveSession) -> Any:
-    driver = s.change("object_create", "object.create", {"name": "MCP Driver", "position": [0, 3, 3], "size": 0.5})
-    box = s.objects_of_type("Box")[0]["id"]
+    # Transform constraints bind independent transform objects (Add > Transform
+    # dummies carry the Position/Rotation/Enforce Global inputs they rewire).
+    before = {item["id"] for item in s.objects()}
+    for _ in range(2):
+        s.change("command.add.transform", "system.action_invoke", {"action_id": "Add.Transform", "expect_change": True})
+    created = [item["id"] for item in s.objects() if item["id"] not in before and item["name"].startswith("Transform")]
+    if len(created) != 2:
+        raise LiveValidationError(f"expected two new transform objects, found {len(created)}")
     return s.change(
-        "constraint_transform", "physics.constraint_transform", {"driver_id": driver["id"], "constrained_id": box}
+        "constraint_transform",
+        "physics.constraint_transform",
+        {"driver_id": created[0], "constrained_id": created[1]},
     )
 
 

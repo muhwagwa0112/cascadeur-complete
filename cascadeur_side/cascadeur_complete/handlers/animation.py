@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 
 def _enum_name(value, context):
@@ -154,7 +154,7 @@ def edit_section(scene, arguments, request, context):
 
         model.layers_editor().change_section(frame, layer_id, modify)
 
-    domain.modify("Cascadeur Complete: set " + operation, edit)
+    transact(domain.modify, "Cascadeur Complete: set " + operation, edit)
     rows = _sections(domain, {"layer_ids": [str(arguments["layer_id"])]}, context)
     observed = next((item for item in rows if item["frame"] == frame), None)
     expected = _enum_name(enum_value, context)
@@ -187,11 +187,7 @@ def key_reduce(scene, arguments, _request, context):
     before = {}
     expected = {}
     for layer_id in layer_ids:
-        key_frames = [
-            int(frame)
-            for frame in viewer.layer(layer_id).key_frame_indices()
-            if first <= int(frame) <= last
-        ]
+        key_frames = [int(frame) for frame in viewer.layer(layer_id).key_frame_indices() if first <= int(frame) <= last]
         layer_text = context["id_string"](layer_id)
         before[layer_text] = key_frames
         preserved = set(key_frames[::every_n])
@@ -215,7 +211,7 @@ def key_reduce(scene, arguments, _request, context):
                 elif fixed_interpolation and frame != layer_keys[-1]:
                     editor.change_section(frame, layer_id, set_fixed)
 
-    domain.modify("Cascadeur Complete: reduce keyframes", reduce)
+    transact(domain.modify, "Cascadeur Complete: reduce keyframes", reduce)
     observed = {}
     for layer_id in layer_ids:
         layer_text = context["id_string"](layer_id)
@@ -226,9 +222,7 @@ def key_reduce(scene, arguments, _request, context):
         )
         if observed[layer_text] != expected[layer_text]:
             raise AssertionError("POSTCONDITION_FAILED: reduced key set differs for layer " + layer_text)
-    removed = {
-        layer_id: sorted(set(before[layer_id]) - set(observed[layer_id])) for layer_id in observed
-    }
+    removed = {layer_id: sorted(set(before[layer_id]) - set(observed[layer_id])) for layer_id in observed}
     return {
         "first_frame": first,
         "last_frame": last,

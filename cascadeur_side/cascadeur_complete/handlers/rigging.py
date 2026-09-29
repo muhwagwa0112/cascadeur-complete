@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 RIG_BEHAVIOURS = (
     "RigInfo",
@@ -59,7 +59,7 @@ def _select_exact(domain, object_ids):
     def select(_model, _update, _scene, session):
         session.take_selector().select(set(object_ids), object_ids[0])
 
-    domain.modify_with_session("Cascadeur Complete: select rig objects", select)
+    transact(domain.modify_with_session, "Cascadeur Complete: select rig objects", select)
 
 
 def _reference_owner_ids(viewer, behaviour_id, property_name, context):
@@ -167,7 +167,7 @@ def constraint_drivers(scene, _arguments, _request, context):
         return (state["model_data_fingerprint"], state["objects"], state["layers"])
 
     before = structure()
-    domain.modify("Cascadeur Complete: inspect constraint drivers", inspect_update)
+    transact(domain.modify, "Cascadeur Complete: inspect constraint drivers", inspect_update)
     after = structure()
     if failures:
         raise RuntimeError("Constraint driver inspection failed: " + " | ".join(failures))
@@ -188,9 +188,7 @@ def joint_create(scene, _arguments, _request, context):
     after_owners = _behaviour_owner_set(behaviours, "Joint", context)
     created = sorted(after_owners - before_owners)
     if len(created) != 1:
-        raise AssertionError(
-            "POSTCONDITION_FAILED: Add.Joint did not create exactly one Joint owner"
-        )
+        raise AssertionError("POSTCONDITION_FAILED: Add.Joint did not create exactly one Joint owner")
     created_id = context["object_id"](created[0])
     selected = {
         context["id_string"](item)
@@ -231,8 +229,7 @@ def rig_info_create(scene, arguments, _request, context):
     linked = set()
     for rig_info_id in behaviours.get_behaviours("RigInfo"):
         related = {
-            context["id_string"](item)
-            for item in behaviours.get_behaviour_objects_range(rig_info_id, "related_joints")
+            context["id_string"](item) for item in behaviours.get_behaviour_objects_range(rig_info_id, "related_joints")
         }
         linked.update(set(joint_ids) & related)
     if linked:
@@ -251,7 +248,7 @@ def rig_info_create(scene, arguments, _request, context):
         )
         created_behaviours.append(rig_info_id)
 
-    domain.modify("Cascadeur Complete: create RigInfo", create)
+    transact(domain.modify, "Cascadeur Complete: create RigInfo", create)
     behaviours = domain.model_viewer().behaviour_viewer()
     after_owners = _behaviour_owner_set(behaviours, "RigInfo", context)
     created_owners = sorted(after_owners - before_owners)
@@ -297,9 +294,7 @@ def ik_chain_create(scene, arguments, _request, context):
     connection_owners = _behaviour_owner_set(behaviours, "ConnectionPointTwoBody", context)
     missing_links = [item for item in ordered_ids[1:-1] if item not in connection_owners]
     if missing_links:
-        raise ValueError(
-            "IK middle links lack ConnectionPointTwoBody behaviour: " + ", ".join(missing_links)
-        )
+        raise ValueError("IK middle links lack ConnectionPointTwoBody behaviour: " + ", ".join(missing_links))
 
     before_owners = _behaviour_owner_set(behaviours, "ChainIK", context)
     py_scene = pycsc.wrap(domain)
@@ -381,18 +376,14 @@ def rig_elements_create(scene, arguments, request, context):
         if start not in joint_owners:
             raise ValueError(f"pairs[{index}].joint_id does not own Joint: {start}")
         if direction is not None and direction not in joint_owners:
-            raise ValueError(
-                f"pairs[{index}].direction_joint_id does not own Joint: {direction}"
-            )
+            raise ValueError(f"pairs[{index}].direction_joint_id does not own Joint: {direction}")
         if direction == start:
             raise ValueError(f"pairs[{index}] cannot point a Joint at itself")
         requested_starts.append(start)
         parsed_pairs.append(
             (
                 context["object_id"](start),
-                context["csc"].model.ObjectId.null()
-                if direction is None
-                else context["object_id"](direction),
+                context["csc"].model.ObjectId.null() if direction is None else context["object_id"](direction),
             )
         )
     if len(set(requested_starts)) != len(requested_starts):
@@ -435,10 +426,7 @@ def rig_elements_create(scene, arguments, request, context):
     py_scene = pycsc.wrap(domain)
     created_objects = rig_actions._add_rig_elements(py_scene, data, parsed_pairs)
     viewer = domain.model_viewer().behaviour_viewer()
-    after = {
-        name: _behaviour_owner_set(viewer, name, context)
-        for name in before
-    }
+    after = {name: _behaviour_owner_set(viewer, name, context) for name in before}
     created_rig_elements = sorted(after["TechnicalLinks"] - before["TechnicalLinks"])
     if len(created_rig_elements) != len(parsed_pairs):
         raise AssertionError(
@@ -446,22 +434,16 @@ def rig_elements_create(scene, arguments, request, context):
         )
     observed_joint_by_element = {}
     for owner_id in created_rig_elements:
-        technical_links = viewer.get_behaviour_by_name(
-            context["object_id"](owner_id), "TechnicalLinks"
-        )
+        technical_links = viewer.get_behaviour_by_name(context["object_id"](owner_id), "TechnicalLinks")
         joint_reference = viewer.get_behaviour_reference(technical_links, "joint")
         if joint_reference.is_null():
             raise AssertionError("POSTCONDITION_FAILED: new rig element has no linked Joint")
-        observed_joint_by_element[owner_id] = context["id_string"](
-            viewer.get_behaviour_owner(joint_reference)
-        )
+        observed_joint_by_element[owner_id] = context["id_string"](viewer.get_behaviour_owner(joint_reference))
     if sorted(observed_joint_by_element.values()) != sorted(requested_starts):
         raise AssertionError("POSTCONDITION_FAILED: new rig elements link different Joints")
     box_only = bool(normalized_options.get("only_box_controller", False))
     if not box_only and len(after["RigidBodyView"] - before["RigidBodyView"]) != len(parsed_pairs):
-        raise AssertionError(
-            "POSTCONDITION_FAILED: full rig elements did not create one RigidBodyView per pair"
-        )
+        raise AssertionError("POSTCONDITION_FAILED: full rig elements did not create one RigidBodyView per pair")
     if request.get("feature_id") == "rigid_body" and box_only:
         raise AssertionError("POSTCONDITION_FAILED: rigid_body cannot create box-only rig elements")
     returned_ids = []
@@ -480,10 +462,7 @@ def rig_elements_create(scene, arguments, request, context):
         "created_rig_element_ids": created_rig_elements,
         "returned_ids": sorted(set(returned_ids)),
         "linked_joint_by_element": observed_joint_by_element,
-        "created_behaviour_owner_ids": {
-            name: sorted(after[name] - before[name])
-            for name in after
-        },
+        "created_behaviour_owner_ids": {name: sorted(after[name] - before[name]) for name in after},
         "execution": "prototypes.add_rig_elements_actions.actions._add_rig_elements",
     }, []
 
@@ -508,9 +487,7 @@ def additional_point_create(scene, arguments, _request, context):
     after = _reference_owner_ids(viewer, technical_links, "manual_points", context)
     created = sorted(set(after) - set(before))
     if len(created) != 1:
-        raise AssertionError(
-            "POSTCONDITION_FAILED: exactly one additional Point controller was not linked"
-        )
+        raise AssertionError("POSTCONDITION_FAILED: exactly one additional Point controller was not linked")
     return {
         "rig_element_id": owner_id,
         "created_point_id": created[0],
@@ -540,9 +517,7 @@ def additional_box_create(scene, arguments, _request, context):
     after = _reference_owner_ids(viewer, technical_links, "additional_boxes", context)
     created = sorted(set(after) - set(before))
     if len(created) != 1:
-        raise AssertionError(
-            "POSTCONDITION_FAILED: exactly one additional Box controller was not linked"
-        )
+        raise AssertionError("POSTCONDITION_FAILED: exactly one additional Box controller was not linked")
     return {
         "rig_element_id": owner_id,
         "created_box_id": created[0],
@@ -606,29 +581,23 @@ def spline_ik_create(scene, arguments, _request, context):
         )
         created.append(context["id_string"](obj.object_id()))
 
-    domain.modify("Cascadeur Complete: create Spline IK", create)
+    transact(domain.modify, "Cascadeur Complete: create Spline IK", create)
     viewer = domain.model_viewer().behaviour_viewer()
     after = _behaviour_owner_set(viewer, "ProtoSplineIk", context)
     created_owners = sorted(after - before)
     if len(created_owners) != 1 or created_owners != created:
         raise AssertionError("POSTCONDITION_FAILED: exactly one ProtoSplineIk was not created")
-    behaviour = viewer.get_behaviour_by_name(
-        context["object_id"](created_owners[0]), "ProtoSplineIk"
-    )
+    behaviour = viewer.get_behaviour_by_name(context["object_id"](created_owners[0]), "ProtoSplineIk")
     observed_joints = {
         context["id_string"](viewer.get_behaviour_owner(item))
         for item in viewer.get_behaviour_reference_range(behaviour, "joints")
     }
-    expected_joints = {
-        context["id_string"](viewer.get_behaviour_owner(item)) for item in joints
-    }
+    expected_joints = {context["id_string"](viewer.get_behaviour_owner(item)) for item in joints}
     observed_links = {
         context["id_string"](viewer.get_behaviour_owner(item))
         for item in viewer.get_behaviour_reference_range(behaviour, "tech_links")
     }
-    expected_links = {
-        context["id_string"](viewer.get_behaviour_owner(item)) for item in technical_links
-    }
+    expected_links = {context["id_string"](viewer.get_behaviour_owner(item)) for item in technical_links}
     if observed_joints != expected_joints or observed_links != expected_links:
         raise AssertionError("POSTCONDITION_FAILED: ProtoSplineIk references differ from resolved hierarchy")
     return {

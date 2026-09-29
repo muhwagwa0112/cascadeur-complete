@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 
 @handler("timeline.range", postconditions=("selected_interval_equals_requested",))
@@ -22,7 +22,7 @@ def select_interval(scene, arguments, _request, context):
     def apply(_model, _update, _scene, session):
         session.take_layers_selector().set_full_selection_by_parts(layer_ids, first, last)
 
-    domain.modify_with_session("Cascadeur Complete: select timeline interval", apply)
+    transact(domain.modify_with_session, "Cascadeur Complete: select timeline interval", apply)
     selector = domain.get_layers_selector()
     observed_ids = {context["id_string"](item) for item in selector.all_included_layer_ids()}
     interval = selector.selection().frames_interval()

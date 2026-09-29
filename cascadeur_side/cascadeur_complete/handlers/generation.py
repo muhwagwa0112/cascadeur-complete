@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 
 def _read(value, name, context):
@@ -132,7 +132,7 @@ def auto_posing(scene, arguments, _request, context):
     def apply(_model, _update, _scene, session):
         getattr(editor, action)(session)
 
-    domain.modify_with_session("Cascadeur Complete: AutoPosing " + action, apply)
+    transact(domain.modify_with_session, "Cascadeur Complete: AutoPosing " + action, apply)
     after = context["scene_state"](context["scene_view"]() or scene)
     if before["revision"] == after["revision"]:
         raise AssertionError("POSTCONDITION_FAILED: AutoPosing made no observable scene change")

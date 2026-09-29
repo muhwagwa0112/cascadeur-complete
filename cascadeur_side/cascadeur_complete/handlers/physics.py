@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 PHYSICS_BEHAVIOURS = (
     "PhysicsSettings",
@@ -98,7 +98,7 @@ def _select_objects(domain, object_ids, context, label):
     def select(_model, _update, _scene, session):
         session.take_selector().select(set(converted), converted[0])
 
-    domain.modify_with_session("Cascadeur Complete: select " + label, select)
+    transact(domain.modify_with_session, "Cascadeur Complete: select " + label, select)
     return converted
 
 
@@ -145,7 +145,7 @@ def physics_mass_set(scene, arguments, _request, context):
         for _owner, data_id, value in rows:
             editor.set_data_value(data_id, value * coefficient)
 
-    domain.modify("Cascadeur Complete: set total rigid body mass", set_mass)
+    transact(domain.modify, "Cascadeur Complete: set total rigid body mass", set_mass)
     observed = []
     for owner, data_id, _value in rows:
         observed.append({"owner_id": owner, "mass": float(_data_value(data_viewer, data_id))})
@@ -182,9 +182,7 @@ def ballistic(scene, arguments, _request, context):
         raise ValueError(f"Invalid ballistic interval: {first}..{last}")
     requested_layers = [str(item) for item in arguments.get("layer_ids", [])]
     layer_ids = (
-        [context["guid"](item) for item in requested_layers]
-        if requested_layers
-        else list(viewer.all_layer_ids())
+        [context["guid"](item) for item in requested_layers] if requested_layers else list(viewer.all_layer_ids())
     )
     if not layer_ids:
         raise ValueError("Ballistic trajectory requires at least one animation layer")
@@ -195,7 +193,7 @@ def ballistic(scene, arguments, _request, context):
         session.take_selector().select({converted_center}, converted_center)
         session.take_layers_selector().set_full_selection_by_parts(layer_ids, first, last)
 
-    domain.modify_with_session("Cascadeur Complete: select ballistic inputs", select_inputs)
+    transact(domain.modify_with_session, "Cascadeur Complete: select ballistic inputs", select_inputs)
     before = context["casc_tool_state"](view_scene)
     action_id = "BallisticTrajectoryTool.Add ballistic trajectory"
     result = context["csc"].app.get_application().get_action_manager().call_action(action_id)
@@ -251,9 +249,7 @@ def center_of_mass(scene, arguments, _request, context):
         raise AssertionError("POSTCONDITION_FAILED: Center of Mass operation made no scene change")
     return {
         "observed_postconditions": (
-            ["center_of_mass_count_increased"]
-            if mode in ("from_rigids", "composite")
-            else ["scene_revision_changed"]
+            ["center_of_mass_count_increased"] if mode in ("from_rigids", "composite") else ["scene_revision_changed"]
         ),
         "mode": mode,
         "execution": "commands.center_of_mass." + commands[mode].__name__.rsplit(".", 1)[-1] + ".run",
@@ -305,7 +301,8 @@ def collision_create(scene, arguments, _request, context):
             int(arguments.get("max_recursion_depth", 10)),
             int(arguments.get("fill_mode", 0)),
         ]
-        domain.modify(
+        transact(
+            domain.modify,
             "Cascadeur Complete: generate convex collision",
             generate_convex_mesh.get_mod(converted, values),
         )
@@ -317,7 +314,8 @@ def collision_create(scene, arguments, _request, context):
             float(arguments.get("weight_threshold", 0.5)),
             float(arguments.get("hull_tolerance", 1.0)),
         ]
-        domain.modify(
+        transact(
+            domain.modify,
             "Cascadeur Complete: generate collision by skinning",
             generate_by_skinning.get_mod(converted, values),
         )
@@ -355,8 +353,7 @@ def collision_delete(scene, arguments, _request, context):
     for object_id in converted:
         object_text = context["id_string"](object_id)
         before[object_text] = {
-            name: not behaviours.get_behaviour_by_name(object_id, name).is_null()
-            for name in collision_behaviours
+            name: not behaviours.get_behaviour_by_name(object_id, name).is_null() for name in collision_behaviours
         }
     if not any(any(row.values()) for row in before.values()):
         raise ValueError("No requested object owns a collision behaviour")
@@ -365,18 +362,13 @@ def collision_delete(scene, arguments, _request, context):
     remaining = {}
     for object_id in converted:
         names = [
-            name
-            for name in collision_behaviours
-            if not behaviours.get_behaviour_by_name(object_id, name).is_null()
+            name for name in collision_behaviours if not behaviours.get_behaviour_by_name(object_id, name).is_null()
         ]
         if names:
             remaining[context["id_string"](object_id)] = names
     if remaining:
         raise AssertionError("POSTCONDITION_FAILED: collision behaviours remain: " + str(remaining))
-    removed = {
-        object_id: sorted(name for name, present in row.items() if present)
-        for object_id, row in before.items()
-    }
+    removed = {object_id: sorted(name for name, present in row.items() if present) for object_id, row in before.items()}
     return {
         "target_ids": ids,
         "removed_behaviours": removed,
@@ -419,15 +411,15 @@ def constraint_transform(scene, arguments, _request, context):
     def add_constraint(model, update, _scene, session):
         driver = update.get_object_by_id(driver_id)
         constrained = update.get_object_by_id(constrained_id)
-        if not constrained.has_input("Position"):
+        if not constrained.root_group().has_input("Position"):
             raise ValueError("The constrained object does not support transform constraints")
-        result = constrain_ortho_transform(domain, model, update, driver, constrained)
-        if result is None:
+        if not constrained.root_group().has_input("Enforce Global"):
             raise ValueError("The constrained object lacks Enforce Global; regenerate the rig first")
+        result = constrain_ortho_transform(domain, model, update, driver, constrained)
         created.append(context["id_string"](result.object_id()))
         session.take_selector().select({result.object_id()}, result.object_id())
 
-    domain.modify_with_session("Cascadeur Complete: transform constraint", add_constraint)
+    transact(domain.modify_with_session, "Cascadeur Complete: transform constraint", add_constraint)
     after_count = constraint_count()
     existing = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
     if not created or created[0] not in existing:
@@ -512,7 +504,7 @@ def constraint_point(scene, arguments, _request, context):
         except Exception as exc:
             failures.append(str(exc))
 
-    domain.modify("Cascadeur Complete: point constraints", add_constraints)
+    transact(domain.modify, "Cascadeur Complete: point constraints", add_constraints)
     if failures:
         raise RuntimeError("Point constraint failed: " + " | ".join(failures))
     after_count = len(list(behaviours.get_behaviours("Constraint")))
@@ -587,7 +579,7 @@ def auto_physics_enable(scene, _arguments, _request, context):
         def select_center(_model, _update, _scene, session):
             session.take_selector().select({object_id}, object_id)
 
-        domain.modify_with_session("Cascadeur Complete: select AutoPhysics center of mass", select_center)
+        transact(domain.modify_with_session, "Cascadeur Complete: select AutoPhysics center of mass", select_center)
     action_id = "AutoPhysicsTool.Switch Auto Physics"
     result = context["csc"].app.get_application().get_action_manager().call_action(action_id)
     after = _auto_physics_state(context["scene_view"]() or scene, context)

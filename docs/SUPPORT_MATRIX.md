@@ -56,7 +56,11 @@ protected change branches the scene into a snapshot working copy.
 ## Known UI-only rows in 2026.1.2
 
 Filament environment/shadows/dynamic lights/ambient occlusion/bloom, the
-Settings window, Scene Linking and Blend Shape sliders exist only in Cascadeur's
-QML UI. The build registers no ActionManager id and no Python API for them, and
+Settings window and Scene Linking exist only in Cascadeur's QML UI. The build registers no ActionManager id and no Python API for them, and
 Qt's accessibility tree for the main window cannot be enumerated reliably, so
 they stay `ui_only` rather than being driven by screen coordinates.
+
+Blend Shape sliders are the exception: an FBX imported with blend shapes stores
+each channel as an animated `<channel>_Weight` datum on a `Blendshape <name>`
+Dynamic behaviour (`common/mesh.py`), so `blend_shape` writes those weights on a
+frame and reads them back.

@@ -8,7 +8,7 @@ host verifies the rendered window changed (``viewport_render_changed``).
 
 from __future__ import annotations
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 VIEW_ACTIONS = {
     "view.silhouette": "View.Silhouette mode",
@@ -53,7 +53,7 @@ def _select(scene, arguments, context):
     def apply(_model, _update, _scene, session):
         session.take_selector().select(set(converted), converted[0])
 
-    domain.modify_with_session("Cascadeur Complete: select for view toggle", apply)
+    transact(domain.modify_with_session, "Cascadeur Complete: select for view toggle", apply)
     return ids
 
 

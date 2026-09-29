@@ -3657,22 +3657,34 @@
       "source_url": "https://cascadeur.com/help/rig/rig_mode/rigging_tools",
       "license": "any",
       "dependency": null,
-      "route": "action.blend_shape",
-      "action": "blend_shape",
-      "operation": "action.blend_shape",
+      "route": "mesh.blend_shape_weight",
+      "action": "mesh.blend_shape_weight",
+      "operation": "mesh.blend_shape_weight",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "blend_shape_weights_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.mesh.blend_shape_weight",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[blend_shape]",
+      "fixture_id": "fixture.sample.cube",
+      "since": "2026.1",
+      "arguments": {
+        "object_id": "mesh object imported with Blendshapes",
+        "blend_shape": "optional blend shape name (required when the mesh has several)",
+        "weights": "{channel: weight in [-100, 100]}",
+        "frame": "optional frame (default: current)"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "camera_create",
@@ -6441,20 +6453,21 @@
       "source_url": "https://cascadeur.com/help/interface/main_menu/file_menu",
       "license": "any",
       "dependency": null,
-      "route": "io.scene_parts_import",
-      "action": "io.scene_parts_import",
-      "operation": "io.scene_parts_import",
+      "route": "system.ui_file_flow",
+      "action": "system.ui_file_flow",
+      "operation": "system.ui_file_flow",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Native",
+      "execution_mode": "UIA",
       "implementation_status": "implemented",
       "preconditions": [
         "compatible_version"
       ],
       "postconditions": [
-        "scene_part_objects_created"
+        "exact_file_dialog",
+        "scene_revision_changed"
       ],
-      "adapter_id": "cascadeur_2026_1.io.scene_parts_import",
+      "adapter_id": "cascadeur_2026_1.system.ui_file_flow",
       "contract_test_ids": [
         "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
         "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
@@ -6463,7 +6476,7 @@
       "fixture_id": "fixture.sample.cube",
       "since": "2026.1",
       "arguments": {
-        "path": ".partscasc file"
+        "path": ".partscasc"
       },
       "fixed_arguments": {}
     },

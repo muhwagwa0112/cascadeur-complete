@@ -52,7 +52,7 @@ def _scene_parts_export(s: LiveSession) -> Any:
 @scenario("scene_parts_import", CUBE)
 def _scene_parts_import(s: LiveSession) -> Any:
     source = getattr(s, "extra_parts", None) or _scene_parts_export(s)["path"]
-    return s.change("scene_parts_import", "io.scene_parts_import", {"path": source})
+    return _dialog(s, "scene_parts_import", source)
 
 
 @scenario("import_image", CUBE)
@@ -208,3 +208,18 @@ def _import_vrm(s: LiveSession) -> Any:
     if not source.is_file():
         raise LiveValidationError("run scripts/fetch_live_fixtures.py to download the VRM sample")
     return _ui_flow(s, "import", "vrm", str(source))
+
+
+@scenario("blend_shape", CUBE)
+def _blend_shape(s: LiveSession) -> Any:
+    # blendshape_cube.fbx: a Blender cube "BlendCube" with one "Stretch" shape key.
+    source = s.service.paths.root / "live-fixtures" / "blendshape_cube.fbx"
+    if not source.is_file():
+        raise LiveValidationError("run scripts/fetch_live_fixtures.py to build the blend shape fixture")
+    before = {item["id"] for item in s.objects()}
+    s.change("import_fbx", "io.import_fbx", {"path": str(source)})
+    created = [item for item in s.objects() if item["id"] not in before]
+    meshes = s.owners("MeshObject", created)
+    if len(meshes) != 1:
+        raise LiveValidationError(f"expected one imported mesh, found {len(meshes)}")
+    return s.change("blend_shape", "mesh.blend_shape_weight", {"object_id": meshes[0], "weights": {"Stretch": 60.0}})

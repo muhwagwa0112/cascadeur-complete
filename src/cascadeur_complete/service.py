@@ -111,7 +111,6 @@ INPUT_PATH_OPERATIONS = frozenset(
         "scene.open",
         "scene.open_autosave",
         "io.selection_groups_import",
-        "io.scene_parts_import",
         "rig.json_import",
         "rig.quick_rig",
     }
@@ -218,6 +217,12 @@ UI_FILE_FLOWS: dict[str, dict[str, Any]] = {
         "dialog_title": "Export to parts file: *",
         "extension": ".partscasc",
         "direction": "export",
+    },
+    "scene_parts_import": {
+        "action_id": "File.Import.PartsCasc",
+        "dialog_title": "Import parts file",
+        "extension": ".partscasc",
+        "direction": "import",
     },
     "import_image": {
         "action_id": "View.Reference image",

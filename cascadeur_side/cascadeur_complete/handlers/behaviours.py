@@ -8,7 +8,7 @@ is observed afterwards. Generic behaviour access is intentionally not exposed.
 
 from __future__ import annotations
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 # operation -> (behaviour, allowed data properties, may add the behaviour)
 BEHAVIOUR_FEATURES = {
@@ -209,17 +209,7 @@ def configure_behaviour(scene, arguments, request, context):
                 else:
                     data_editor.set_data_value(data_id, frame, coerced)
 
-    errors = []
-
-    def guarded(model, update, scene_updater):
-        try:
-            edit(model, update, scene_updater)
-        except Exception as exc:  # surfaced after the edit transaction closes
-            errors.append(exc)
-
-    domain.modify("Cascadeur Complete: " + operation, guarded)
-    if errors:
-        raise errors[0]
+    transact(domain.modify, "Cascadeur Complete: " + operation, edit)
     viewer = domain.model_viewer().behaviour_viewer()
     observed = {}
     for raw_id in ids:
@@ -264,7 +254,7 @@ def marker_behaviour(scene, arguments, request, context):
             elif not enabled and not current.is_null():
                 editor.delete_behaviour(current)
 
-    domain.modify("Cascadeur Complete: " + operation, edit)
+    transact(domain.modify, "Cascadeur Complete: " + operation, edit)
     viewer = domain.model_viewer().behaviour_viewer()
     observed = {
         raw_id: not viewer.get_behaviour_by_name(context["object_id"](raw_id), behaviour).is_null() for raw_id in ids
@@ -353,17 +343,7 @@ def camera_texture(scene, arguments, _request, context):
         else:
             model.data_editor().set_data_value(start_id, start_frame)
 
-    errors = []
-
-    def guarded(model, update, scene_updater):
-        try:
-            edit(model, update, scene_updater)
-        except Exception as exc:
-            errors.append(exc)
-
-    domain.modify("Cascadeur Complete: camera texture", guarded)
-    if errors:
-        raise errors[0]
+    transact(domain.modify, "Cascadeur Complete: camera texture", edit)
     viewer = domain.model_viewer().behaviour_viewer()
     data = domain.model_viewer().data_viewer()
     container = viewer.get_behaviour_reference(camera_behaviour, "textures")
@@ -373,3 +353,78 @@ def camera_texture(scene, arguments, _request, context):
     if observed != paths:
         raise AssertionError("POSTCONDITION_FAILED: camera texture paths differ from request")
     return {"camera_id": context["id_string"](camera), "paths": observed, "start_frame": start_frame}, []
+
+
+# -- blend shapes ----------------------------------------------------------------------
+# An FBX imported with Blendshapes creates, per MeshObject blend shape, a Dynamic
+# behaviour named "Blendshape <name>" whose 'datas' range holds one animated
+# "<channel>_Weight" per channel and 'dataNames' the matching channel names
+# (common/mesh.py set_mesh_object_blendshape_data). The Object Properties
+# sliders edit exactly these weights.
+
+
+def _blend_shapes(domain, object_id, context):
+    import common.behavior_operations as behaviour_operations
+
+    viewer = domain.model_viewer().behaviour_viewer()
+    data_viewer = domain.model_viewer().data_viewer()
+    shapes = {}
+    for behaviour_id in viewer.get_behaviours(object_id):
+        if str(viewer.get_behaviour_name(behaviour_id)) != "Dynamic":
+            continue
+        try:
+            label = str(behaviour_operations.dynamic_behavior_name(viewer, data_viewer, behaviour_id))
+        except Exception:
+            continue
+        if not label.startswith("Blendshape "):
+            continue
+        weights = list(viewer.get_behaviour_data_range(behaviour_id, "datas"))
+        names = [
+            str(data_viewer.get_data_value(item)) for item in viewer.get_behaviour_data_range(behaviour_id, "dataNames")
+        ]
+        if len(weights) != len(names):
+            raise AssertionError("Blend shape " + label + " has mismatched channel ranges")
+        shapes[label[len("Blendshape ") :]] = dict(zip(names, weights, strict=True))
+    return shapes
+
+
+@handler("mesh.blend_shape_weight", postconditions=("blend_shape_weights_equal_request",))
+def blend_shape_weight(scene, arguments, _request, context):
+    domain = context["domain_scene"](scene)
+    object_id = context["object_id"](arguments["object_id"])
+    weights = {str(name): float(value) for name, value in dict(arguments.get("weights") or {}).items()}
+    if not weights:
+        raise ValueError("weights must name at least one channel")
+    out_of_range = sorted(name for name, value in weights.items() if not -100.0 <= value <= 100.0)
+    if out_of_range:
+        raise ValueError("Blend shape weights lie in [-100, 100]: " + ", ".join(out_of_range))
+    frame = int(arguments.get("frame", domain.get_current_frame(False)))
+    shapes = _blend_shapes(domain, object_id, context)
+    shape = arguments.get("blend_shape")
+    if shape is None:
+        if len(shapes) != 1:
+            raise ValueError("Object has blend shapes " + ", ".join(sorted(shapes)) + "; pass blend_shape")
+        shape = next(iter(shapes))
+    if shape not in shapes:
+        raise KeyError("Object has no blend shape " + str(shape) + "; known: " + ", ".join(sorted(shapes)))
+    channels = shapes[shape]
+    unknown = sorted(set(weights) - set(channels))
+    if unknown:
+        raise KeyError(
+            "Unknown blend shape channels: " + ", ".join(unknown) + "; known: " + ", ".join(sorted(channels))
+        )
+
+    def edit(model, _update, scene_updater):
+        data_editor = model.data_editor()
+        for name, value in weights.items():
+            data_editor.set_data_value(channels[name], frame, value)
+        scene_updater.generate_update()
+        scene_updater.run_update(set(channels[name] for name in weights), frame)
+
+    transact(domain.modify_update, "Cascadeur Complete: blend shape weights", edit)
+    data_viewer = domain.model_viewer().data_viewer()
+    observed = {name: float(data_viewer.get_data_value(channels[name], frame)) for name in weights}
+    for name, expected in weights.items():
+        if not _equal(observed[name], expected):
+            raise AssertionError(f"POSTCONDITION_FAILED: blend shape weight {name}={observed[name]} != {expected}")
+    return {"object_id": str(arguments["object_id"]), "blend_shape": shape, "frame": frame, "weights": observed}, []

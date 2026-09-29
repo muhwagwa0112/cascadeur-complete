@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 
 def _value_token(value):
@@ -49,10 +49,7 @@ def _transform_fingerprint(domain, object_ids, first, last, context):
 
 def _box_owner_ids(domain, context):
     behaviours = domain.model_viewer().behaviour_viewer()
-    return {
-        context["id_string"](behaviours.get_behaviour_owner(item))
-        for item in behaviours.get_behaviours("BoxView")
-    }
+    return {context["id_string"](behaviours.get_behaviour_owner(item)) for item in behaviours.get_behaviours("BoxView")}
 
 
 def _select_interval(domain, layer_ids, first, last, context):
@@ -69,7 +66,7 @@ def _select_interval(domain, layer_ids, first, last, context):
     def apply(_model, _update, _scene, session):
         session.take_layers_selector().set_full_selection_by_parts(requested, first, last)
 
-    domain.modify_with_session("Cascadeur Complete: select mirror interval", apply)
+    transact(domain.modify_with_session, "Cascadeur Complete: select mirror interval", apply)
     selector = domain.get_layers_selector()
     interval = selector.selection().frames_interval()
     observed = {
@@ -116,7 +113,7 @@ def mirror(scene, arguments, _request, context):
         def set_frame(_model, _update, _scene, session):
             session.set_current_frame(first)
 
-        domain.modify_with_session("Cascadeur Complete: set mirror frame", set_frame)
+        transact(domain.modify_with_session, "Cascadeur Complete: set mirror frame", set_frame)
         interval = None
     else:
         first = int(arguments["first_frame"])

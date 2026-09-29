@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -27,44 +28,33 @@ def _groups(context, view):
 
 
 @handler("io.selection_groups_import", postconditions=("selection_groups_loaded",))
-def selection_groups_import(_scene, arguments, _request, context):
+def selection_groups_import(scene, arguments, _request, context):
     path = Path(str(arguments["path"]))
     if not path.is_file():
         raise FileNotFoundError(path)
+    try:
+        expected = {
+            int(row["index"]): sorted(str(name) for name in row.get("objects", []))
+            for row in json.loads(path.read_text(encoding="utf-8"))["groups"]
+        }
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ValueError("path is not a Cascadeur selection groups file") from exc
+    if not any(expected.values()):
+        raise ValueError("The selection groups file names no objects")
     view = context["scene_view"]()
-    editor, before = _groups(context, view)
+    editor, _before = _groups(context, view)
     editor.import_file(str(path).replace("\\", "/"))
     _editor, after = _groups(context, view)
-    if not any(after.values()) or after == before:
-        raise AssertionError("POSTCONDITION_FAILED: selection groups were not loaded from the file")
-    return {"path": str(path), "groups": {str(key): len(value) for key, value in after.items()}}, []
-
-
-@handler("io.scene_parts_import", postconditions=("scene_part_objects_created",))
-def scene_parts_import(scene, arguments, _request, context):
-    path = Path(str(arguments["path"]))
-    if not path.is_file() or path.suffix.casefold() != ".partscasc":
-        raise ValueError("path must be an existing .partscasc file")
-    domain = context["domain_scene"](scene)
-    before = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
-    created = []
-
-    def insert(model, update, current_scene):
-        object_ids, _groups_ids = (
-            context["csc"]
-            .parts.Buffer.get()
-            .insert_objects_by_path(
-                str(path).replace("\\", "/"), update.root().group_id(), model, current_scene.assets_manager()
-            )
-        )
-        created.extend(context["id_string"](item) for item in object_ids)
-
-    domain.modify("Cascadeur Complete: import scene parts", insert)
-    after = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
-    new_ids = sorted(after - before)
-    if not new_ids:
-        raise AssertionError("POSTCONDITION_FAILED: scene parts import created no objects")
-    return {"path": str(path), "created_ids": new_ids, "reported_ids": sorted(created)}, []
+    # The file stores object names; every group it names must now hold exactly
+    # the scene objects with those names (whatever the groups held before).
+    model_viewer = context["domain_scene"](scene).model_viewer()
+    names = {context["id_string"](item): str(model_viewer.get_object_name(item)) for item in model_viewer.get_objects()}
+    observed = {index: sorted(names.get(item, item) for item in after.get(index, [])) for index in expected}
+    present = set(names.values())
+    for index, wanted in expected.items():
+        if sorted(name for name in wanted if name in present) != observed[index]:
+            raise AssertionError(f"POSTCONDITION_FAILED: selection group {index} does not match the file")
+    return {"path": str(path), "groups": {str(key): len(value) for key, value in observed.items()}}, []
 
 
 @handler("scene.open_autosave", postconditions=("autosave_scene_loaded",))

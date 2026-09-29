@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from ..handler_registry import handler
+from ..handler_registry import handler, transact
 
 
 def _layers(domain, requested, context):
@@ -45,7 +45,7 @@ def _select_interval(domain, layer_ids, first, last):
     def apply(_model, _update, _scene, session):
         session.take_layers_selector().set_full_selection_by_parts(layer_ids, first, last)
 
-    domain.modify_with_session("Cascadeur Complete: select interval", apply)
+    transact(domain.modify_with_session, "Cascadeur Complete: select interval", apply)
 
 
 def _select_objects(domain, object_ids, context):
@@ -56,7 +56,7 @@ def _select_objects(domain, object_ids, context):
             set(converted), converted[0] if converted else context["csc"].model.ObjectId.null()
         )
 
-    domain.modify_with_session("Cascadeur Complete: select objects", select)
+    transact(domain.modify_with_session, "Cascadeur Complete: select objects", select)
     return converted
 
 
@@ -64,7 +64,7 @@ def _set_frame(domain, frame):
     def apply(_model, _update, _scene, session):
         session.set_current_frame(frame)
 
-    domain.modify_with_session("Cascadeur Complete: set frame", apply)
+    transact(domain.modify_with_session, "Cascadeur Complete: set frame", apply)
 
 
 def _call(context, action_id):
@@ -133,6 +133,12 @@ def cycle(scene, arguments, _request, context):
         first, last = _interval(domain, arguments)
         if last - first < 1:
             raise ValueError("A cycle needs at least two frames")
+        # Cascadeur's layer invariant rejects a cycle whose ends are not keys
+        # ("checkCycles: no keys") when the scene is saved later.
+        for layer_id in layer_ids:
+            keys = set(_keys(domain, layer_id))
+            if first not in keys or last not in keys:
+                raise ValueError("first_frame and last_frame must be keyframes on every layer")
     else:
         frame = int(arguments["frame"])
 
@@ -175,7 +181,7 @@ def bake(scene, arguments, _request, context):
             for frame in range(first, last + 1):
                 editor.set_fixed_interpolation_or_key_if_need(layer_id, frame, True)
 
-    domain.modify("Cascadeur Complete: bake interval", edit)
+    transact(domain.modify, "Cascadeur Complete: bake interval", edit)
     expected = list(range(first, last + 1))
     for layer_id in layer_ids:
         if _keys(domain, layer_id, first, last) != expected:
@@ -223,7 +229,7 @@ def fulcrum(scene, arguments, _request, context):
             for frame in touched[context["id_string"](layer_id)]:
                 editor.change_section(frame, layer_id, mark)
 
-    domain.modify("Cascadeur Complete: fulcrum " + state, edit)
+    transact(domain.modify, "Cascadeur Complete: fulcrum " + state, edit)
     observed = {
         context["id_string"](layer_id): _fixation_rows(domain, layer_id, first, last, context) for layer_id in layer_ids
     }
@@ -274,6 +280,9 @@ def stretch(scene, arguments, _request, context):
     frames = int(domain.layers_viewer().frames_count())
     if new_last <= first or new_last >= frames:
         raise ValueError("new_last_frame must lie after first_frame and inside the animation")
+    for layer_id in layer_ids:
+        if any(start <= max(last, new_last) and end >= first for start, end in _cycles(domain, layer_id, context)):
+            raise ValueError("The stretched interval overlaps a cycle; remove the cycle first")
     scale = (new_last - first) / float(last - first)
     plans = {}
     for layer_id in layer_ids:
@@ -295,7 +304,7 @@ def stretch(scene, arguments, _request, context):
         changed = set()
         for layer_id, mapping in plans.items():
             layer = layers_viewer.layer(layer_id)
-            object_ids = set(layer.obj_ids())
+            object_ids = set(layer.obj_ids)
             animated = [
                 data_id
                 for data_id in data_viewer.get_all_data_id()
@@ -327,12 +336,14 @@ def stretch(scene, arguments, _request, context):
         scene_updater.generate_update()
         scene_updater.run_update(changed, domain.get_current_frame(False))
 
-    domain.modify_update("Cascadeur Complete: stretch interval", edit)
+    transact(domain.modify_update, "Cascadeur Complete: stretch interval", edit)
     observed = {}
     for layer_id, mapping in plans.items():
         keys = _keys(domain, layer_id, first, max(last, new_last))
         if keys != sorted(mapping.values()):
-            raise AssertionError(f"POSTCONDITION_FAILED: retimed keys {keys} differ from plan {sorted(mapping.values())}")
+            raise AssertionError(
+                f"POSTCONDITION_FAILED: retimed keys {keys} differ from plan {sorted(mapping.values())}"
+            )
         observed[context["id_string"](layer_id)] = keys
     del view
     return {"scale": scale, "keys": observed}, []
@@ -514,15 +525,24 @@ def activate_layer(scene, arguments, _request, context):
     layer_id = _layers(domain, [arguments["layer_id"]], context)[0]
     frame = int(domain.get_current_frame(False))
 
-    def apply(_model, _update, _scene, session):
-        session.take_layers_selector().set_full_selection_by_parts([layer_id], frame, frame)
+    accepted = []
 
-    domain.modify_with_session("Cascadeur Complete: activate layer", apply)
+    def apply(_model, _update, _scene, session):
+        # The session changer is the one pycsc uses; it reports acceptance.
+        accepted.append(session.take_layers_selector().set_full_selection_by_parts([layer_id], frame, frame))
+
+    transact(domain.modify_with_session, "Cascadeur Complete: activate layer", apply)
+    if accepted and accepted[0] is False:
+        raise ValueError("Cascadeur rejected the layer selection")
     selector = domain.get_layers_selector()
     included = sorted(context["id_string"](item) for item in selector.all_included_layer_ids())
-    if included != [context["id_string"](layer_id)]:
-        raise AssertionError("POSTCONDITION_FAILED: active layer differs from request")
-    return {"layer_id": included[0], "frame": frame, "top_layer_id": context["id_string"](selector.top_layer_id())}, []
+    requested = context["id_string"](layer_id)
+    if included != [requested]:
+        raise AssertionError(
+            f"POSTCONDITION_FAILED: {len(included)} included layers after selecting {requested} "
+            f"(first: {included[:3]}, top: {context['id_string'](selector.top_layer_id())})"
+        )
+    return {"layer_id": requested, "frame": frame, "top_layer_id": context["id_string"](selector.top_layer_id())}, []
 
 
 SECTION_FIELDS = {
@@ -569,7 +589,7 @@ def section_edit(scene, arguments, _request, context):
 
         model.layers_editor().change_section(frame, layer_id, modify)
 
-    domain.modify("Cascadeur Complete: edit key section", edit)
+    transact(domain.modify, "Cascadeur Complete: edit key section", edit)
     section = domain.layers_viewer().layer(layer_id).section(frame)
     observed = {}
     for name, (member, _value) in requested.items():

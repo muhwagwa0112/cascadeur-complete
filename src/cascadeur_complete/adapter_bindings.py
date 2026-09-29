@@ -484,11 +484,15 @@ BINDINGS: tuple[AdapterBinding, ...] = (
         gap=True,
     ),
     _b(
-        "scene_parts_import",
-        "io.scene_parts_import",
-        ("scene_part_objects_created",),
-        arguments={"path": ".partscasc file"},
-        gap=True,
+        "blend_shape",
+        "mesh.blend_shape_weight",
+        ("blend_shape_weights_equal_request",),
+        arguments={
+            "object_id": "mesh object imported with Blendshapes",
+            "blend_shape": "optional blend shape name (required when the mesh has several)",
+            "weights": "{channel: weight in [-100, 100]}",
+            "frame": "optional frame (default: current)",
+        },
     ),
     # -- view toggles (whitelisted action, host-verified rendered change) ----------
     _b("silhouette", "view.silhouette", VIEW, arguments=SELECT, gap=True, mode=UIA),
@@ -528,6 +532,9 @@ BINDINGS: tuple[AdapterBinding, ...] = (
     ),
     _b(
         "import_scene_to_current", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": ".casc"}, gap=True, mode=UIA
+    ),
+    _b(
+        "scene_parts_import", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": ".partscasc"}, gap=True, mode=UIA
     ),
     _b("import_image", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": "image"}, mode=UIA),
     _b("import_video", "system.ui_file_flow", DIALOG_IMPORT, arguments={"path": "video"}, mode=UIA),

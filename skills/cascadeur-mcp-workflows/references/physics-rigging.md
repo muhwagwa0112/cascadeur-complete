@@ -42,7 +42,7 @@ Use this dependency order, skipping only elements that are already verified:
 
 `rig_elements_create_prepare(feature="rigid_body")` requires actual rigid bodies; the adapter rejects `only_box_controller=true`. Use a clear direction Joint for each pair rather than guessing from selection order.
 
-Rig Mode prototype tooling (delete element, hinges, mirror, virtual/standard joints, snaps, root constraints, fulcrum groups, additional joints/parents/points, custom rotation, untwist, AutoPosing props, rig JSON, Quick Rig from a `.qrigcasc` template, Generate rig) is adapter-bound; see [adapter-features.md](adapter-features.md). Blend Shapes remain UI-only. Do not fall back to mass-creating approximate rig elements and call that Quick Rig.
+Rig Mode prototype tooling (delete element, hinges, mirror, virtual/standard joints, snaps, root constraints, fulcrum groups, additional joints/parents/points, custom rotation, untwist, AutoPosing props, rig JSON, Quick Rig from a `.qrigcasc` template, Generate rig) is adapter-bound; see [adapter-features.md](adapter-features.md). Blend shape weights are set per frame with `feature_prepare("blend_shape", {"object_id", "weights"})` on a mesh imported with blend shapes. Do not fall back to mass-creating approximate rig elements and call that Quick Rig.
 
 ## Center of Mass
 

@@ -41,3 +41,26 @@ def declared_postconditions(operation_name):
 
 def registered_operations():
     return tuple(sorted(_HANDLERS))
+
+
+def transact(method, name, func):
+    """Run ``method(name, func)`` (a DomainScene ``modify*``) and surface failures.
+
+    Cascadeur logs an exception raised inside a transaction and aborts it, but
+    does not propagate it to the caller, so a failed edit looked like a silent
+    no-op and surfaced later as a misleading postcondition. The exception is
+    re-raised inside (keeping Cascadeur's abort) and raised again here.
+    """
+    errors = []
+
+    def guarded(*args):
+        try:
+            return func(*args)
+        except Exception as exc:
+            errors.append(exc)
+            raise
+
+    result = method(name, guarded)
+    if errors:
+        raise errors[0]
+    return result
