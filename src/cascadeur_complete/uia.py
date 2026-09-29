@@ -132,7 +132,7 @@ def active_scene_title() -> str | None:
 
 
 def capture_window_sample(columns: int = 160, rows: int = 90) -> list[int] | None:
-    """Capture the main Cascadeur window and return a grayscale sample grid.
+    """Capture the main Cascadeur window and return per-cell brightness extremes.
 
     The window is brought to the foreground first so the screen copy shows the
     rendered viewport and panels rather than an overlapping window.
@@ -189,16 +189,23 @@ def capture_window_sample(columns: int = 160, rows: int = 90) -> list[int] | Non
         gdi32.DeleteObject(bitmap)
         gdi32.DeleteDC(memory)
         user32.ReleaseDC(0, screen)
-    raw = buffer.raw
-    sample = []
+    # Per cell, keep the brightest and darkest green-channel value. A thin
+    # overlay line (trajectory, grid, composition guide) changes a cell's
+    # extremes even though point sampling of the cell centre would miss it.
+    green = buffer.raw[1::4]
+    maxima, minima = [], []
     for row in range(rows):
-        y = int((row + 0.5) * height / rows)
+        top, bottom = int(row * height / rows), max(int(row * height / rows) + 1, int((row + 1) * height / rows))
         for column in range(columns):
-            x = int((column + 0.5) * width / columns)
-            offset = (y * width + x) * 4
-            blue, green, red = raw[offset], raw[offset + 1], raw[offset + 2]
-            sample.append((red * 299 + green * 587 + blue * 114) // 1000)
-    return sample
+            left = int(column * width / columns)
+            right = max(left + 1, int((column + 1) * width / columns))
+            high, low = 0, 255
+            for y in range(top, bottom):
+                segment = green[y * width + left : y * width + right]
+                high, low = max(high, max(segment)), min(low, min(segment))
+            maxima.append(high)
+            minima.append(low)
+    return maxima + minima
 
 
 def sample_difference(before: list[int] | None, after: list[int] | None, threshold: int = 24) -> float:
