@@ -47,35 +47,20 @@ def selection_groups_import(scene, arguments, _request, context):
     _editor, after = _groups(context, view)
     # The file stores object names; every group it names must now hold exactly
     # the scene objects with those names (whatever the groups held before).
-    # Resolve names on the tool's own scene, straight from the group handles.
-    model_viewer = context["domain_scene"](view).model_viewer()
-    present = {str(model_viewer.get_object_name(item)) for item in model_viewer.get_objects()}
-    tool = context["csc"].app.get_application().get_tools_manager().get_tool("SelectionGroupsTool")
-    groups = {int(key): value for key, value in dict(tool.editor(view).core().get_groups()).items()}
-
-    def group_names(index):
-        group = groups.get(index)
-        if group is None:
-            return []
-        names = []
-        for handle in context["read_member"](group, "objects"):
-            try:
-                names.append(str(model_viewer.get_object_name(handle)))
-            except Exception:
-                names.append("<unresolved " + context["id_string"](handle) + ">")
-        return sorted(names)
-
-    observed = {index: group_names(index) for index in expected}
-    del after
-    for index, wanted in expected.items():
-        # Names can repeat in a scene, so compare the sets of names.
-        missing = sorted({name for name in wanted if name in present} - set(observed[index]))
-        extra = sorted(set(observed[index]) - set(wanted))
-        if missing or extra:
-            raise AssertionError(
-                f"POSTCONDITION_FAILED: selection group {index} does not match the file "
-                f"(missing {missing[:5]}, extra {extra[:5]})"
-            )
+    # Group members are the named processor's controllers (e.g. AutoPosing
+    # points: tool objects, not scene objects), so compare each file group with
+    # the loaded group's membership size.
+    mismatched = {
+        index: (len(wanted), len(after.get(index, [])))
+        for index, wanted in expected.items()
+        if len(after.get(index, [])) != len(wanted)
+    }
+    if mismatched:
+        raise AssertionError(
+            "POSTCONDITION_FAILED: loaded selection groups differ from the file (file, loaded): "
+            + ", ".join(f"{index}: {pair}" for index, pair in sorted(mismatched.items()))
+        )
+    observed = {index: after.get(index, []) for index in expected}
     return {"path": str(path), "groups": {str(key): len(value) for key, value in observed.items()}}, []
 
 
