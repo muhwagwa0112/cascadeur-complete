@@ -8,12 +8,13 @@ from typing import Any, Literal
 from mcp.server import MCPServer
 
 from .models import ErrorCode, ExecutionMode, ResultEnvelope
+from .product_catalog import SUPPORTED_BUILD
 from .service import CascadeurService, dialog_flow_arguments, ui_file_flow_arguments
 
 mcp = MCPServer(
     "cascadeur-complete",
     instructions=(
-        "Cascadeur 2026.1.2.0.15343 automation only. Read capabilities first. Destructive operations require "
+        f"Cascadeur {SUPPORTED_BUILD} automation only. Read capabilities first. Destructive operations require "
         "change_prepare followed by change_commit. Never assume a gated feature ran."
     ),
 )

@@ -3,7 +3,7 @@
 Every operation verifies its own result from the domain scene after the edit
 (key sets, section fixation, cycles, object sets, transform fingerprints).
 Actions that Cascadeur only exposes through its ActionManager are dispatched by
-their exact 2026.1.2 identifiers and still verified through scene state.
+their exact 2026.1 identifiers and still verified through scene state.
 """
 
 from __future__ import annotations

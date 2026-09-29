@@ -1,7 +1,7 @@
 [project]
 name = "cascadeur-complete"
 version = "0.1.0"
-description = "Version-pinned MCP automation for a verified subset of Cascadeur 2026.1.2"
+description = "Version-pinned MCP automation for a verified subset of Cascadeur 2026.1.3"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }
@@ -44,7 +44,7 @@ build-backend = "hatchling.build"
 packages = ["src/cascadeur_complete"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"inventory/product_features_2026_1_2.json" = "cascadeur_complete/data/product_features_2026_1_2.json"
+"inventory/product_features_2026_1_3.json" = "cascadeur_complete/data/product_features_2026_1_3.json"
 "inventory/csc_schema.json" = "cascadeur_complete/data/csc_schema.json"
 "policy.default.json" = "cascadeur_complete/data/policy.default.json"
 

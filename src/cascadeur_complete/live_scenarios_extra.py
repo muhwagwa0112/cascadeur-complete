@@ -7,7 +7,7 @@ from typing import Any
 
 from .live_scenarios import BACKFLIP, CASCY, CUBE
 from .live_scenarios_scene import center_of_mass
-from .live_validation import LiveSession, LiveValidationError, scenario
+from .live_validation import FIXTURES, LiveSession, LiveValidationError, scenario
 from .service import dialog_flow_arguments
 
 # -- files (Cube) ---------------------------------------------------------------------
@@ -223,3 +223,23 @@ def _blend_shape(s: LiveSession) -> Any:
     if len(meshes) != 1:
         raise LiveValidationError(f"expected one imported mesh, found {len(meshes)}")
     return s.change("blend_shape", "mesh.blend_shape_weight", {"object_id": meshes[0], "weights": {"Stretch": 60.0}})
+
+
+@scenario("retargeting", BACKFLIP)
+def _retargeting(s: LiveSession) -> Any:
+    # Backflip's animated Cascy is the source; a second, unanimated Cascy is
+    # imported into the same scene as the target (both carry AutoPosing rigs).
+    before = {item["id"]: item for item in s.objects()}
+    _dialog(s, "import_scene_to_current", str(FIXTURES["fixture.sample.cascy"]))
+    created = [item for item in s.objects() if item["id"] not in before]
+    targets = {item["name"]: item["id"] for item in created if item["type"] == "Point"}
+    sources = {item["name"]: item["id"] for item in before.values() if item["type"] == "Point"}
+    shared = sorted(set(targets) & set(sources))
+    if not shared:
+        raise LiveValidationError("the imported character shares no point names with the animated one")
+    name = next((item for item in shared if "pelvis" in item.casefold()), shared[0])
+    return s.change(
+        "retargeting",
+        "generation.retargeting",
+        {"source_point_id": sources[name], "target_point_id": targets[name], "first_frame": 0, "last_frame": 20},
+    )

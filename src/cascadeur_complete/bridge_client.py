@@ -128,7 +128,7 @@ class BridgeClient:
             # once Cascadeur atomically renames it to .processing, another
             # dispatch is forbidden and we only wait for that claimed result.
             # Permit up to twelve total dispatches within the original TTL. In
-            # live 2026.1.2 validation, a QML popup occasionally ignored a
+            # live 2026.1 validation, a QML popup occasionally ignored a
             # longer sequence after repeated scene/snapshot transitions but
             # accepted a later exact invocation.
             # The request-file existence check keeps every retry idempotent.

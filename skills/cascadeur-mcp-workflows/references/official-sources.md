@@ -19,9 +19,10 @@ Use these sources to understand product behavior and preconditions. Use the live
 
 - [Cascadeur 2026.1 release notes](https://cascadeur.com/help/category/312): Filament, rebuilt Unreal Live Link, Root Motion, Collision Penetration Cleaning, quadruped AutoPosing, constraints in AutoPhysics/Ragdoll, lights, neck Spline IK, and related changes.
 - [Cascadeur 2026.1.2 release notes](https://cascadeur.com/help/category/314): rotated-character fixes for Retargeting/Inbetweening/Root Motion, constraint/Ragdoll fixes, Root Motion interval behavior, trajectory performance/crash fixes, neck Spline IK, FBX import, and video-with-audio crash fix.
+- [Cascadeur 2026.1.3 release notes](https://cascadeur.com/help/category/316): fixes only — Collision Penetration Cleaning blending, Ragdoll direction controllers, Inbetweening from the Timeline menu, TransformMulti constraint, AutoPosing for multi-armed characters, Blendshape ghost-mesh physics, Cascy sample physics settings; per-axis local copy on Meshes and Cameras.
 - [Cascadeur 2026.1 overview](https://cascadeur.com/blog/view/cascadeur-2026-1-new-renderer-ue-live-link): official product overview for Filament, Live Link, Root Motion, collision cleaning, constraints, and quadrupeds.
 
-The local adapter baseline is `2026.1.2.0.15343`. Do not use 2026.2-only Additive Layers or Easing unless `cascadeur_status` reports a newer compatible adapter and `feature_describe` reports an executable route.
+The local adapter baseline is `2026.1.3.0.15619`. Do not use 2026.2-only Additive Layers or Easing unless `cascadeur_status` reports a newer compatible adapter and `feature_describe` reports an executable route.
 
 ## Automation and API sources
 
@@ -53,7 +54,7 @@ Use this precedence:
 
 1. current user intent and authorization;
 2. live `cascadeur-complete` capability/scene state;
-3. installed 2026.1.2 API schema, tools, commands, and action IDs;
+3. installed 2026.1.3 API schema, tools, commands, and action IDs;
 4. version-matched official manual/release notes;
 5. general tutorials or examples.
 

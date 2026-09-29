@@ -2,7 +2,7 @@
 
 These actions change what Cascadeur draws (silhouette, grids, ghosts,
 trajectories, panels) without touching scene data, so the bridge cannot observe
-them. The bridge dispatches exactly one whitelisted 2026.1.2 action id and the
+them. The bridge dispatches exactly one whitelisted 2026.1 action id and the
 host verifies the rendered window changed (``viewport_render_changed``).
 """
 

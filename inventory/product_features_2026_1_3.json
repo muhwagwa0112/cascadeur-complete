@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "product": "Cascadeur",
-  "product_version": "2026.1.2",
-  "supported_build": "2026.1.2.0.15343",
-  "generated_from": "Official Cascadeur 2026.1/2026.1.2 documentation; product inventory is distinct from installed csc discovery.",
+  "product_version": "2026.1.3",
+  "supported_build": "2026.1.3.0.15619",
+  "generated_from": "Official Cascadeur 2026.1/2026.1.2/2026.1.3 documentation; product inventory is distinct from installed csc discovery.",
   "sources": [
     "https://cascadeur.com/help/category/215",
     "https://cascadeur.com/help/interface/main_menu/file_menu",
@@ -13,7 +13,8 @@
     "https://cascadeur.com/help/category/311",
     "https://cascadeur.com/help/interface",
     "https://cascadeur.com/help/category/312",
-    "https://cascadeur.com/help/category/314"
+    "https://cascadeur.com/help/category/314",
+    "https://cascadeur.com/help/category/316"
   ],
   "features": [
     {
@@ -2571,8 +2572,8 @@
         "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract",
         "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[inbetweening]",
+      "fixture_id": "fixture.sample.backflip",
       "since": "2026.1"
     },
     {
@@ -2637,22 +2638,36 @@
       "source_url": "https://cascadeur.com/help/tools",
       "license": "pro",
       "dependency": null,
-      "route": "tool.Retargeting",
-      "action": "retargeting",
-      "operation": "tool.Retargeting",
+      "route": "generation.retargeting",
+      "action": "generation.retargeting",
+      "operation": "generation.retargeting",
       "mutation": true,
       "requires_scene": true,
-      "execution_mode": "Gated",
-      "implementation_status": "ui_only",
-      "preconditions": [],
-      "postconditions": [],
-      "adapter_id": null,
-      "contract_test_ids": [
-        "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
+      "execution_mode": "Action",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version",
+        "pro_license",
+        "autoposing_rigs"
       ],
-      "live_test_id": null,
-      "fixture_id": null,
-      "since": "2026.1"
+      "postconditions": [
+        "target_animation_changed"
+      ],
+      "adapter_id": "cascadeur_2026_1.generation.retargeting",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[retargeting]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "source_point_id": "point controller of the animated source character",
+        "target_point_id": "point controller of the target character (another layer)",
+        "first_frame": "first frame to copy",
+        "last_frame": "last frame to copy"
+      },
+      "fixed_arguments": {}
     },
     {
       "id": "unbaking",

@@ -251,6 +251,13 @@ def _root_motion(s: LiveSession) -> Any:
     return s.change("root_motion", "generation.root_motion", {})
 
 
+@scenario("inbetweening", BACKFLIP)
+def _inbetweening(s: LiveSession) -> Any:
+    # Pro: generates motion between the selected keyframes (gaps of at most 120 frames).
+    _select_interval(s, 0, 40)
+    return s.change("inbetweening", "generation.inbetweening", {})
+
+
 @scenario("auto_posing", BACKFLIP)
 def _auto_posing(s: LiveSession) -> Any:
     box = next(item["id"] for item in s.objects_of_type("Box") if "hand" in item["name"])

@@ -3,7 +3,7 @@
 ## Supported versions
 
 Only the latest published release is eligible for security fixes. The project
-is currently pre-1.0 and supports only Cascadeur `2026.1.2.0.15343` on Windows.
+is currently pre-1.0 and supports only Cascadeur `2026.1.3.0.15619` on Windows.
 
 ## Reporting a vulnerability
 

@@ -34,7 +34,7 @@ $checks = [ordered]@{
 
 if ($checks.CascadeurInstalled) {
     $checks.CascadeurVersion = (Get-Item -LiteralPath $CascadeurExecutable).VersionInfo.ProductVersion
-    $checks.CascadeurVersionExact = [string]$checks.CascadeurVersion -eq '2026.1.2.0.15343'
+    $checks.CascadeurVersionExact = [string]$checks.CascadeurVersion -eq '2026.1.3.0.15619'
 }
 if ($checks.ExecutableExists) {
     $checks.SignatureStatus = [string](Get-AuthenticodeSignature -LiteralPath $Executable).Status

@@ -1,6 +1,6 @@
 ---
 name: cascadeur-mcp-workflows
-description: Plan and execute Cascadeur 2026.1.2.0.15343 scene, animation, rigging, physics, rendering, import/export, and DCC-integration work through the cascadeur-complete MCP. Use for inspecting or changing a live Cascadeur project; do not use for generic animation theory or direct work inside another DCC.
+description: Plan and execute Cascadeur 2026.1.3.0.15619 scene, animation, rigging, physics, rendering, import/export, and DCC-integration work through the cascadeur-complete MCP. Use for inspecting or changing a live Cascadeur project; do not use for generic animation theory or direct work inside another DCC.
 ---
 
 # Cascadeur MCP Workflows

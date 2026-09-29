@@ -152,7 +152,7 @@ MUTATION_VERBS = (
 def ui_file_flow_arguments(
     direction: str, format: str, path: str, preset: str = "scene", allow_overwrite: bool = False
 ) -> tuple[str, dict[str, Any]]:
-    """Return the feature id and exact 2026.1.2 action/dialog contract for a UI file flow."""
+    """Return the feature id and exact action/dialog contract for a UI file flow on the pinned build."""
     if direction not in ("import", "export"):
         raise ValueError("direction must be import or export")
     if format not in ("usd", "glb", "gltf", "vrm"):
@@ -161,7 +161,7 @@ def ui_file_flow_arguments(
     if not path.casefold().endswith(suffix):
         raise ValueError(f"{format} path must end with {suffix}")
     if format == "vrm" and direction == "export":
-        raise ValueError("Cascadeur 2026.1.2 exposes VRM import but no VRM export action")
+        raise ValueError("Cascadeur 2026.1 exposes VRM import but no VRM export action")
     if format == "usd":
         allowed = {"import": {"animation", "model", "scene"}, "export": {"model", "scene"}}[direction]
         if preset not in allowed:
@@ -190,7 +190,7 @@ def ui_file_flow_arguments(
     }
 
 
-# Dialog-driven Cascadeur 2026.1.2 file flows beyond USD/GLB/GLTF/VRM. Each
+# Dialog-driven Cascadeur 2026.1 file flows beyond USD/GLB/GLTF/VRM. Each
 # feature is bound to one exact action id and owned dialog title; the host only
 # fills that dialog and verifies a file or scene postcondition afterwards.
 UI_FILE_FLOWS: dict[str, dict[str, Any]] = {
@@ -433,7 +433,7 @@ class CascadeurService:
         return {
             "server": "cascadeur-complete",
             "server_version": "0.1.0",
-            "baseline": "2026.1.2.0.15343",
+            "baseline": PRODUCT_CATALOG.supported_build,
             "installation": self.installation,
             "bridge_protocol": PROTOCOL_VERSION,
             "transport": "stdio",

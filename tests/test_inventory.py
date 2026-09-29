@@ -7,7 +7,7 @@ from cascadeur_complete.discovery import (
     schema_counts,
 )
 from cascadeur_complete.feature_registry import build_registry, registry_json
-from cascadeur_complete.product_catalog import PRODUCT_CATALOG, SUPPORTED_BUILD
+from cascadeur_complete.product_catalog import PRODUCT_CATALOG, PRODUCT_VERSION, SUPPORTED_BUILD
 
 
 def test_installed_inventory_matches_baseline_counts():
@@ -24,7 +24,7 @@ def test_installed_inventory_matches_baseline_counts():
 
 
 def test_product_catalog_core_matches_registry_contract():
-    assert PRODUCT_CATALOG.product_version == "2026.1.2"
+    assert PRODUCT_CATALOG.product_version == PRODUCT_VERSION
     assert PRODUCT_CATALOG.supported_build == SUPPORTED_BUILD
     assert len(PRODUCT_CATALOG.core_features) == len(PRODUCT_CATALOG.features) - len(PRODUCT_CATALOG.official_gaps)
     assert {item.id for item in PRODUCT_CATALOG.core_features} == {
@@ -99,7 +99,7 @@ def test_basic_license_is_explicitly_gated():
 
 def test_installed_executable_uses_the_2026_1_adapter():
     installation = discover_installation()
-    assert installation["version"] == "2026.1.2.0.15343"
+    assert installation["version"] == SUPPORTED_BUILD
     assert installation["compatible"] is True
 
 
@@ -110,7 +110,7 @@ def test_installation_detection_does_not_require_programfiles_environment(monkey
     installation = discover_installation()
 
     assert installation["executable"] == r"C:\Program Files\Cascadeur\cascadeur.exe"
-    assert installation["version"] == "2026.1.2.0.15343"
+    assert installation["version"] == SUPPORTED_BUILD
     assert installation["compatible"] is True
 
 
@@ -147,7 +147,7 @@ def test_live_evidence_is_required_before_adapter_is_available():
     by_id = {record.id: record for record in records}
     assert by_id["timeline_set_frame"].state.value == "available"
     assert by_id["timeline_set_frame"].verification.value == "verified_live"
-    assert by_id["transform_get"].last_verified_version == "2026.1.2.0.15343"
+    assert by_id["transform_get"].last_verified_version == SUPPORTED_BUILD
     assert by_id["transform_set"].state.value == "unhealthy"
 
 
@@ -156,8 +156,8 @@ def test_registry_json_uses_schema_v3_and_reports_truth_layer_gaps():
     payload = __import__("json").loads(registry_json(records))
     assert payload["schema_version"] == 3
     assert payload["product_catalog"] == {
-        "product_version": "2026.1.2",
-        "supported_build": "2026.1.2.0.15343",
+        "product_version": PRODUCT_VERSION,
+        "supported_build": SUPPORTED_BUILD,
         "feature_count": len(PRODUCT_CATALOG.features),
         "core_feature_count": len(PRODUCT_CATALOG.core_features),
         "official_gap_count": len(PRODUCT_CATALOG.official_gaps),

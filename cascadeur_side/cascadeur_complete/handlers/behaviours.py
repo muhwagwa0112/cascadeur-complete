@@ -1,7 +1,7 @@
 """Feature-bound behaviour property adapters.
 
 Each operation is bound to one Cascadeur behaviour and an explicit property
-whitelist taken from the 2026.1.2 behaviour schema. Values are written through
+whitelist taken from the 2026.1 behaviour schema. Values are written through
 the data editor and read back; the operation fails unless every requested value
 is observed afterwards. Generic behaviour access is intentionally not exposed.
 """

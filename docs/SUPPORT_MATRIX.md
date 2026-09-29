@@ -1,6 +1,6 @@
 # Support matrix policy
 
-The package targets only Cascadeur `2026.1.2.0.15343` on Windows. It is a verified
+The package targets only Cascadeur `2026.1.3.0.15619` on Windows. It is a verified
 subset until every official user-facing feature has a dedicated adapter, exact
 postcondition, and live evidence on the applicable license/dependency matrix.
 
@@ -53,7 +53,7 @@ The run drives Cascadeur's UI (foreground window, tab switching, file dialogs),
 so do not use the machine while it runs. Fixtures are opened read-only; the first
 protected change branches the scene into a snapshot working copy.
 
-## Known UI-only rows in 2026.1.2
+## Known UI-only rows in 2026.1.3
 
 Filament environment/shadows/dynamic lights/ambient occlusion/bloom, the
 Settings window and Scene Linking exist only in Cascadeur's QML UI. The build registers no ActionManager id and no Python API for them, and

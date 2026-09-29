@@ -8,8 +8,10 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-CATALOG_FILE_NAME = "product_features_2026_1_2.json"
-SUPPORTED_BUILD = "2026.1.2.0.15343"
+# The single pin for the Cascadeur build this package verifies against.
+SUPPORTED_BUILD = "2026.1.3.0.15619"
+PRODUCT_VERSION = ".".join(SUPPORTED_BUILD.split(".")[:3])
+CATALOG_FILE_NAME = f"product_features_{PRODUCT_VERSION.replace('.', '_')}.json"
 
 
 def _canonical_hash(value: Any) -> str:
@@ -131,8 +133,8 @@ def load_product_catalog(path: Path | None = None) -> ProductCatalog:
     payload = json.loads(catalog_path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 1:
         raise ValueError("Unsupported product feature catalog schema")
-    if payload.get("product_version") != "2026.1.2":
-        raise ValueError("Product feature catalog must be pinned to Cascadeur 2026.1.2")
+    if payload.get("product_version") != PRODUCT_VERSION:
+        raise ValueError(f"Product feature catalog must be pinned to Cascadeur {PRODUCT_VERSION}")
     if payload.get("supported_build") != SUPPORTED_BUILD:
         raise ValueError(f"Product feature catalog build must be {SUPPORTED_BUILD}")
     features = tuple(ProductFeature.from_json(item) for item in payload.get("features", ()))

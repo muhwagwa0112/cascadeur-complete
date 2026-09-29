@@ -53,6 +53,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | `autoposing_props` | AutoPosing props | `rig.autoposing_props` | `rig_element_ids`: IDs, `enabled`: bool | — | `autoposing_names_equal_request` |
 | `finger_auto_posing` | Finger AutoPosing | `view.fingers_drawing` | `ids`: optional objects to select first | — | `viewport_render_changed` |
 | `fulcrum_cleaning` | Fulcrum cleaning | `timeline.fulcrum` | `layer_ids`: layer GUIDs (default: all), `first_frame`: int, `last_frame`: int | `state=Free` | `key_fixation_equals_request` |
+| `retargeting` | Retargeting | `generation.retargeting` | `source_point_id`: point controller of the animated source character, `target_point_id`: point controller of the target character (another layer), `first_frame`: first frame to copy, `last_frame`: last frame to copy | — | `target_animation_changed` |
 | `root_constraint` | Root Constraint | `rig.root_constraint` | `root_id`: root joint, `rig_element_id`: pelvis rig element | `action=add` | `root_constraint_present` |
 
 ## Physics

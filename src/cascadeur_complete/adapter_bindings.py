@@ -484,6 +484,19 @@ BINDINGS: tuple[AdapterBinding, ...] = (
         gap=True,
     ),
     _b(
+        "retargeting",
+        "generation.retargeting",
+        ("target_animation_changed",),
+        preconditions=("compatible_version", "pro_license", "autoposing_rigs"),
+        arguments={
+            "source_point_id": "point controller of the animated source character",
+            "target_point_id": "point controller of the target character (another layer)",
+            "first_frame": "first frame to copy",
+            "last_frame": "last frame to copy",
+        },
+        mode=ExecutionMode.ACTION,
+    ),
+    _b(
         "blend_shape",
         "mesh.blend_shape_weight",
         ("blend_shape_weights_equal_request",),

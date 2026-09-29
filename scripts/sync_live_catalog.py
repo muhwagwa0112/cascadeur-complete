@@ -10,8 +10,9 @@ import json
 from pathlib import Path
 
 from cascadeur_complete.live_validation import SCENARIOS
+from cascadeur_complete.product_catalog import CATALOG_FILE_NAME
 
-CATALOG = Path(__file__).resolve().parents[1] / "inventory" / "product_features_2026_1_2.json"
+CATALOG = Path(__file__).resolve().parents[1] / "inventory" / CATALOG_FILE_NAME
 
 
 def main() -> int:

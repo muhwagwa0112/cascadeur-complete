@@ -18,9 +18,9 @@ TARGET = Path(__file__).resolve().parents[1] / "docs" / "SUPPORT_STATUS.md"
 GATE_REASON = {
     "license_gated": "requires a Cascadeur Pro license (this machine: {license})",
     "missing_dependency": "requires {dependency}",
-    "unsupported": "the 2026.1.2 build exposes no such capability",
+    "unsupported": "the pinned build exposes no such capability",
     "unsupported_version": "installed build differs from the pinned build",
-    "ui_only": "only reachable through Cascadeur's QML UI; no action id or Python API exists in 2026.1.2",
+    "ui_only": "only reachable through Cascadeur's QML UI; no safe action id or Python API in the pinned build",
     "not_implemented": "no adapter yet",
     "unhealthy": "adapter present, no current live evidence on this machine",
     "needs_scene": "adapter present, no current live evidence on this machine",

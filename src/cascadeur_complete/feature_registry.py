@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from .adapter_bindings import BINDINGS, BY_OPERATION
 from .build_profile import DEVELOPER_BUILD
 from .models import CapabilityState, ExecutionMode, FeatureRecord, VerificationState
-from .product_catalog import PRODUCT_CATALOG, ProductFeature
+from .product_catalog import PRODUCT_CATALOG, PRODUCT_VERSION, SUPPORTED_BUILD, ProductFeature
 
 # Generic csc/Python execution is compiled out of release builds; these rows are
 # gated by the developer build policy rather than implemented for production.
@@ -749,7 +749,9 @@ def _official_gap_record(feature: ProductFeature) -> FeatureRecord:
         id=feature.id,
         family=feature.family,
         name=feature.name,
-        description=f"Official Cascadeur 2026.1.2 feature without a postcondition-safe MCP adapter: {feature.name}",
+        description=(
+            f"Official Cascadeur {PRODUCT_VERSION} feature without a postcondition-safe MCP adapter: {feature.name}"
+        ),
         execution_mode=ExecutionMode.GATED,
         state=CapabilityState.NOT_IMPLEMENTED,
         route=f"not_implemented:{feature.id}",
@@ -868,7 +870,7 @@ def build_registry(
     *,
     license_name: str = "Basic",
     scene_available: bool = False,
-    version_name: str = "2026.1.2.0.15343",
+    version_name: str = SUPPORTED_BUILD,
     verified_features: Iterable[str] = (),
     developer_enabled: bool = False,
     available_dependencies: Iterable[str] = (),

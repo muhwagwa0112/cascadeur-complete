@@ -655,7 +655,7 @@ def complete_file_dialog(
             raise UIAutomationError(f"Expected options button did not appear: {options_title} > {options_accept_title}")
         accept_options.click_input()
 
-    # A trailing "*" pins a title prefix: some 2026.1.2 dialogs append the scene
+    # A trailing "*" pins a title prefix: some 2026.1 dialogs append the scene
     # name ("Save Scene <name>"). Everything before it must still match exactly.
     prefix = expected_dialog_title[:-1] if expected_dialog_title.endswith("*") else None
     dialog = (

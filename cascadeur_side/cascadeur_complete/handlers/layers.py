@@ -29,7 +29,7 @@ def edit_folder(scene, arguments, _request, context):
         viewer = scene_updater.layers_viewer()
         if action == "create":
             if not bool(arguments.get("with_default_layer", True)):
-                raise ValueError("Cascadeur 2026.1.2 does not persist an empty folder; with_default_layer must be true")
+                raise ValueError("Cascadeur 2026.1 does not persist an empty folder; with_default_layer must be true")
             parent = context["guid"](arguments["parent_id"]) if arguments.get("parent_id") else viewer.root_id()
             changed.append(
                 editor.create_folder(

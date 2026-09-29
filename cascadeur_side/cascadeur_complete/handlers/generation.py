@@ -142,3 +142,60 @@ def auto_posing(scene, arguments, _request, context):
         "before_revision": before["revision"],
         "after_revision": after["revision"],
     }, []
+
+
+@handler("generation.retargeting", postconditions=("target_animation_changed",))
+def retargeting(scene, arguments, _request, context):
+    """Edit > Retargeting copy/paste: move an interval of animation between two AutoPosing rigs.
+
+    Copy reads the selected frames of the character owning the selected point;
+    paste applies them to the whole character owning the target point. The
+    target character's layer must change on at least one copied frame.
+    """
+    from .timeline_edit import _call, _fingerprint, _select_interval, _select_objects
+
+    domain = context["domain_scene"](scene)
+    source = str(arguments["source_point_id"])
+    target = str(arguments["target_point_id"])
+    existing = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
+    unknown = sorted({source, target} - existing)
+    if unknown:
+        raise KeyError("Unknown object IDs: " + ", ".join(unknown))
+    viewer = domain.model_viewer().behaviour_viewer()
+    for raw_id in (source, target):
+        if viewer.get_behaviour_by_name(context["object_id"](raw_id), "Point").is_null():
+            raise ValueError("Retargeting needs a point controller of each character: " + raw_id)
+    if not list(viewer.get_behaviours("RigInfo")):
+        raise ValueError("Retargeting needs characters with a generated AutoPosing rig")
+    layers = domain.layers_viewer()
+    source_layer = layers.layer_id_by_obj_id(context["object_id"](source))
+    target_layer = layers.layer_id_by_obj_id(context["object_id"](target))
+    if source_layer.is_null() or target_layer.is_null():
+        raise ValueError("Both points must belong to an animation layer")
+    if context["id_string"](source_layer) == context["id_string"](target_layer):
+        raise ValueError("Source and target points belong to the same character layer")
+    first = int(arguments["first_frame"])
+    last = int(arguments["last_frame"])
+    if first < 0 or last < first or last >= int(layers.frames_count()):
+        raise ValueError(f"Invalid retargeting interval: {first}..{last}")
+    target_objects = sorted(context["id_string"](item) for item in layers.layer(target_layer).obj_ids)
+    frames = range(first, last + 1)
+    before = [_fingerprint(domain, target_objects, frame, context) for frame in frames]
+
+    _select_interval(domain, [source_layer], first, last)
+    _select_objects(domain, [source], context)
+    _call(context, "View.Retargeting_Copy")
+    _select_objects(domain, [target], context)
+    _call(context, "View.Retargeting_Paste")
+
+    after = [_fingerprint(domain, target_objects, frame, context) for frame in frames]
+    changed = [frame for frame, old, new in zip(frames, before, after, strict=True) if old != new]
+    if not changed:
+        raise AssertionError("POSTCONDITION_FAILED: target character animation did not change")
+    return {
+        "source_point_id": source,
+        "target_point_id": target,
+        "interval": [first, last],
+        "target_objects": len(target_objects),
+        "changed_frames": len(changed),
+    }, []

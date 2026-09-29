@@ -12,8 +12,9 @@ import json
 from pathlib import Path
 
 from cascadeur_complete.adapter_bindings import BINDINGS
+from cascadeur_complete.product_catalog import CATALOG_FILE_NAME
 
-CATALOG = Path(__file__).resolve().parents[1] / "inventory" / "product_features_2026_1_2.json"
+CATALOG = Path(__file__).resolve().parents[1] / "inventory" / CATALOG_FILE_NAME
 CONTRACT_TESTS = [
     "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
     "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings",

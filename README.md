@@ -1,7 +1,7 @@
 # Cascadeur MCP
 
 `cascadeur-complete` is the compatibility package name for a clean-room MCP
-server and in-process bridge targeting Cascadeur `2026.1.2.0.15343` on Windows.
+server and in-process bridge targeting Cascadeur `2026.1.3.0.15619` on Windows.
 The project is pre-1.0 and provides a **verified subset** of Cascadeur automation;
 it does not claim that every user-facing Cascadeur feature is implemented.
 
@@ -15,7 +15,7 @@ dedicated adapter, exact postcondition, and version-matched live evidence exist.
 
 ## Support status
 
-- Exact application baseline: Cascadeur `2026.1.2.0.15343`
+- Exact application baseline: Cascadeur `2026.1.3.0.15619`
 - Host runtime: bundled Python 3.12 on Windows x64
 - Primary client: Codex stdio registration
 - License/dependency/UI gates are reported as gates, not successful execution

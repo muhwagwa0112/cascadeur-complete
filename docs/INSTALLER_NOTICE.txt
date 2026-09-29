@@ -1,5 +1,5 @@
 Cascadeur MCP is pre-1.0 software for a verified subset of Cascadeur
-2026.1.2.0.15343. It is not affiliated with Nekki.
+2026.1.3.0.15619. It is not affiliated with Nekki.
 
 The installer creates a recoverable pre-upgrade backup under:
 %LOCALAPPDATA%\CascadeurMCP\backups
