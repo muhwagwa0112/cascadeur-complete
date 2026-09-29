@@ -265,6 +265,17 @@ def _verify_confirmation(root, request, before):
         os.fsync(stream.fileno())
 
 
+def _finite(value):
+    """Replace NaN/Infinity (not valid JSON for the signed channel) with null."""
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return None
+    if isinstance(value, dict):
+        return {key: _finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(item) for item in value]
+    return value
+
+
 def atomic_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name("." + path.name + ".tmp")
@@ -1615,6 +1626,10 @@ def _drain_once(scene, *, matching_scene_only=False):
                         "mac": "",
                     }
                 )
+                # Sign exactly what the host will read: JSON turns non-string
+                # keys (e.g. frame numbers) into strings, which changes the
+                # canonical key order and would break the MAC.
+                result = json.loads(json.dumps(_finite(result), ensure_ascii=False, allow_nan=False))
                 result["mac"] = _sign_message(result, bridge_secret)
                 atomic_json(responses / (request_id + ".json"), result)
             processed += 1
