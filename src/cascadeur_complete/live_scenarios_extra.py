@@ -244,7 +244,10 @@ def _retargeting(s: LiveSession) -> Any:
     sources = {base(item["name"]): item["id"] for item in before.values() if item["type"] == "Point"}
     shared = sorted(set(targets) & set(sources))
     if not shared:
-        raise LiveValidationError("the imported character shares no point names with the animated one")
+        raise LiveValidationError(
+            "the imported character shares no point names with the animated one: "
+            f"imported {[item['name'] for item in created][:4]}, existing {sorted(sources)[:4]}"
+        )
     name = next((item for item in shared if "pelvis" in item.casefold()), shared[0])
     return s.change(
         "retargeting",
