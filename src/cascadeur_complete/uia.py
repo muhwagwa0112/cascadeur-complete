@@ -11,10 +11,13 @@ from pathlib import Path
 
 
 class UIAutomationError(RuntimeError):
-    def __init__(self, message: str, *, not_running: bool = False, timed_out: bool = False):
+    def __init__(
+        self, message: str, *, not_running: bool = False, timed_out: bool = False, license_gated: bool = False
+    ):
         super().__init__(message)
         self.not_running = not_running
         self.timed_out = timed_out
+        self.license_gated = license_gated
 
 
 @dataclass(frozen=True)
@@ -444,6 +447,7 @@ def invoke_process_pending() -> TriggerEvidence:
             time.sleep(0.5)
             if int(user32.GetForegroundWindow()) == handle:
                 return
+        _raise_if_feature_gate("the previous request")
         raise UIAutomationError("Cascadeur could not become the foreground window")
 
     def native_click(point: tuple[int, int]) -> None:
@@ -647,6 +651,7 @@ def complete_file_dialog(
     if options_title:
         options = owner_spec.child_window(title=options_title, control_type="Window")
         if not options.exists(timeout=remaining(), retry_interval=0.05):
+            _raise_if_feature_gate(action_id)
             raise UIAutomationError(f"Expected Cascadeur options window did not appear: {options_title}")
         if options.window_text() != options_title:
             raise UIAutomationError(f"Unexpected Cascadeur options window: {options.window_text()}")
@@ -673,6 +678,7 @@ def complete_file_dialog(
         else owner_spec.child_window(title=expected_dialog_title, control_type="Window", **native)
     )
     if not dialog.exists(timeout=remaining(), retry_interval=0.05):
+        _raise_if_feature_gate(action_id)
         raise UIAutomationError(
             f"Expected file dialog did not appear: {expected_dialog_title}; "
             f"owned windows: {owned_window_titles()}"
@@ -850,6 +856,7 @@ def complete_export_video_form(
         raise UIAutomationError("No visible Cascadeur window", not_running=True)
     window_spec = spec.child_window(title=EXPORT_VIDEO_TITLE, control_type="Window")
     if not window_spec.exists(timeout=max(1.0, timeout), retry_interval=0.1):
+        _raise_if_feature_gate(action_id)
         raise UIAutomationError(f"Expected window did not appear: {EXPORT_VIDEO_TITLE}; owned: {owned_window_titles()}")
     window = window_spec.wrapper_object()
     frame = window.rectangle()
@@ -916,6 +923,41 @@ def finish_export_video_form(timeout: float = 60.0) -> bool:
     if window.exists(timeout=5.0, retry_interval=0.1):
         raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} did not close after Ok")
     return True
+
+
+FEATURE_GATE_TITLE = "Feature not available"
+
+
+def dismiss_feature_gate() -> str | None:
+    """Close Cascadeur's license gate ("Feature not available": Upgrade/Sync/Close).
+
+    Returns the gate's text when one was open. Only "Close" is pressed; Upgrade
+    and Sync are account actions left to the user.
+    """
+    try:
+        spec = _owner_spec()
+        if spec is None:
+            return None
+        gate = spec.child_window(title=FEATURE_GATE_TITLE, control_type="Window")
+        if not gate.exists(timeout=0.2, retry_interval=0.05):
+            return None
+        wrapper = gate.wrapper_object()
+        texts = [item.window_text() for item in wrapper.descendants() if item.window_text()]
+        detail = " / ".join(text for text in texts if text not in ("Upgrade", "Sync", "Close"))[:300]
+        gate.child_window(title="Close", control_type="Button").click_input()
+        gate.wait_not("exists", timeout=5, retry_interval=0.1)
+        return detail or FEATURE_GATE_TITLE
+    except Exception:  # pragma: no cover - diagnostics must not mask the caller's error
+        return None
+
+
+def _raise_if_feature_gate(context: str) -> None:
+    detail = dismiss_feature_gate()
+    if detail is not None:
+        raise UIAutomationError(
+            f"Cascadeur reported '{FEATURE_GATE_TITLE}' for {context} (license does not include it): {detail}",
+            license_gated=True,
+        )
 
 
 def owned_window_titles() -> list[str]:

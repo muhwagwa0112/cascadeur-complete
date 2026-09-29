@@ -1341,6 +1341,14 @@ class CascadeurService:
                 cancel_owned_file_dialogs()
             worker.join(min(10.0, max(0.1, timeout)))
             is_uia = isinstance(exc, UIAutomationError)
+            gated = responses and responses[0].error_code == ErrorCode.LICENSE_GATED
+            if is_uia and exc.license_gated or gated:
+                return self._host_error(
+                    record.feature_id,
+                    ErrorCode.LICENSE_GATED,
+                    str(exc) if is_uia and exc.license_gated else str(responses[0].error_message),
+                    mode=ExecutionMode.GATED,
+                )
             return self._host_error(
                 record.feature_id,
                 (ErrorCode.CASCADEUR_NOT_RUNNING if is_uia and exc.not_running else ErrorCode.UI_LOCKED),

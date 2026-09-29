@@ -9,16 +9,22 @@ from .atomic_queue import AtomicQueue, read_json
 from .models import BridgeRequest, ErrorCode, ExecutionMode, Operation, ResultEnvelope, SafetyContext
 from .paths import RuntimePaths
 from .queue_auth import QueueAuthenticationError
-from .uia import UIAutomationError, invoke_process_pending
+from .uia import UIAutomationError, dismiss_feature_gate, invoke_process_pending
 
 
 class BridgeClient:
     def __init__(
-        self, paths: RuntimePaths | None = None, trigger: Callable[[], object] | None = invoke_process_pending
+        self,
+        paths: RuntimePaths | None = None,
+        trigger: Callable[[], object] | None = invoke_process_pending,
+        gate_probe: Callable[[], str | None] | None = None,
     ):
         self.paths = paths or RuntimePaths.discover()
         self.queue = AtomicQueue(self.paths)
         self.trigger = trigger
+        # Cascadeur's "Feature not available" gate is modal: it blocks the UI
+        # thread (and the bridge) until closed. Watch for it with the real UI.
+        self.gate_probe = gate_probe or (dismiss_feature_gate if trigger is invoke_process_pending else None)
         self._execute_lock = RLock()
 
     def execute(
@@ -114,7 +120,11 @@ class BridgeClient:
                     feature_id=feature_id,
                     execution_mode=ExecutionMode.UIA,
                     error_code=(
-                        ErrorCode.CASCADEUR_NOT_RUNNING if canceled and exc.not_running else ErrorCode.UI_LOCKED
+                        ErrorCode.LICENSE_GATED
+                        if exc.license_gated
+                        else ErrorCode.CASCADEUR_NOT_RUNNING
+                        if canceled and exc.not_running
+                        else ErrorCode.UI_LOCKED
                     ),
                     error_message=(
                         str(exc)
@@ -188,6 +198,37 @@ class BridgeClient:
         return until if until > time.time() else None
 
     def _wait_response(self, request: BridgeRequest, timeout: float) -> ResultEnvelope | None:
+        if self.gate_probe is None or timeout < 2.0:
+            return self._wait_response_once(request, timeout)
+        deadline = time.monotonic() + timeout
+        gate = None
+        while True:
+            response = self._wait_response_once(request, min(2.0, max(0.01, deadline - time.monotonic())))
+            if response is not None or time.monotonic() >= deadline:
+                break
+            if gate is None:
+                gate = self.gate_probe()
+        if gate is None:
+            return response
+        if response is None:
+            # Never leave the refused request queued for a later Process Pending.
+            for path in self.paths.requests.glob(f"*-{request.request_id}.json"):
+                path.unlink(missing_ok=True)
+        # The gate was closed, so the bridge could finish; its result is not the
+        # requested feature, which Cascadeur refused under the current license.
+        return ResultEnvelope(
+            ok=False,
+            feature_id=request.feature_id,
+            execution_mode=ExecutionMode.GATED,
+            request_id=request.request_id,
+            session_id=request.session_id,
+            nonce=request.nonce,
+            error_code=ErrorCode.LICENSE_GATED,
+            error_message=f"Cascadeur reported 'Feature not available' (license does not include it): {gate}",
+            warnings=[] if response is None else [f"bridge result after the gate closed: ok={response.ok}"],
+        )
+
+    def _wait_response_once(self, request: BridgeRequest, timeout: float) -> ResultEnvelope | None:
         try:
             return self.queue.wait_response(request.request_id, timeout)
         except QueueAuthenticationError as exc:

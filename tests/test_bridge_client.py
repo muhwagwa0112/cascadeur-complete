@@ -103,3 +103,19 @@ def test_hung_ui_trigger_is_bounded_and_request_is_canceled(tmp_path):
     assert result.error_code == ErrorCode.UI_LOCKED
     assert calls == [1]
     assert client.queue.pending_count() == 0
+
+
+def test_feature_gate_is_reported_as_license_gated_and_cancels_the_request(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    probes = []
+
+    def gate():
+        probes.append(1)
+        return "USD export"
+
+    client = BridgeClient(paths, trigger=None, gate_probe=gate)
+    result = client.execute("export_usd", [Operation(name="system.status")], timeout=2.5)
+    assert result.error_code == ErrorCode.LICENSE_GATED
+    assert "USD export" in result.error_message
+    assert probes == [1]
+    assert client.queue.pending_count() == 0
