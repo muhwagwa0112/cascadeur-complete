@@ -1524,14 +1524,16 @@ DRAIN_LINGER_SECONDS = 1.0
 DRAIN_MAX_SECONDS = 20.0
 
 
-def process_pending(scene, *, matching_scene_only=False):
+def process_pending(scene, *, matching_scene_only=False, linger=True):
     """Drain queued requests, lingering briefly for follow-up requests.
 
     One UI trigger (menu command or tab activation) costs several seconds, but
     MCP clients usually send short bursts (status, snapshot, commit, re-read).
     After each pass the drain waits up to ``DRAIN_LINGER_SECONDS`` for the next
     request and stops at ``DRAIN_MAX_SECONDS`` or after an event-loop-bound
-    operation, keeping the Cascadeur UI responsive between bursts.
+    operation, keeping the Cascadeur UI responsive between bursts. The UI-thread
+    pump polls on its own timer, so it passes ``linger=False`` and never blocks
+    the UI waiting for requests that have not arrived yet.
     """
     started = time.monotonic()
     total = 0
@@ -1542,6 +1544,8 @@ def process_pending(scene, *, matching_scene_only=False):
             total += processed
             if processed == 0 or must_yield or time.monotonic() - started >= DRAIN_MAX_SECONDS:
                 return total
+            if not linger:
+                continue
             linger_deadline = time.monotonic() + DRAIN_LINGER_SECONDS
             _mark_draining(time.time() + DRAIN_LINGER_SECONDS)
             while time.monotonic() < linger_deadline and not any(requests.glob("*.json")):

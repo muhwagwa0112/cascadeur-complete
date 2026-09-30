@@ -7,6 +7,10 @@ def run(scene: "csc.domain.Scene") -> None:
     try:
         from cascadeur_complete.runtime import process_pending
 
+        from cascadeur_complete import pump
+
+        pump.ensure_installed()
+
         count = process_pending(scene, matching_scene_only=True)
         if count:
             scene.success(f"Cascadeur Complete scene-open event processed {count} request(s)")

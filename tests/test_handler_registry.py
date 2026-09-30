@@ -83,3 +83,34 @@ def test_focus_and_open_events_drain_complete_queue():
         source = (root / relative).read_text(encoding="utf-8")
         assert "cascadeur_complete.runtime import process_pending" in source
         assert "process_pending(scene, matching_scene_only=True)" in source
+
+
+def test_entry_points_install_the_ui_thread_pump():
+    bridge = Path(__file__).parents[1] / "cascadeur_side"
+    sources = [
+        bridge / "cascadeur_complete" / "__init__.py",
+        bridge / "cascadeur_complete" / "process_pending.py",
+        bridge / "cascadeur_complete_events" / "scene_activated" / "drain.py",
+        bridge / "cascadeur_complete_events" / "scene_opened" / "drain.py",
+    ]
+    for path in sources:
+        assert "ensure_installed()" in path.read_text(encoding="utf-8"), path
+
+
+def test_pump_never_installs_outside_cascadeur():
+    import importlib.util
+    import sys
+    import types
+
+    path = Path(__file__).parents[1] / "cascadeur_side" / "cascadeur_complete" / "pump.py"
+    spec = importlib.util.spec_from_file_location("cascadeur_complete_pump_probe", path)
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get("csc")
+    sys.modules.setdefault("csc", types.ModuleType("csc"))
+    try:
+        spec.loader.exec_module(module)
+        assert module.ensure_installed() is False
+        assert module.status()["hwnd"] is None
+    finally:
+        if previous is None:
+            sys.modules.pop("csc", None)

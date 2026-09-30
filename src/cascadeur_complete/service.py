@@ -487,8 +487,13 @@ class CascadeurService:
             "states": states,
             "execution_modes": modes,
             "connection": status.model_dump(mode="json") if status else {"live_checked": False},
+            "ui_pump": self._pump_state(),
             "developer_execute_python": self._developer_policy(),
         }
+
+    def _pump_state(self) -> dict[str, object]:
+        probe = getattr(self.client, "pump_state", None)
+        return probe() if callable(probe) else {"active": False}
 
     def _developer_policy(self) -> bool:
         if not self.paths.policy.is_file():

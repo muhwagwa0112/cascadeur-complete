@@ -8,8 +8,14 @@ from threading import Event, RLock, Thread
 from .atomic_queue import AtomicQueue, read_json
 from .models import BridgeRequest, ErrorCode, ExecutionMode, Operation, ResultEnvelope, SafetyContext
 from .paths import RuntimePaths
+from .pump_client import read_pump, wake_pump
 from .queue_auth import QueueAuthenticationError
 from .uia import UIAutomationError, dismiss_feature_gate, invoke_process_pending
+
+# How long a live UI-thread pump may take to claim a request before the host
+# falls back to the Process Pending menu (e.g. the request targets another scene
+# tab, or a modal dialog is blocking the main window).
+PUMP_CLAIM_SECONDS = 2.5
 
 
 class BridgeClient:
@@ -78,6 +84,15 @@ class BridgeClient:
             # request; it claims this one without another UI trigger.
             wait = min(timeout, max(0.0, lingering_until - time.time()) + 0.75)
             response = self._wait_response(request, wait)
+            if response is not None:
+                response.duration_ms = int((time.monotonic() - started) * 1000)
+                return response
+        pump = read_pump(self.paths)
+        if pump is not None and request_path.exists():
+            # A live pump drains on Cascadeur's UI thread from its own timer; the
+            # wake-up post only shortens the wait. No window is activated.
+            wake_pump(pump)
+            response = self._wait_claim_or_response(request, request_path, min(timeout, PUMP_CLAIM_SECONDS))
             if response is not None:
                 response.duration_ms = int((time.monotonic() - started) * 1000)
                 return response
@@ -196,6 +211,20 @@ class BridgeClient:
         except (OSError, ValueError, TypeError):
             return None
         return until if until > time.time() else None
+
+    def pump_state(self) -> dict[str, object]:
+        pump = read_pump(self.paths)
+        if pump is None:
+            return {"active": False}
+        return {"active": True, "pid": pump.pid, "heartbeat_age_s": round(pump.age(), 2)}
+
+    def _wait_claim_or_response(self, request: BridgeRequest, request_path, timeout: float) -> ResultEnvelope | None:
+        """Wait until the bridge answers or claims the request; None if claimed or unclaimed."""
+        deadline = time.monotonic() + timeout
+        while True:
+            response = self._wait_response_once(request, 0.03)
+            if response is not None or not request_path.exists() or time.monotonic() >= deadline:
+                return response
 
     def _wait_response(self, request: BridgeRequest, timeout: float) -> ResultEnvelope | None:
         if self.gate_probe is None or timeout < 2.0:

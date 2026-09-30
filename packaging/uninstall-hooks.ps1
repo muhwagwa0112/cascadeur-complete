@@ -30,6 +30,11 @@ if (Test-Path -LiteralPath $settingsPath) {
     if ($settings.Python.Events -and -not [bool]$ownership.event_preexisting) {
         $settings.Python.Events = @($settings.Python.Events | Where-Object { $_ -ne 'cascadeur_complete_events' })
     }
+    # Records written before path_preexisting existed never added the entry.
+    if ($settings.Python.Path -and $ownership.user_scripts_path -and
+        $null -ne $ownership.PSObject.Properties['path_preexisting'] -and -not [bool]$ownership.path_preexisting) {
+        $settings.Python.Path = @($settings.Python.Path | Where-Object { $_ -ine [string]$ownership.user_scripts_path })
+    }
     $temporary = "$settingsPath.cascadeur-mcp.tmp"
     $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $temporary -Encoding utf8
     Move-Item -LiteralPath $temporary -Destination $settingsPath -Force

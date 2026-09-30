@@ -119,3 +119,80 @@ def test_feature_gate_is_reported_as_license_gated_and_cancels_the_request(tmp_p
     assert "USD export" in result.error_message
     assert probes == [1]
     assert client.queue.pending_count() == 0
+
+
+def _publish_pump(paths, *, age=0.0):
+    import os
+    import time
+
+    paths.state.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(
+        paths.state / "pump.json",
+        {"schema": 1, "pid": os.getpid(), "hwnd": 0, "wake_message": 0, "heartbeat": time.time() - age},
+    )
+
+
+def _serve_one_request(client, paths, stop):
+    import time
+
+    while not stop.is_set():
+        pending = list(paths.requests.glob("*.json"))
+        if not pending:
+            time.sleep(0.01)
+            continue
+        request = read_json(pending[0])
+        pending[0].unlink()
+        response = ResultEnvelope(ok=True, feature_id=request["feature_id"], execution_mode=ExecutionMode.NATIVE)
+        client.queue.authenticate_response(BridgeRequest.model_validate(request), response)
+        atomic_write_json(paths.responses / f"{request['request_id']}.json", response.model_dump(mode="json"))
+        return
+
+
+def test_live_pump_drains_without_ui_trigger(tmp_path):
+    from threading import Thread
+
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    triggers = []
+    client = BridgeClient(paths, trigger=lambda: triggers.append(1))
+    _publish_pump(paths)
+    stop = Event()
+    pump = Thread(target=_serve_one_request, args=(client, paths, stop), daemon=True)
+    pump.start()
+
+    result = client.execute("status", [Operation(name="system.status")], timeout=5)
+    stop.set()
+
+    assert result.ok
+    assert triggers == []
+    assert client.pump_state()["active"] is True
+
+
+def test_pump_that_does_not_claim_falls_back_to_ui_trigger(tmp_path, monkeypatch):
+    import cascadeur_complete.bridge_client as bridge_client
+
+    monkeypatch.setattr(bridge_client, "PUMP_CLAIM_SECONDS", 0.05)
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    client = BridgeClient(paths, trigger=None)
+    _publish_pump(paths)
+    triggers = []
+
+    def trigger():
+        triggers.append(1)
+        _serve_one_request(client, paths, Event())
+
+    client.trigger = trigger
+    result = client.execute("status", [Operation(name="system.status")], timeout=5)
+
+    assert result.ok
+    assert triggers == [1]
+
+
+def test_stale_or_disabled_pump_is_ignored(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    client = BridgeClient(paths, trigger=None)
+    _publish_pump(paths, age=30.0)
+    assert client.pump_state() == {"active": False}
+    _publish_pump(paths)
+    assert client.pump_state()["active"] is True
+    (paths.state / "pump.disabled").write_text("", encoding="utf-8")
+    assert client.pump_state() == {"active": False}

@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $RuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot)
 $BackupRoot = Join-Path $env:LOCALAPPDATA ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-installer')
 $SettingsPath = Join-Path $env:LOCALAPPDATA 'Nekki Limited\Cascadeur\settings.json'
+$UserScriptsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Nekki Limited\Cascadeur\user_scripts')).TrimEnd('\')
 $CodexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
 New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
 
@@ -49,10 +50,22 @@ if (Test-Path -LiteralPath $SettingsPath) {
     if ($null -eq $settings.Python.PSObject.Properties['Events']) {
         $settings.Python | Add-Member -NotePropertyName Events -NotePropertyValue @()
     }
+    if ($null -eq $settings.Python.PSObject.Properties['Path']) {
+        $settings.Python | Add-Member -NotePropertyName Path -NotePropertyValue @()
+    }
     $commandPreexisting = @($settings.Python.Commands) -contains 'cascadeur_complete'
     $eventPreexisting = @($settings.Python.Events) -contains 'cascadeur_complete_events'
     $settings.Python.Commands = @($settings.Python.Commands | Where-Object { $_ -ne 'cascadeur_complete' }) + 'cascadeur_complete'
     $settings.Python.Events = @($settings.Python.Events | Where-Object { $_ -ne 'cascadeur_complete_events' }) + 'cascadeur_complete_events'
+    # Cascadeur resolves Commands/Events entries by module name only and does
+    # not put user_scripts on sys.path itself; without this entry both bridge
+    # packages fail to import at startup.
+    $pathPreexisting = @($settings.Python.Path | Where-Object {
+        $_ -and ([IO.Path]::GetFullPath([string]$_).TrimEnd('\') -ieq $UserScriptsRoot)
+    }).Count -gt 0
+    if (-not $pathPreexisting) {
+        $settings.Python.Path = @($settings.Python.Path) + $UserScriptsRoot
+    }
     $temporary = "$SettingsPath.cascadeur-mcp.tmp"
     $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $temporary -Encoding utf8
     Move-Item -LiteralPath $temporary -Destination $SettingsPath -Force
@@ -68,6 +81,8 @@ if (-not $ActiveOwnership) {
         installed = $true
         command_preexisting = [bool]$commandPreexisting
         event_preexisting = [bool]$eventPreexisting
+        path_preexisting = [bool]$pathPreexisting
+        user_scripts_path = $UserScriptsRoot
         codex_preexisting = $previousCodex
         codex_registered_by_installer = $false
         transaction_manifest = $IncomingTransaction
@@ -88,6 +103,15 @@ if (-not $ActiveOwnership) {
     }
     $ExistingOwnership.transaction_manifest = $IncomingTransaction
     $ExistingOwnership | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $OwnershipPath -Encoding utf8
+}
+
+# Upgrades over an ownership record that predates the Python.Path entry adopt
+# the state observed before this run, so uninstall only removes what we added.
+$ownership = Get-Content -LiteralPath $OwnershipPath -Raw | ConvertFrom-Json
+if ($null -eq $ownership.PSObject.Properties['path_preexisting']) {
+    $ownership | Add-Member -NotePropertyName path_preexisting -NotePropertyValue ([bool]$pathPreexisting)
+    $ownership | Add-Member -NotePropertyName user_scripts_path -NotePropertyValue $UserScriptsRoot -Force
+    $ownership | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $OwnershipPath -Encoding utf8
 }
 
 $codexRegistered = $false

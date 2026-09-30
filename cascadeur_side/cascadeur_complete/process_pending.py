@@ -1,3 +1,4 @@
+from . import pump
 from .runtime import process_pending
 
 
@@ -10,6 +11,7 @@ def command_description():
 
 
 def run(scene):
+    pump.ensure_installed()
     count = process_pending(scene, matching_scene_only=True)
     if count:
         scene.success(f"Cascadeur Complete processed {count} request(s)")
