@@ -2878,6 +2878,40 @@
       "fixed_arguments": {}
     },
     {
+      "id": "position_keys",
+      "family": "animation",
+      "name": "Position keys",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.position_keys_set",
+      "action": "animation.position_keys_set",
+      "operation": "animation.position_keys_set",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "position_keys_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.position_keys_set",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[position_keys]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "writes": "[{id, frame (existing key), position}]",
+        "space": "global|local (default global)"
+      },
+      "fixed_arguments": {}
+    },
+    {
       "id": "rotation_keys",
       "family": "animation",
       "name": "Rotation keys",

@@ -372,3 +372,93 @@ def interpolation_refresh(scene, _arguments, _request, context):
     started = time.monotonic()
     refresh_interpolation(context["domain_scene"](scene))
     return {"duration_ms": int((time.monotonic() - started) * 1000)}, []
+
+
+@handler("animation.position_keys_set", postconditions=("position_keys_equal_request",))
+def position_keys_set(scene, arguments, _request, context):
+    """Rewrite positions at existing keys for many objects in one transaction.
+
+    Used for contact cleanup (pinning a sliding foot's points in place): only
+    existing keys on each object's own layer are rewritten, through the
+    update-graph position node when the object has one. Every write is read
+    back; the host re-reads a sample in a separate request as well.
+    """
+    from ..runtime import _read_transforms, _transform_data_ids
+
+    domain = context["domain_scene"](scene)
+    writes = list(arguments.get("writes") or [])
+    space = str(arguments.get("space", "global"))
+    if space not in ("local", "global"):
+        raise ValueError("space must be local or global")
+    if not writes:
+        raise ValueError("writes must be a non-empty list of {id, frame, position}")
+    if len(writes) > MAX_ROTATION_KEY_WRITES:
+        raise ValueError(f"At most {MAX_ROTATION_KEY_WRITES} writes per call")
+    layers_viewer = domain.layers_viewer()
+    targets = {}
+    by_frame = {}
+    for item in writes:
+        raw_id = str(item["id"])
+        frame = int(item["frame"])
+        position = [float(value) for value in item["position"]]
+        if len(position) != 3:
+            raise ValueError("position must contain exactly three numbers")
+        if raw_id not in targets:
+            object_id = context["object_id"](raw_id)
+            data_ids = _transform_data_ids(domain, object_id, space)
+            if data_ids is None or data_ids["position"].is_null():
+                raise ValueError(f"Object has no {space} position data: " + raw_id)
+            layer = layers_viewer.layer(layers_viewer.layer_id_by_obj_id(object_id))
+            targets[raw_id] = (data_ids["position"], {int(key) for key in layer.key_frame_indices()})
+        if frame not in targets[raw_id][1]:
+            raise ValueError(f"{raw_id} has no key at frame {frame}; only existing keys are rewritten")
+        by_frame.setdefault(frame, []).append((raw_id, position))
+    node_names = ("Global Position", "Position") if space == "global" else ("Local Position", "Position")
+
+    def edit(model, update, scene_updater):
+        import numpy
+
+        editor = model.data_editor()
+        nodes = {}
+        for raw_id in targets:
+            nodes[raw_id] = None
+            for node_name in node_names:
+                try:
+                    node = update.get_object_by_id(context["object_id"](raw_id)).root_group().node_deep(node_name)
+                except Exception:
+                    node = None
+                if node is not None:
+                    nodes[raw_id] = node
+                    break
+        for frame in sorted(by_frame):
+            changed = set()
+            for raw_id, position in by_frame[frame]:
+                value = numpy.array(position, dtype=numpy.float32)
+                node = nodes[raw_id]
+                if node is not None:
+                    node.set_value(value, frame)
+                    changed.add(node.data_id())
+                else:
+                    data_id = targets[raw_id][0]
+                    editor.set_data_value(data_id, frame, value)
+                    changed.add(data_id)
+            scene_updater.run_update(changed, frame)
+
+    transact(domain.modify_update, "Cascadeur Complete: set position keys", edit)
+    refresh_interpolation(domain)
+    worst = 0.0
+    for frame, items in by_frame.items():
+        observed = {row["id"]: row for row in _read_transforms(domain, [raw for raw, _ in items], frame, space)}
+        for raw_id, position in items:
+            actual = observed[str(raw_id)]["position"]
+            error = max(abs(a - b) for a, b in zip(actual, position, strict=True))
+            worst = max(worst, error)
+            if error > 1e-2:
+                raise AssertionError(f"POSTCONDITION_FAILED: position differs for {raw_id} at frame {frame}")
+    return {
+        "space": space,
+        "write_count": len(writes),
+        "object_count": len(targets),
+        "frame_count": len(by_frame),
+        "max_position_error": worst,
+    }, []

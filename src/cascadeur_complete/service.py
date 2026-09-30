@@ -54,7 +54,10 @@ from .verification import LiveEvidenceStore
 # rig updates). The bridge verifies them inside its own request; the host
 # re-reads a sample in a separate request so an override is not reported as
 # success.
-SETTLED_ROTATION_OPERATIONS = frozenset({"animation.rotation_keys_set", "animation.transform_set"})
+SETTLED_ROTATION_OPERATIONS = frozenset(
+    {"animation.rotation_keys_set", "animation.transform_set", "animation.position_keys_set"}
+)
+SETTLED_POSITION_TOLERANCE = 0.05
 SETTLED_SAMPLE_LIMIT = 64
 # Cascadeur converts Euler input through float32; real overrides are tens of degrees.
 SETTLED_TOLERANCE_DEGREES = 0.2
@@ -80,6 +83,13 @@ def quaternion_angle_degrees(first: list[float], second: list[float]) -> float:
 
 def settled_rotation_samples(operation_name: str, arguments: dict[str, Any], frame: int | None) -> list[tuple]:
     """(object id, frame, expected wxyz) pairs to re-read after a rotation write."""
+    if operation_name == "animation.position_keys_set":
+        writes = list(arguments.get("writes") or [])
+        step = max(1, len(writes) // SETTLED_SAMPLE_LIMIT)
+        return [
+            (str(item["id"]), int(item["frame"]), [float(value) for value in item["position"]])
+            for item in writes[::step][:SETTLED_SAMPLE_LIMIT]
+        ]
     if operation_name == "animation.rotation_keys_set":
         writes = list(arguments.get("writes") or [])
         step = max(1, len(writes) // SETTLED_SAMPLE_LIMIT)
@@ -1270,7 +1280,7 @@ class CascadeurService:
                 if checked:
                     add_postconditions(
                         result,
-                        f"{checked} written rotation(s) re-read unchanged in a separate request",
+                        f"{checked} written value(s) re-read unchanged in a separate request",
                         "rotations_persist_after_update",
                     )
             if result.ok and record.feature_id == "blender_export":
@@ -1576,7 +1586,9 @@ class CascadeurService:
         samples = settled_rotation_samples(record.operation.name, dict(record.operation.arguments), frame)
         if not samples:
             return 0
-        space = str(record.operation.arguments.get("space", "local"))
+        is_position = record.operation.name == "animation.position_keys_set"
+        default_space = "global" if is_position else "local"
+        space = str(record.operation.arguments.get("space", default_space))
         time.sleep(0.3)
         by_frame: dict[int, list[tuple[str, list[float]]]] = {}
         for object_id, sample_frame, expected in samples:
@@ -1594,15 +1606,22 @@ class CascadeurService:
         rows = reread.result if len(operations) > 1 else [{"result": reread.result}]
         worst = (0.0, None, None)
         for (sample_frame, items), row in zip(sorted(by_frame.items()), rows, strict=True):
-            observed = {str(item["id"]): item["rotation"]["quaternion_wxyz"] for item in row["result"]}
-            for object_id, expected in items:
-                angle = quaternion_angle_degrees(expected, observed[object_id])
-                if angle > worst[0]:
-                    worst = (angle, object_id, sample_frame)
-        if worst[0] > SETTLED_TOLERANCE_DEGREES:
+            for item in row["result"]:
+                object_id = str(item["id"])
+                expected = dict(items).get(object_id)
+                if expected is None:
+                    continue
+                if is_position:
+                    error = max(abs(a - b) for a, b in zip(item["position"], expected, strict=True))
+                else:
+                    error = quaternion_angle_degrees(expected, item["rotation"]["quaternion_wxyz"])
+                if error > worst[0]:
+                    worst = (error, object_id, sample_frame)
+        tolerance, unit = (SETTLED_POSITION_TOLERANCE, "cm") if is_position else (SETTLED_TOLERANCE_DEGREES, "deg")
+        if worst[0] > tolerance:
             raise RuntimeError(
-                f"written rotation did not persist: {worst[1]} at frame {worst[2]} differs by {worst[0]:.2f} deg "
-                "after the update (AutoPosing or the rig re-solved it; deactivate AutoPosing first)"
+                f"written value did not persist: {worst[1]} at frame {worst[2]} differs by {worst[0]:.2f} {unit} "
+                "after the update (AutoPosing or the rig re-solved it)"
             )
         return len(samples)
 

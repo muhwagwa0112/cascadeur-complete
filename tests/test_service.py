@@ -168,10 +168,10 @@ def test_product_coverage_does_not_count_discovery_or_contract_only_rows(tmp_pat
     status = svc.capabilities(live=False)
     searched = svc.feature_search("", limit=500)
 
-    assert status["product_coverage"]["catalog_count"] == 230
+    assert status["product_coverage"]["catalog_count"] == 231
     # Only host-only contract features (feature search/describe) count without live evidence.
     assert status["product_coverage"]["supported"] == 2
-    assert status["product_coverage"]["support_percent"] == round(2 / 230 * 100, 2)
+    assert status["product_coverage"]["support_percent"] == round(2 / 231 * 100, 2)
     assert searched and all(item["truth_layer"] == "product" for item in searched)
 
 
@@ -817,3 +817,13 @@ def test_settled_rotation_samples_cover_bulk_and_single_writes():
     quarter_turn = euler_xyz_to_quaternion([0.0, 0.0, math.pi / 2])
     assert abs(quaternion_angle_degrees(quarter_turn, [1.0, 0.0, 0.0, 0.0]) - 90.0) < 1e-6
     assert quaternion_angle_degrees(quarter_turn, [-value for value in quarter_turn]) < 1e-6
+
+
+def test_settled_samples_cover_position_writes():
+    from cascadeur_complete.service import SETTLED_ROTATION_OPERATIONS, settled_rotation_samples
+
+    assert "animation.position_keys_set" in SETTLED_ROTATION_OPERATIONS
+    writes = [{"id": "p", "frame": 3, "position": [1, 2, 3]}]
+    assert settled_rotation_samples("animation.position_keys_set", {"writes": writes}, None) == [
+        ("p", 3, [1.0, 2.0, 3.0])
+    ]

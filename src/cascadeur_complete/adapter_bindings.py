@@ -143,6 +143,12 @@ BINDINGS: tuple[AdapterBinding, ...] = (
     _b("dialog_probe", "system.dialog_probe", ("probe_dialog_shown",), arguments={"token": "string echoed back"}),
     _b("interpolation_refresh", "animation.interpolation_refresh", ("interpolation_refreshed",)),
     _b(
+        "position_keys",
+        "animation.position_keys_set",
+        ("position_keys_equal_request",),
+        arguments={"writes": "[{id, frame (existing key), position}]", "space": "global|local (default global)"},
+    ),
+    _b(
         "rotation_keys",
         "animation.rotation_keys_set",
         ("rotation_keys_equal_request",),
