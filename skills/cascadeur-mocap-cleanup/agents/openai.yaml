@@ -1,0 +1,13 @@
+interface:
+  display_name: "Cascadeur Mocap Cleanup"
+  short_description: "Measure and clean imported mocap: physics, fingers and foot sliding in one pass"
+  default_prompt: "Use $cascadeur-mocap-cleanup to measure, clean up and verify this mocap clip in Cascadeur."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "cascadeur-complete"
+      description: "Local Cascadeur 2026.1.x control and verification server"
+
+policy:
+  allow_implicit_invocation: true

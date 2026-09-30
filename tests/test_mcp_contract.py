@@ -59,6 +59,8 @@ async def test_mcp_lists_expected_tools_and_resources():
             "ballistic_create_prepare",
             "selection_edit",
             "object_delete_prepare",
+            "motion_cleanup_analyze",
+            "motion_cleanup_prepare",
         } <= names
         assert {
             "tool_call",

@@ -15,8 +15,11 @@ classifiers = [
 ]
 dependencies = [
   "mcp>=2.0.0,<3",
+  "numpy>=2.2,<3",
+  "osqp>=1.0,<2",
   "pydantic>=2.12,<3",
   "pywinauto==0.6.9",
+  "scipy>=1.15,<2",
 ]
 
 [project.urls]

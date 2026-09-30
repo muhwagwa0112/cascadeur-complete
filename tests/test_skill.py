@@ -22,7 +22,7 @@ def test_skill_catalog_covers_every_public_mcp_tool():
     contract = module.public_mcp_tools(ROOT / "src" / "cascadeur_complete" / "server.py")
     catalog = module.catalog_tools(SKILL / "references" / "tool-routing.md")
 
-    assert len(contract) == 73
+    assert len(contract) == 75
     assert catalog == contract
 
 
@@ -43,3 +43,16 @@ def test_adapter_feature_reference_matches_bindings():
     spec.loader.exec_module(module)
 
     assert module.TARGET.read_text(encoding="utf-8") == module.render()
+
+
+def test_mocap_cleanup_skill_links_resolve_and_name_the_cleanup_tools():
+    skill = ROOT / "skills" / "cascadeur-mocap-cleanup"
+    entrypoint = (skill / "SKILL.md").read_text(encoding="utf-8")
+    assert entrypoint.startswith("---\nname: cascadeur-mocap-cleanup\n")
+    local_links = re.findall(r"\]\((references/[^)]+)\)", entrypoint)
+    assert len(local_links) >= 5
+    assert all((skill / link).is_file() for link in local_links)
+    contract = _coverage_module().public_mcp_tools(ROOT / "src" / "cascadeur_complete" / "server.py")
+    text = "".join(path.read_text(encoding="utf-8") for path in (skill / "references").glob("*.md"))
+    for tool in ("motion_cleanup_analyze", "motion_cleanup_prepare", "change_commit", "key_reduction_prepare"):
+        assert tool in contract and tool in text

@@ -1499,6 +1499,81 @@ def redo(expected_revision: str, scene_id: str | None = None, expect_change: boo
     )
 
 
+def _cleanup_error(exc: Exception) -> dict[str, Any]:
+    from .cleanup_workflow import CleanupError
+
+    code = ErrorCode.INVALID_REQUEST if isinstance(exc, CleanupError) else ErrorCode.DEPENDENCY_MISSING
+    return {"ok": False, "error_code": code, "error_message": str(exc)}
+
+
+def _segments(segments: list[list[int]] | None) -> list[tuple[int, int]] | None:
+    return [(int(item[0]), int(item[1])) for item in segments] if segments else None
+
+
+@mcp.tool()
+def motion_cleanup_analyze(
+    checks: list[Literal["feet", "fingers"]] | None = None,
+    object_ids: list[str] | None = None,
+    segments: list[list[int]] | None = None,
+    spike_deg: float = 10.0,
+) -> dict[str, Any]:
+    """Measure a mocap clip over every frame: foot skating (cm/frame), slides, drags, finger spread/spikes.
+
+    Read-only. Samples the active scene's Quick Rigging Tool character (pass
+    object_ids to restrict to one character). segments are [first, last]
+    frame pairs to report separately. Takes ~1-2 minutes for 1000 frames.
+    """
+    from .cleanup_workflow import CleanupWorkflow
+
+    wanted = checks or ["feet", "fingers"]
+    try:
+        workflow = CleanupWorkflow(service())
+        result: dict[str, Any] = {"ok": True}
+        if "feet" in wanted:
+            result["feet"] = workflow.analyze_feet(object_ids, _segments(segments))
+        if "fingers" in wanted:
+            result["fingers"] = workflow.analyze_fingers(object_ids, spike_deg)
+        result["scene_id"] = workflow.scene_id
+        return result
+    except (RuntimeError, ImportError) as exc:
+        return _cleanup_error(exc)
+
+
+@mcp.tool()
+def motion_cleanup_prepare(
+    kind: Literal["foot_contacts", "fingers"],
+    object_ids: list[str] | None = None,
+    steps: bool = True,
+    max_foot_offset_cm: float = 10.0,
+    body_smoothness: float = 2.0,
+    joints: list[str] | None = None,
+    spike_deg: float = 10.0,
+    segments: list[list[int]] | None = None,
+    ttl: float = 900,
+) -> dict[str, Any]:
+    """Snapshot and prepare a whole-clip cleanup as one protected key write; commit with change_commit.
+
+    foot_contacts: one global solve over every frame for a whole-body offset
+    and per-foot offsets that stop planted feet sliding, keeping legs within
+    their original reach; with steps=true, remaining one-foot drags become
+    short steps. fingers: soft-limit knuckle spread/twist and remove spikes,
+    keeping curl (switch AutoPosing off for the finger controllers first).
+    Writes only existing keys. The result carries predicted before/after
+    metrics under "cleanup". Commit with a long timeout (e.g. 900 s).
+    """
+    from .cleanup_workflow import CleanupWorkflow
+    from .motion_cleanup import ContactParams
+
+    try:
+        workflow = CleanupWorkflow(service())
+        if kind == "foot_contacts":
+            params = ContactParams(max_foot_offset=max_foot_offset_cm, body_smoothness=body_smoothness)
+            return workflow.prepare_feet(object_ids, params, steps, _segments(segments), ttl)
+        return workflow.prepare_fingers(object_ids, joints, spike_deg, ttl)
+    except (RuntimeError, ImportError) as exc:
+        return _cleanup_error(exc)
+
+
 def main() -> None:
     mcp.run(transport="stdio")
 

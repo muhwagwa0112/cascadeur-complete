@@ -254,7 +254,7 @@ def rotation_from_euler_xyz(csc, euler):
     return csc.math.Rotation.from_quaternion(quaternion)
 
 
-MAX_ROTATION_KEY_WRITES = 20000
+MAX_ROTATION_KEY_WRITES = 60000
 
 
 @handler("animation.rotation_keys_set", postconditions=("rotation_keys_equal_request",))

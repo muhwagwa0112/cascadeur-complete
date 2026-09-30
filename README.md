@@ -43,6 +43,23 @@ limitations, and [the support status](docs/SUPPORT_STATUS.md) for the per-featur
 result of the latest live validation run. The generated feature registry remains the runtime source of
 truth; neither tool count nor discovered Python symbols imply support.
 
+## Mocap cleanup
+
+`motion_cleanup_analyze` samples every frame of the active character and reports
+foot skating (cm/frame), slides, drags and finger spread/spikes.
+`motion_cleanup_prepare` turns one whole-clip solve into a single protected key
+write (commit it with `change_commit`):
+
+- `foot_contacts`: one quadratic program over all frames finds a whole-body offset
+  and per-foot offsets that stop planted feet sliding while keeping each leg within
+  its original reach; leftover one-foot drags become short steps.
+- `fingers`: soft-limits knuckle spread/twist and removes spikes while keeping curl.
+
+On a 986-frame clip this took mean foot skating from 0.98 to 0.34 cm/frame with no
+remaining slides or drags. The [`cascadeur-mocap-cleanup`](skills/cascadeur-mocap-cleanup/SKILL.md)
+skill documents the full pipeline (key reduction, splines, AutoPhysics, fingers,
+feet) and the pitfalls behind it.
+
 ## Install an official release
 
 1. Download the signed installer, SHA-256 manifest, SBOM, and provenance from the

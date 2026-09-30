@@ -1,6 +1,6 @@
 # Public MCP Tool Routing
 
-This catalog mirrors the 73 production tools in the `cascadeur-complete` MCP contract. Prefer the most specific tool in the relevant row. Capability and scene state still determine whether a listed tool can execute. Generic csc/tool/Python execution, runtime tool introspection, and arbitrary settings reads are compiled out of release builds.
+This catalog mirrors the 75 production tools in the `cascadeur-complete` MCP contract. Prefer the most specific tool in the relevant row. Capability and scene state still determine whether a listed tool can execute. Generic csc/tool/Python execution, runtime tool introspection, and arbitrary settings reads are compiled out of release builds.
 
 <!-- MCP-TOOLS-START -->
 
@@ -15,6 +15,7 @@ This catalog mirrors the 73 production tools in the `cascadeur-complete` MCP con
 | Timeline and animation | Playhead, transforms, layers, keys, curves, and interval selection | `timeline_set_frame`, `timeline_get`, `transform_edit`, `layer_list`, `layer_write`, `key_edit`, `animation_curve`, `timeline_select_interval` |
 | Camera and render | Camera/view state, protected camera/light creation, file output | `viewport_camera`, `render_object_create_prepare`, `render_output` |
 | Generation and editing | AutoPosing, prerequisites, Root Motion, Inbetweening, Unbaking, key reduction, mirror, cycles | `auto_posing`, `generation_state`, `root_motion_prepare`, `inbetweening_prepare`, `animation_unbaking_prepare`, `key_reduction_prepare`, `mirror_prepare`, `cycle_list` |
+| Mocap cleanup | Whole-clip foot-skate/finger measurement and one-shot contact or finger correction (protected key write) | `motion_cleanup_analyze`, `motion_cleanup_prepare` |
 | Physics and rig inspection | AutoPhysics readiness, physics/rig inventory, valid constraint drivers | `auto_physics_state`, `physics_state`, `rig_state`, `constraint_driver_catalog` |
 | Rig construction | Mass, Joint/RigInfo, IK, manual rig elements, extra controllers, Spline IK, twist | `rigid_body_mass_prepare`, `joint_create_prepare`, `rig_info_create_prepare`, `ik_chain_create_prepare`, `rig_elements_create_prepare`, `additional_point_controller_prepare`, `additional_box_controller_prepare`, `spline_ik_create_prepare`, `twist_prepare` |
 | Physics construction | CoM, collisions, constraints, ballistics, AutoPhysics enable/snap | `center_of_mass_prepare`, `collision_create_prepare`, `collision_delete_prepare`, `transform_constraint_prepare`, `point_constraint_prepare`, `ballistic_create_prepare`, `auto_physics_enable`, `auto_physics_snap` |
