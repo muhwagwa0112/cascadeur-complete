@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -49,6 +50,50 @@ from .verification import LiveEvidenceStore
 
 # View toggles only change what Cascadeur draws; the host proves the effect by
 # comparing captures of the Cascadeur window before and after the action.
+# Writes whose values Cascadeur may re-solve after the transaction (AutoPosing,
+# rig updates). The bridge verifies them inside its own request; the host
+# re-reads a sample in a separate request so an override is not reported as
+# success.
+SETTLED_ROTATION_OPERATIONS = frozenset({"animation.rotation_keys_set", "animation.transform_set"})
+SETTLED_SAMPLE_LIMIT = 64
+SETTLED_TOLERANCE_DEGREES = 0.05
+
+
+def euler_xyz_to_quaternion(euler: list[float]) -> list[float]:
+    """Cascadeur's rotation_euler_xyz_radians (extrinsic x, y, z) as wxyz."""
+    half = [value / 2.0 for value in euler]
+    cx, cy, cz = (math.cos(value) for value in half)
+    sx, sy, sz = (math.sin(value) for value in half)
+    return [
+        cx * cy * cz + sx * sy * sz,
+        sx * cy * cz - cx * sy * sz,
+        cx * sy * cz + sx * cy * sz,
+        cx * cy * sz - sx * sy * cz,
+    ]
+
+
+def quaternion_angle_degrees(first: list[float], second: list[float]) -> float:
+    dot = min(1.0, abs(sum(a * b for a, b in zip(first, second, strict=True))))
+    return math.degrees(2.0 * math.acos(dot))
+
+
+def settled_rotation_samples(operation_name: str, arguments: dict[str, Any], frame: int | None) -> list[tuple]:
+    """(object id, frame, expected wxyz) pairs to re-read after a rotation write."""
+    if operation_name == "animation.rotation_keys_set":
+        writes = list(arguments.get("writes") or [])
+        step = max(1, len(writes) // SETTLED_SAMPLE_LIMIT)
+        return [
+            (str(item["id"]), int(item["frame"]), euler_xyz_to_quaternion(item["rotation_euler_xyz_radians"]))
+            for item in writes[::step][:SETTLED_SAMPLE_LIMIT]
+        ]
+    euler = arguments.get("rotation_euler_xyz_radians")
+    ids = [str(item) for item in arguments.get("ids") or []]
+    if euler is None or not ids or frame is None:
+        return []
+    expected = euler_xyz_to_quaternion([float(value) for value in euler])
+    return [(object_id, int(arguments.get("frame", frame)), expected) for object_id in ids[:SETTLED_SAMPLE_LIMIT]]
+
+
 VIEW_OPERATIONS = frozenset(
     {
         "view.silhouette",
@@ -1219,6 +1264,14 @@ class CascadeurService:
                 result = self._wait_for_open_scene(result, str(working_path), timeout)
             if result.ok and record.operation.name == "physics.auto_snap":
                 result = self._complete_auto_physics_snap(result, timeout)
+            if result.ok and record.operation.name in SETTLED_ROTATION_OPERATIONS:
+                checked = self._verify_settled_rotations(record, result)
+                if checked:
+                    add_postconditions(
+                        result,
+                        f"{checked} written rotation(s) re-read unchanged in a separate request",
+                        "rotations_persist_after_update",
+                    )
             if result.ok and record.feature_id == "blender_export":
                 report = verify_blender_fbx(str(record.operation.arguments["path"]))
                 if report["armatures"] < 1 or not report["actions"]:
@@ -1515,6 +1568,42 @@ class CascadeurService:
             )
             failed.evidence.extend(restored.evidence)
         return failed
+
+    def _verify_settled_rotations(self, record, result: ResultEnvelope) -> int:
+        payload = result.result if isinstance(result.result, dict) else {}
+        frame = payload.get("frame") if isinstance(payload, dict) else None
+        samples = settled_rotation_samples(record.operation.name, dict(record.operation.arguments), frame)
+        if not samples:
+            return 0
+        space = str(record.operation.arguments.get("space", "local"))
+        time.sleep(0.3)
+        by_frame: dict[int, list[tuple[str, list[float]]]] = {}
+        for object_id, sample_frame, expected in samples:
+            by_frame.setdefault(sample_frame, []).append((object_id, expected))
+        operations = [
+            Operation(
+                name="animation.transform_get",
+                arguments={"ids": [item[0] for item in items], "frame": sample_frame, "space": space},
+            )
+            for sample_frame, items in sorted(by_frame.items())
+        ]
+        reread = self.client.execute("transform_get", operations, timeout=120)
+        if not reread.ok:
+            raise RuntimeError(f"settled read-back failed: {reread.error_code}: {reread.error_message}")
+        rows = reread.result if len(operations) > 1 else [{"result": reread.result}]
+        worst = (0.0, None, None)
+        for (sample_frame, items), row in zip(sorted(by_frame.items()), rows, strict=True):
+            observed = {str(item["id"]): item["rotation"]["quaternion_wxyz"] for item in row["result"]}
+            for object_id, expected in items:
+                angle = quaternion_angle_degrees(expected, observed[object_id])
+                if angle > worst[0]:
+                    worst = (angle, object_id, sample_frame)
+        if worst[0] > SETTLED_TOLERANCE_DEGREES:
+            raise RuntimeError(
+                f"written rotation did not persist: {worst[1]} at frame {worst[2]} differs by {worst[0]:.2f} deg "
+                "after the update (AutoPosing or the rig re-solved it; deactivate AutoPosing first)"
+            )
+        return len(samples)
 
     def _complete_auto_physics_snap(self, initial: ResultEnvelope, timeout: float) -> ResultEnvelope:
         payload = dict(initial.result) if isinstance(initial.result, dict) else {}

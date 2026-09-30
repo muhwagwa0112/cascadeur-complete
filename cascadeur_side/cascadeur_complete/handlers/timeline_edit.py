@@ -349,6 +349,9 @@ def interpolation_range(scene, arguments, _request, context):
                 editor.change_section(frame, layer_id, apply)
 
     transact(domain.modify, "Cascadeur Complete: set interpolation " + expected, edit)
+    from .animation import refresh_interpolation
+
+    refresh_interpolation(domain)
     observed = {
         context["id_string"](layer_id): _interpolation_rows(
             domain, layer_id, touched[context["id_string"](layer_id)], context

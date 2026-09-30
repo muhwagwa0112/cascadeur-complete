@@ -235,3 +235,123 @@ def key_reduce(scene, arguments, _request, context):
         "removed_count": sum(len(items) for items in removed.values()),
         "execution": "commands.animation_scripts.keyframe_reduction verified direct implementation",
     }, []
+
+
+MAX_ROTATION_KEY_WRITES = 20000
+
+
+@handler("animation.rotation_keys_set", postconditions=("rotation_keys_equal_request",))
+def rotation_keys_set(scene, arguments, _request, context):
+    """Rewrite rotations (local or global) at existing keys for many objects in one transaction.
+
+    Pose polish (e.g. limiting mocap finger spread) touches thousands of
+    (controller, key) pairs; one protected transform_set per pair is
+    impractical. Only existing keys on each object's own layer are rewritten,
+    so the key structure and interpolation are unchanged. Every write is read
+    back and must match the requested rotation.
+    """
+    from ..runtime import _quaternion_list, _read_transforms, _transform_data_ids
+
+    csc = context["csc"]
+    domain = context["domain_scene"](scene)
+    writes = list(arguments.get("writes") or [])
+    space = str(arguments.get("space", "local"))
+    if space not in ("local", "global"):
+        raise ValueError("space must be local or global")
+    if not writes:
+        raise ValueError("writes must be a non-empty list of {id, frame, rotation_euler_xyz_radians}")
+    if len(writes) > MAX_ROTATION_KEY_WRITES:
+        raise ValueError(f"At most {MAX_ROTATION_KEY_WRITES} writes per call")
+    layers_viewer = domain.layers_viewer()
+    targets = {}
+    by_frame = {}
+    for item in writes:
+        raw_id = str(item["id"])
+        frame = int(item["frame"])
+        euler = [float(value) for value in item["rotation_euler_xyz_radians"]]
+        if len(euler) != 3:
+            raise ValueError("rotation_euler_xyz_radians must contain exactly three numbers")
+        if raw_id not in targets:
+            object_id = context["object_id"](raw_id)
+            data_ids = _transform_data_ids(domain, object_id, space)
+            if data_ids is None or data_ids["rotation"].is_null():
+                raise ValueError(f"Object has no {space} rotation data: " + raw_id)
+            layer = layers_viewer.layer(layers_viewer.layer_id_by_obj_id(object_id))
+            targets[raw_id] = (data_ids["rotation"], {int(key) for key in layer.key_frame_indices()})
+        if frame not in targets[raw_id][1]:
+            raise ValueError(f"{raw_id} has no key at frame {frame}; only existing keys are rewritten")
+        by_frame.setdefault(frame, []).append((raw_id, euler))
+
+    node_name = "Local Rotation" if space == "local" else "Global Rotation"
+
+    def edit(model, update, scene_updater):
+        # Write through the object's update-graph node, as Cascadeur's own
+        # animation tools (ml/editable_animation.py) do; fall back to the
+        # Transform data. Whether a rig re-solves the value afterwards is
+        # checked by the host's settled read-back, not here.
+        editor = model.data_editor()
+        nodes = {}
+        for raw_id in targets:
+            node = None
+            try:
+                node = update.get_object_by_id(context["object_id"](raw_id)).root_group().node_deep(node_name)
+            except Exception:
+                node = None
+            nodes[raw_id] = node
+        for frame in sorted(by_frame):
+            changed = set()
+            for raw_id, euler in by_frame[frame]:
+                rotation = csc.math.Rotation.from_euler(*euler)
+                node = nodes[raw_id]
+                if node is not None:
+                    node.set_value(rotation, frame)
+                    changed.add(node.data_id())
+                else:
+                    data_id = targets[raw_id][0]
+                    editor.set_data_value(data_id, frame, rotation)
+                    changed.add(data_id)
+            scene_updater.run_update(changed, frame)
+
+    transact(domain.modify_update, "Cascadeur Complete: set rotation keys", edit)
+    refresh_interpolation(domain)
+    worst = 0.0
+    for frame, items in by_frame.items():
+        observed = {row["id"]: row for row in _read_transforms(domain, [raw for raw, _ in items], frame, space)}
+        for raw_id, euler in items:
+            expected = _quaternion_list(csc.math.Rotation.from_euler(*euler))
+            actual = observed[str(raw_id)]["rotation"]["quaternion_wxyz"]
+            error = abs(1.0 - abs(sum(a * b for a, b in zip(expected, actual, strict=True))))
+            worst = max(worst, error)
+            if error > 1e-4:
+                raise AssertionError(f"POSTCONDITION_FAILED: rotation differs for {raw_id} at frame {frame}")
+    return {
+        "space": space,
+        "write_count": len(writes),
+        "object_count": len(targets),
+        "frame_count": len(by_frame),
+        "max_quaternion_error": worst,
+    }, []
+
+
+def refresh_interpolation(domain):
+    """Recompute interpolated frames for the whole timeline.
+
+    Cascadeur only re-interpolates from frame 0 up to the playhead after an
+    edit, so frames past it keep stale values until the playhead reaches them.
+    """
+
+    def refresh(_model, _update, scene_updater):
+        interpolator = scene_updater.get_interpolator()
+        interpolator.reload()
+        interpolator.interpolate()
+
+    transact(domain.modify_update, "Cascadeur Complete: refresh interpolation", refresh)
+
+
+@handler("animation.interpolation_refresh", postconditions=("interpolation_refreshed",))
+def interpolation_refresh(scene, _arguments, _request, context):
+    import time
+
+    started = time.monotonic()
+    refresh_interpolation(context["domain_scene"](scene))
+    return {"duration_ms": int((time.monotonic() - started) * 1000)}, []

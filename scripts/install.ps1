@@ -133,6 +133,26 @@ try {
     if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
 }
 
+# Snapshots (rollback points and working clones) and live evidence belong to the
+# user's history, not to a runtime version. The old runtime was moved into the
+# backup above, so carry them over only now: a failed install removes the new
+# runtime directory and must never take snapshots with it.
+$PreviousRuntime = Join-Path $BackupRoot 'runtime'
+$PreviousSnapshots = Join-Path $PreviousRuntime 'snapshots'
+if (Test-Path -LiteralPath $PreviousSnapshots) {
+    $NewSnapshots = Join-Path $RuntimeRoot 'snapshots'
+    New-Item -ItemType Directory -Path $NewSnapshots -Force | Out-Null
+    Get-ChildItem -LiteralPath $PreviousSnapshots -File | ForEach-Object {
+        $destination = Join-Path $NewSnapshots $_.Name
+        if (-not (Test-Path -LiteralPath $destination)) { Move-Item -LiteralPath $_.FullName -Destination $destination }
+    }
+}
+$PreviousEvidence = Join-Path $PreviousRuntime 'state\live_evidence.json'
+$NewEvidence = Join-Path $RuntimeRoot 'state\live_evidence.json'
+if ((Test-Path -LiteralPath $PreviousEvidence) -and -not (Test-Path -LiteralPath $NewEvidence)) {
+    Copy-Item -LiteralPath $PreviousEvidence -Destination $NewEvidence
+}
+
 [pscustomobject]@{
     Runtime = $RuntimeRoot
     Bridge = $BridgeRoot

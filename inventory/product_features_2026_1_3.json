@@ -2749,6 +2749,168 @@
       }
     },
     {
+      "id": "auto_posing_state",
+      "family": "generation",
+      "name": "AutoPosing state",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "generation.auto_posing_state",
+      "action": "generation.auto_posing_state",
+      "operation": "generation.auto_posing_state",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "auto_posing_state_dispatched"
+      ],
+      "adapter_id": "cascadeur_2026_1.generation.auto_posing_state",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[auto_posing_state]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "state": "active|inactive",
+        "ids": "controller object IDs"
+      },
+      "fixed_arguments": {}
+    },
+    {
+      "id": "close_working_tabs",
+      "family": "scene",
+      "name": "Close working tabs",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "scene.close_working_tabs",
+      "action": "scene.close_working_tabs",
+      "operation": "scene.close_working_tabs",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "working_tabs_closed"
+      ],
+      "adapter_id": "cascadeur_2026_1.scene.close_working_tabs",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[close_working_tabs]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {}
+    },
+    {
+      "id": "dialog_probe",
+      "family": "system",
+      "name": "Dialog probe",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "system.dialog_probe",
+      "action": "system.dialog_probe",
+      "operation": "system.dialog_probe",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "probe_dialog_shown"
+      ],
+      "adapter_id": "cascadeur_2026_1.system.dialog_probe",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[dialog_probe]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "token": "string echoed back"
+      },
+      "fixed_arguments": {}
+    },
+    {
+      "id": "interpolation_refresh",
+      "family": "animation",
+      "name": "Interpolation refresh",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.interpolation_refresh",
+      "action": "animation.interpolation_refresh",
+      "operation": "animation.interpolation_refresh",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "interpolation_refreshed"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.interpolation_refresh",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[interpolation_refresh]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {},
+      "fixed_arguments": {}
+    },
+    {
+      "id": "rotation_keys",
+      "family": "animation",
+      "name": "Rotation keys",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.rotation_keys_set",
+      "action": "animation.rotation_keys_set",
+      "operation": "animation.rotation_keys_set",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "rotation_keys_equal_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.rotation_keys_set",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[rotation_keys]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "writes": "[{id, frame (existing key), rotation_euler_xyz_radians (local)}]"
+      },
+      "fixed_arguments": {}
+    },
+    {
       "id": "interpolation_range",
       "family": "animation",
       "name": "Interpolation range",

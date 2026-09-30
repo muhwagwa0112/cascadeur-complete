@@ -21,7 +21,12 @@ if ($checks.CodexAvailable) {
     $checks.CodexRegistered = [bool](& codex mcp list 2>$null | Select-String -SimpleMatch 'cascadeur-complete')
 }
 $required = @('RuntimeExists', 'ExecutableExists', 'BridgeRuntimeExists', 'BridgeCommandExists')
-if ($checks.CodexAvailable) { $required += 'CodexRegistered' }
+# Codex registration is required only when the installer performed it; installs
+# made with -SkipCodexRegistration serve other MCP clients.
+$ownershipPath = Join-Path $RuntimeRoot 'state\install-ownership.json'
+$registeredByInstaller = (Test-Path -LiteralPath $ownershipPath) -and
+    [bool](Get-Content -LiteralPath $ownershipPath -Raw | ConvertFrom-Json).codex_registered_by_installer
+if ($checks.CodexAvailable -and $registeredByInstaller) { $required += 'CodexRegistered' }
 if (-not ($required | Where-Object { -not $checks[$_] })) {
     $output = & (Join-Path $RuntimeRoot '.venv\Scripts\python.exe') (Join-Path $PSScriptRoot 'mcp-smoke.py') --server $Executable --timeout 30 2>&1
     $checks.McpSmoke = $LASTEXITCODE -eq 0

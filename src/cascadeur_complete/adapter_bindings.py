@@ -134,6 +134,21 @@ BINDINGS: tuple[AdapterBinding, ...] = (
         arguments=LAYER_INTERVAL,
     ),
     _b(
+        "auto_posing_state",
+        "generation.auto_posing_state",
+        ("auto_posing_state_dispatched",),
+        arguments={"state": "active|inactive", "ids": "controller object IDs"},
+    ),
+    _b("close_working_tabs", "scene.close_working_tabs", ("working_tabs_closed",)),
+    _b("dialog_probe", "system.dialog_probe", ("probe_dialog_shown",), arguments={"token": "string echoed back"}),
+    _b("interpolation_refresh", "animation.interpolation_refresh", ("interpolation_refreshed",)),
+    _b(
+        "rotation_keys",
+        "animation.rotation_keys_set",
+        ("rotation_keys_equal_request",),
+        arguments={"writes": "[{id, frame (existing key), rotation_euler_xyz_radians (local)}]"},
+    ),
+    _b(
         "interpolation_range",
         "timeline.interpolation_range",
         ("interval_interpolation_equals_request",),

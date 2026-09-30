@@ -168,10 +168,10 @@ def test_product_coverage_does_not_count_discovery_or_contract_only_rows(tmp_pat
     status = svc.capabilities(live=False)
     searched = svc.feature_search("", limit=500)
 
-    assert status["product_coverage"]["catalog_count"] == 225
+    assert status["product_coverage"]["catalog_count"] == 230
     # Only host-only contract features (feature search/describe) count without live evidence.
     assert status["product_coverage"]["supported"] == 2
-    assert status["product_coverage"]["support_percent"] == round(2 / 225 * 100, 2)
+    assert status["product_coverage"]["support_percent"] == round(2 / 230 * 100, 2)
     assert searched and all(item["truth_layer"] == "product" for item in searched)
 
 
@@ -791,3 +791,29 @@ def test_ui_flow_cannot_dispatch_an_unregistered_action(tmp_path):
 
     assert refused["ok"] is False
     assert refused["error_code"] == "INVALID_REQUEST"
+
+
+def test_settled_rotation_samples_cover_bulk_and_single_writes():
+    import math
+
+    from cascadeur_complete.service import (
+        SETTLED_SAMPLE_LIMIT,
+        euler_xyz_to_quaternion,
+        quaternion_angle_degrees,
+        settled_rotation_samples,
+    )
+
+    writes = [{"id": f"id{n}", "frame": n * 3, "rotation_euler_xyz_radians": [0.1, 0.2, 0.3]} for n in range(500)]
+    bulk = settled_rotation_samples("animation.rotation_keys_set", {"writes": writes}, None)
+    assert 0 < len(bulk) <= SETTLED_SAMPLE_LIMIT
+    assert bulk[0][0] == "id0" and bulk[0][1] == 0
+
+    single = settled_rotation_samples(
+        "animation.transform_set", {"ids": ["a", "b"], "rotation_euler_xyz_radians": [0.0, 0.0, 0.5]}, 12
+    )
+    assert [(item[0], item[1]) for item in single] == [("a", 12), ("b", 12)]
+    assert settled_rotation_samples("animation.transform_set", {"ids": ["a"], "position": [0, 0, 0]}, 12) == []
+
+    quarter_turn = euler_xyz_to_quaternion([0.0, 0.0, math.pi / 2])
+    assert abs(quaternion_angle_degrees(quarter_turn, [1.0, 0.0, 0.0, 0.0]) - 90.0) < 1e-6
+    assert quaternion_angle_degrees(quarter_turn, [-value for value in quarter_turn]) < 1e-6

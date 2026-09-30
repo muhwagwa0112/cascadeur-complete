@@ -199,3 +199,37 @@ def retargeting(scene, arguments, _request, context):
         "target_objects": len(target_objects),
         "changed_frames": len(changed),
     }, []
+
+
+@handler("generation.auto_posing_state", postconditions=("auto_posing_state_dispatched",))
+def auto_posing_state(scene, arguments, _request, context):
+    """Activate or deactivate AutoPosing for explicit controllers.
+
+    Controllers with an AutoPosingLink (e.g. Quick Rig fingers) are re-solved
+    by AutoPosing after every change, which silently replaces keyed values
+    written through the data editor. Deactivating them keeps such edits;
+    activating hands them back to the solver. Cascadeur exposes no getter for
+    the per-object state, so persistence of later edits is verified by the
+    host's settled read-back instead.
+    """
+    state = str(arguments.get("state", ""))
+    if state not in ("active", "inactive"):
+        raise ValueError("state must be active or inactive")
+    raw_ids = [str(item) for item in arguments.get("ids") or []]
+    if not raw_ids:
+        raise ValueError("ids must list the controllers to (de)activate")
+    view_scene = context["scene_view"]()
+    if view_scene is None:
+        raise RuntimeError("No application scene is available")
+    domain = context["domain_scene"](scene)
+    object_ids = {context["object_id"](raw_id) for raw_id in raw_ids}
+    editor = context["csc"].app.get_application().get_tools_manager().get_tool("AutoPosingTool").editor(view_scene)
+    if editor is None:
+        raise RuntimeError("AutoPosing editor is unavailable for the current scene")
+    method = getattr(editor, "activate" if state == "active" else "deactivate")
+
+    def apply(_model, _update, _scene, session):
+        method(session, object_ids)
+
+    transact(domain.modify_with_session, "Cascadeur Complete: AutoPosing " + state, apply)
+    return {"state": state, "ids": sorted(raw_ids)}, []

@@ -1081,7 +1081,18 @@ def _run_operation(scene, operation, request):
             ids = [_id_string(item) for item in domain.selector().selected().ids]
         if not ids:
             raise ValueError("transform_get requires ids or a non-empty selection")
-        return _read_transforms(domain, ids, frame, str(args.get("space", "local"))), []
+        warnings = []
+        if bool(args.get("refresh", False)):
+            from .handlers.animation import refresh_interpolation
+
+            refresh_interpolation(domain)
+        elif frame > int(domain.get_current_frame(False)):
+            # Cascadeur re-interpolates only up to the playhead after an edit.
+            warnings.append(
+                f"frame {frame} is past the playhead; values may predate the latest edit "
+                "(pass refresh=true or run interpolation_refresh)"
+            )
+        return _read_transforms(domain, ids, frame, str(args.get("space", "local"))), warnings
     if name == "animation.transform_set":
         domain = _domain_scene(scene)
         current_frame = int(domain.get_current_frame(False))

@@ -641,8 +641,13 @@ def transform_edit(
     scale: list[float] | None = None,
     scene_id: str | None = None,
     expected_revision: str | None = None,
+    refresh: bool = False,
 ) -> dict[str, Any]:
-    """Read or write position, Euler rotation (radians), and local scale for explicit or selected objects."""
+    """Read or write position, Euler rotation (radians), and local scale for explicit or selected objects.
+
+    Cascadeur re-interpolates only up to the playhead after an edit; reads past it
+    carry a warning. Pass refresh=true to recompute the whole timeline first.
+    """
     if action == "set" and all(value is None for value in (position, rotation_euler_xyz_radians, scale)):
         return {
             "ok": False,
@@ -650,6 +655,8 @@ def transform_edit(
             "error_message": "set requires at least one transform component",
         }
     arguments: dict[str, Any] = {"ids": ids or [], "space": space}
+    if refresh and action == "get":
+        arguments["refresh"] = True
     if frame is not None:
         arguments["frame"] = frame
     if position is not None:

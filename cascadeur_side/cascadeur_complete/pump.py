@@ -280,6 +280,11 @@ def _inside_cascadeur(kernel32):
     return os.path.basename(buffer.value).casefold() == "cascadeur.exe"
 
 
+def draining():
+    """True while the pump (not a menu command) is executing requests."""
+    return bool(_state["busy"])
+
+
 def status():
     return {key: _state[key] for key in ("hwnd", "thread_id", "busy", "processed", "last_error")}
 

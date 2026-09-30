@@ -36,8 +36,10 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | `cycle` | Cycle | `timeline.cycle` | `layer_ids`: layer GUIDs (default: all), `first_frame`: int, `last_frame`: int | `action=create` | `cycle_present` |
 | `graph_edit` | Graph edit | `animation.section_edit` | `layer_id`: layer GUID, `frame`: key frame, `interpolation`: optional Interpolation name, `tangents`: optional Tangents name, `ik_fk`: optional IK\|FK, `fixation`: optional Free\|Fulcrum | — | `section_equals_request` |
 | `interpolation_range` | Interpolation range | `timeline.interpolation_range` | `layer_ids`: layer GUIDs (default: all), `first_frame`: int, `last_frame`: int, `interpolation`: Interpolation name (e.g. CLAMPED_BEZIER, LINEAR) | — | `interval_interpolation_equals_request` |
+| `interpolation_refresh` | Interpolation refresh | `animation.interpolation_refresh` | — | — | `interpolation_refreshed` |
 | `layer_activate` | Activate layer | `layer.activate` | `layer_id`: layer GUID | — | `active_layer_equals_request` |
 | `node_editor` | Node Editor | `view.node_editor` | `state`: on\|off | — | `viewport_render_changed` |
+| `rotation_keys` | Rotation keys | `animation.rotation_keys_set` | `writes`: [{id, frame (existing key), rotation_euler_xyz_radians (local)}] | — | `rotation_keys_equal_request` |
 | `silhouette` | Silhouette mode | `view.silhouette` | `ids`: optional objects to select first | — | `viewport_render_changed` |
 | `stretch` | Stretch | `timeline.stretch` | `layer_ids`: layer GUIDs (default: all), `first_frame`: int, `last_frame`: int, `new_last_frame`: int | — | `keys_retimed_to_request` |
 | `timeline_play` | Play | `timeline.playback` | — | `state=play` | `playback_frames_advance` |
@@ -51,6 +53,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 
 | Feature | Name | Operation | Arguments | Fixed | Postconditions |
 |---|---|---|---|---|---|
+| `auto_posing_state` | AutoPosing state | `generation.auto_posing_state` | `state`: active\|inactive, `ids`: controller object IDs | — | `auto_posing_state_dispatched` |
 | `autoposing_props` | AutoPosing props | `rig.autoposing_props` | `rig_element_ids`: IDs, `enabled`: bool | — | `autoposing_names_equal_request` |
 | `finger_auto_posing` | Finger AutoPosing | `view.fingers_drawing` | `ids`: optional objects to select first | — | `viewport_render_changed` |
 | `fulcrum_cleaning` | Fulcrum cleaning | `timeline.fulcrum` | `layer_ids`: layer GUIDs (default: all), `first_frame`: int, `last_frame`: int | `state=Free` | `key_fixation_equals_request` |
@@ -145,9 +148,21 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | `selection_groups_export` | Export Selection Groups | `system.ui_file_flow` | `path`: file | — | `exact_file_dialog`, `output_file`, `nonzero_bytes` |
 | `selection_groups_import` | Import Selection Groups | `io.selection_groups_import` | `path`: selection groups file | — | `selection_groups_loaded` |
 
+## Scene
+
+| Feature | Name | Operation | Arguments | Fixed | Postconditions |
+|---|---|---|---|---|---|
+| `close_working_tabs` | Close working tabs | `scene.close_working_tabs` | — | — | `working_tabs_closed` |
+
 ## External
 
 | Feature | Name | Operation | Arguments | Fixed | Postconditions |
 |---|---|---|---|---|---|
 | `blender_export` | Blender export | `io.export_fbx` | `path`: absolute .fbx path | `target=blender` | `output_file`, `nonzero_bytes`, `target_import_verified` |
 | `control_picker` | Control Picker | `view.control_picker` | `state`: on\|off | — | `viewport_render_changed` |
+
+## System
+
+| Feature | Name | Operation | Arguments | Fixed | Postconditions |
+|---|---|---|---|---|---|
+| `dialog_probe` | Dialog probe | `system.dialog_probe` | `token`: string echoed back | — | `probe_dialog_shown` |

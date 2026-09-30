@@ -222,3 +222,44 @@ def fix_scene(scene, _arguments, _request, context):
     if problems:
         raise AssertionError("POSTCONDITION_FAILED: Fix Scene left issues: " + "; ".join(problems[:10]))
     return {"changed": before != fixed, "before_revision": before, "after_revision": fixed}, []
+
+
+@handler("scene.close_working_tabs", postconditions=("working_tabs_closed",))
+def close_working_tabs(_scene, _arguments, _request, context):
+    """Close inactive, saved MCP working-clone tabs.
+
+    Every rollback and scene open adds a tab, and Cascadeur keeps each one in
+    memory (a long session crossed its 6 GB history limit). Removing a tab from
+    inside a menu command terminates Cascadeur, because the tab bar re-selects
+    its previous tab when the command returns, so this runs only from the UI
+    pump. Only tabs whose file is a *.working.casc in the snapshots directory,
+    that are not active and show no unsaved marker, are closed.
+    """
+    import os
+    from pathlib import Path
+
+    from .. import pump
+    from ..runtime import runtime_root
+
+    # pump.draining() is newer than a pump that was hot-reloaded around it.
+    draining = getattr(pump, "draining", lambda: bool(pump._state.get("busy")))
+    if not draining():
+        raise RuntimeError("close_working_tabs runs only from the UI pump, never inside a menu command")
+    manager = context["csc"].app.get_application().get_scene_manager()
+    current = manager.current_scene()
+    snapshots = (runtime_root() / "snapshots").resolve()
+    closed, kept = [], []
+    for item in list(manager.scenes()):
+        path_text = str(item.get_path_name() or "")
+        path = Path(path_text).resolve() if path_text else None
+        is_working = bool(path and path.parent == snapshots and path.name.endswith(".working.casc"))
+        unsaved = str(item.name() if callable(getattr(item, "name", None)) else "").startswith("*")
+        if item == current or not is_working or unsaved:
+            kept.append(os.path.basename(path_text) or "<unsaved>")
+            continue
+        manager.remove_application_scene(item)
+        closed.append(path.name)
+    remaining = {os.path.basename(str(item.get_path_name() or "")) for item in manager.scenes()}
+    if any(name in remaining for name in closed):
+        raise AssertionError("POSTCONDITION_FAILED: a closed working tab is still open")
+    return {"closed": closed, "kept": kept}, []

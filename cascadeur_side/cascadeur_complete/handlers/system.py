@@ -89,3 +89,35 @@ def view_mode(_scene, arguments, _request, context):
         "apply_to_all": apply_to_all,
         "viewports": rows,
     }, []
+
+
+@handler("system.dialog_probe", postconditions=("probe_dialog_shown",))
+def dialog_probe(_scene, arguments, _request, context):
+    """Show a Yes/No "Warning" dialog that records the pressed button.
+
+    Live validation for focus-free dialog handling: the host answers it with the
+    same helper it uses for Cascadeur's own warnings, while another application
+    keeps the foreground. The answer lands in state/dialog_probe.json.
+    """
+    import json
+    import time
+
+    from ..runtime import atomic_json, runtime_root
+
+    csc = context["csc"]
+    token = str(arguments.get("token", ""))
+    path = runtime_root() / "state" / "dialog_probe.json"
+    atomic_json(path, {"token": token, "answer": None, "shown_at": time.time()})
+
+    def answer(button):
+        def record():
+            atomic_json(path, {"token": token, "answer": button, "answered_at": time.time()})
+
+        return record
+
+    buttons = [
+        csc.view.DialogButton(csc.view.StandardButton.Yes, answer("Yes")),
+        csc.view.DialogButton(csc.view.StandardButton.No, answer("No")),
+    ]
+    csc.view.DialogManager.instance().show_buttons_dialog("Warning", "Cascadeur Complete dialog probe", buttons)
+    return {"token": token, "path": str(path), "state": json.loads(path.read_text(encoding="utf-8"))}, []
