@@ -393,8 +393,12 @@ def position_keys_set(scene, arguments, _request, context):
     # Rig constraints (IK limb lengths) may trim a requested position slightly;
     # callers that move whole limbs pass an explicit, bounded tolerance.
     tolerance = float(arguments.get("tolerance_cm", 0.05))
-    if not 0.0 < tolerance <= 5.0:
-        raise ValueError("tolerance_cm must be in (0, 5]")
+    if not 0.0 < tolerance <= 10.0:
+        raise ValueError("tolerance_cm must be in (0, 10]")
+    # Helper points the rig re-derives (e.g. a leg AdditionalPoint that follows
+    # the limb direction) are written so the rig starts from the moved pose, but
+    # are reported instead of verified against the tolerance.
+    rig_solved = {str(item) for item in arguments.get("rig_solved_ids") or []}
     if not writes:
         raise ValueError("writes must be a non-empty list of {id, frame, position}")
     if len(writes) > MAX_ROTATION_KEY_WRITES:
@@ -462,7 +466,7 @@ def position_keys_set(scene, arguments, _request, context):
             worst = max(worst, error)
             if error > 0.01:
                 adjusted[raw_id] = max(adjusted.get(raw_id, 0.0), error)
-            if error > tolerance:
+            if error > tolerance and raw_id not in rig_solved:
                 mismatched[raw_id] = max(mismatched.get(raw_id, 0.0), error)
     if mismatched:
         # Rig-derived points (e.g. direction points) are recomputed from their

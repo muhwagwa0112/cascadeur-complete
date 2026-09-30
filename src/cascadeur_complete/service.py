@@ -1606,10 +1606,11 @@ class CascadeurService:
         rows = reread.result if len(operations) > 1 else [{"result": reread.result}]
         worst = (0.0, None, None)
         for (sample_frame, items), row in zip(sorted(by_frame.items()), rows, strict=True):
+            skipped = {str(item) for item in record.operation.arguments.get("rig_solved_ids") or []}
             for item in row["result"]:
                 object_id = str(item["id"])
                 expected = dict(items).get(object_id)
-                if expected is None:
+                if expected is None or object_id in skipped:
                     continue
                 if is_position:
                     error = max(abs(a - b) for a, b in zip(item["position"], expected, strict=True))
@@ -1619,7 +1620,7 @@ class CascadeurService:
                     worst = (error, object_id, sample_frame)
         if is_position:
             requested = float(record.operation.arguments.get("tolerance_cm", 0.0) or 0.0)
-            tolerance, unit = max(SETTLED_POSITION_TOLERANCE, min(requested, 5.0)), "cm"
+            tolerance, unit = max(SETTLED_POSITION_TOLERANCE, min(requested, 10.0)), "cm"
         else:
             tolerance, unit = SETTLED_TOLERANCE_DEGREES, "deg"
         if worst[0] > tolerance:

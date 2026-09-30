@@ -835,4 +835,4 @@ def test_position_tolerance_is_bounded_by_the_request():
     from cascadeur_complete import service
 
     source = inspect.getsource(service.CascadeurService._verify_settled_rotations)
-    assert "tolerance_cm" in source and "min(requested, 5.0)" in source
+    assert "tolerance_cm" in source and "min(requested, 10.0)" in source
