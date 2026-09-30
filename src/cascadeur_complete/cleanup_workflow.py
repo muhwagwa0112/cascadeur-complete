@@ -113,7 +113,9 @@ class CleanupWorkflow:
             for frame, row in zip(chunk, rows, strict=True):
                 for item in row["result"]:
                     positions[item["id"]][frame] = item["position"]
-                    quaternions[item["id"]][frame] = item["rotation"]["quaternion_wxyz"]
+                    # Points carry a position only; rotation is null for them.
+                    if item.get("rotation"):
+                        quaternions[item["id"]][frame] = item["rotation"]["quaternion_wxyz"]
         return {"position": positions, "quaternion": quaternions}
 
     # -- feet ---------------------------------------------------------------
@@ -229,7 +231,12 @@ class CleanupWorkflow:
     def analyze_fingers(self, object_ids=None, spike_deg: float = 10.0) -> dict[str, Any]:
         _, frames, quaternions = self._finger_quaternions(object_ids, None)
         rows = mc.finger_stats(quaternions, spike_deg)
-        flagged = [row for row in rows if row["steps_over_spike"] or row["spread_range_deg"] > 15]
+        # Thumbs swing wide by design; only spikes flag them.
+        flagged = [
+            row
+            for row in rows
+            if row["steps_over_spike"] or (row["spread_range_deg"] > 15 and "Thumb" not in row["joint"])
+        ]
         return {"frames": frames, "joints": rows, "flagged": [row["joint"] for row in flagged]}
 
     def prepare_fingers(self, object_ids=None, joints=None, spike_deg: float = 10.0, ttl: float = 900.0):

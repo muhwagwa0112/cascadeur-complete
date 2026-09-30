@@ -155,7 +155,7 @@ class _FakeClient:
                 {
                     "id": object_id,
                     "position": self.track[by_id[object_id]][args["frame"]].tolist(),
-                    "rotation": {"quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]},
+                    "rotation": None,
                 }
                 for object_id in args["ids"]
             ]
