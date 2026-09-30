@@ -1617,7 +1617,11 @@ class CascadeurService:
                     error = quaternion_angle_degrees(expected, item["rotation"]["quaternion_wxyz"])
                 if error > worst[0]:
                     worst = (error, object_id, sample_frame)
-        tolerance, unit = (SETTLED_POSITION_TOLERANCE, "cm") if is_position else (SETTLED_TOLERANCE_DEGREES, "deg")
+        if is_position:
+            requested = float(record.operation.arguments.get("tolerance_cm", 0.0) or 0.0)
+            tolerance, unit = max(SETTLED_POSITION_TOLERANCE, min(requested, 5.0)), "cm"
+        else:
+            tolerance, unit = SETTLED_TOLERANCE_DEGREES, "deg"
         if worst[0] > tolerance:
             raise RuntimeError(
                 f"written value did not persist: {worst[1]} at frame {worst[2]} differs by {worst[0]:.2f} {unit} "

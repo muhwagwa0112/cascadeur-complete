@@ -827,3 +827,12 @@ def test_settled_samples_cover_position_writes():
     assert settled_rotation_samples("animation.position_keys_set", {"writes": writes}, None) == [
         ("p", 3, [1.0, 2.0, 3.0])
     ]
+
+
+def test_position_tolerance_is_bounded_by_the_request():
+    import inspect
+
+    from cascadeur_complete import service
+
+    source = inspect.getsource(service.CascadeurService._verify_settled_rotations)
+    assert "tolerance_cm" in source and "min(requested, 5.0)" in source

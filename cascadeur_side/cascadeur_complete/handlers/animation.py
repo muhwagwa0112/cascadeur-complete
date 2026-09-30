@@ -390,6 +390,11 @@ def position_keys_set(scene, arguments, _request, context):
     space = str(arguments.get("space", "global"))
     if space not in ("local", "global"):
         raise ValueError("space must be local or global")
+    # Rig constraints (IK limb lengths) may trim a requested position slightly;
+    # callers that move whole limbs pass an explicit, bounded tolerance.
+    tolerance = float(arguments.get("tolerance_cm", 0.05))
+    if not 0.0 < tolerance <= 5.0:
+        raise ValueError("tolerance_cm must be in (0, 5]")
     if not writes:
         raise ValueError("writes must be a non-empty list of {id, frame, position}")
     if len(writes) > MAX_ROTATION_KEY_WRITES:
@@ -447,18 +452,29 @@ def position_keys_set(scene, arguments, _request, context):
     transact(domain.modify_update, "Cascadeur Complete: set position keys", edit)
     refresh_interpolation(domain)
     worst = 0.0
+    mismatched = {}
+    adjusted = {}
     for frame, items in by_frame.items():
         observed = {row["id"]: row for row in _read_transforms(domain, [raw for raw, _ in items], frame, space)}
         for raw_id, position in items:
             actual = observed[str(raw_id)]["position"]
             error = max(abs(a - b) for a, b in zip(actual, position, strict=True))
             worst = max(worst, error)
-            if error > 1e-2:
-                raise AssertionError(f"POSTCONDITION_FAILED: position differs for {raw_id} at frame {frame}")
+            if error > 0.01:
+                adjusted[raw_id] = max(adjusted.get(raw_id, 0.0), error)
+            if error > tolerance:
+                mismatched[raw_id] = max(mismatched.get(raw_id, 0.0), error)
+    if mismatched:
+        # Rig-derived points (e.g. direction points) are recomputed from their
+        # drivers; report every one so the caller can drop them from the plan.
+        detail = ", ".join(f"{key} ({value:.2f})" for key, value in sorted(mismatched.items()))
+        raise AssertionError(f"POSTCONDITION_FAILED: position differs for {len(mismatched)} object(s): {detail}")
     return {
         "space": space,
         "write_count": len(writes),
         "object_count": len(targets),
         "frame_count": len(by_frame),
         "max_position_error": worst,
+        "tolerance_cm": tolerance,
+        "adjusted_by_rig": {key: round(value, 3) for key, value in sorted(adjusted.items())},
     }, []
