@@ -35,6 +35,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | `ballistic_ghosts` | Ballistic Ghosts | `view.ballistic_ghosts` | `ids`: optional objects to select first | — | `viewport_render_changed` |
 | `cycle` | Cycle | `timeline.cycle` | `layer_ids`: layer GUIDs (default: all), `first_frame`: int, `last_frame`: int | `action=create` | `cycle_present` |
 | `graph_edit` | Graph edit | `animation.section_edit` | `layer_id`: layer GUID, `frame`: key frame, `interpolation`: optional Interpolation name, `tangents`: optional Tangents name, `ik_fk`: optional IK\|FK, `fixation`: optional Free\|Fulcrum | — | `section_equals_request` |
+| `interpolation_range` | Interpolation range | `timeline.interpolation_range` | `layer_ids`: layer GUIDs (default: all), `first_frame`: int, `last_frame`: int, `interpolation`: Interpolation name (e.g. CLAMPED_BEZIER, LINEAR) | — | `interval_interpolation_equals_request` |
 | `layer_activate` | Activate layer | `layer.activate` | `layer_id`: layer GUID | — | `active_layer_equals_request` |
 | `node_editor` | Node Editor | `view.node_editor` | `state`: on\|off | — | `viewport_render_changed` |
 | `silhouette` | Silhouette mode | `view.silhouette` | `ids`: optional objects to select first | — | `viewport_render_changed` |

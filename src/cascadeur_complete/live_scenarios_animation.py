@@ -225,6 +225,16 @@ def _fulcrum_cleaning(s: LiveSession) -> Any:
     return s.change("fulcrum_cleaning", "timeline.fulcrum", {"layer_ids": [layer], "first_frame": 0, "last_frame": 12})
 
 
+@scenario("interpolation_range", BACKFLIP)
+def _interpolation_range(s: LiveSession) -> Any:
+    layer, _keys = animated_layer(s)
+    return s.change(
+        "interpolation_range",
+        "timeline.interpolation_range",
+        {"layer_ids": [layer], "first_frame": 0, "last_frame": 12, "interpolation": "LINEAR"},
+    )
+
+
 @scenario("timeline_play", BACKFLIP)
 def _timeline_play(s: LiveSession) -> Any:
     return s.change("timeline_play", "timeline.playback", {})

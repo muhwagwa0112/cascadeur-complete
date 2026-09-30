@@ -168,10 +168,10 @@ def test_product_coverage_does_not_count_discovery_or_contract_only_rows(tmp_pat
     status = svc.capabilities(live=False)
     searched = svc.feature_search("", limit=500)
 
-    assert status["product_coverage"]["catalog_count"] == 224
+    assert status["product_coverage"]["catalog_count"] == 225
     # Only host-only contract features (feature search/describe) count without live evidence.
     assert status["product_coverage"]["supported"] == 2
-    assert status["product_coverage"]["support_percent"] == round(2 / 224 * 100, 2)
+    assert status["product_coverage"]["support_percent"] == round(2 / 225 * 100, 2)
     assert searched and all(item["truth_layer"] == "product" for item in searched)
 
 

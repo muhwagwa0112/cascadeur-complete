@@ -273,6 +273,89 @@ def fulcrum(scene, arguments, _request, context):
     return {"state": state, "keys": observed}, []
 
 
+def _interpolation_rows(domain, layer_id, frames, context):
+    layer = domain.layers_viewer().layer(layer_id)
+    return {frame: str(context["read_member"](layer.section(frame).interval.interpolation, "name")) for frame in frames}
+
+
+@handler("timeline.interpolation_range", postconditions=("interval_interpolation_equals_request",))
+def interpolation_range(scene, arguments, _request, context):
+    """Set the interpolation of every key interval starting inside first..last.
+
+    Animation Unbaking leaves most intervals FIXED (the baked samples between
+    sparse keys). Converting them one section per protected call is impractical,
+    so this edits every interval that starts at a key in [first, last) on the
+    requested layers in one transaction. The interval of a key at ``last`` runs
+    past the range and is left untouched.
+    """
+    domain = context["domain_scene"](scene)
+    layer_ids = _layers(domain, arguments.get("layer_ids", []), context)
+    first, last = _interval(domain, arguments)
+    requested = str(arguments.get("interpolation", "CLAMPED_BEZIER"))
+    enum_class = context["csc"].layers.layer.Interpolation
+    try:
+        enum_name = next(name for name in dir(enum_class) if name.casefold() == requested.casefold())
+    except StopIteration as exc:
+        allowed = [name for name in dir(enum_class) if not name.startswith("_") and name[:1].isupper()]
+        raise ValueError("Unsupported interpolation. Expected one of: " + ", ".join(allowed)) from exc
+    target = getattr(enum_class, enum_name)
+    expected = str(context["read_member"](target, "name"))
+    touched = {}
+    for layer_id in layer_ids:
+        touched[context["id_string"](layer_id)] = [
+            frame for frame in _keys(domain, layer_id, first, last) if frame < last
+        ]
+    if not any(touched.values()):
+        raise ValueError("No key intervals start inside the requested range")
+    before = {
+        context["id_string"](layer_id): _interpolation_rows(
+            domain, layer_id, touched[context["id_string"](layer_id)], context
+        )
+        for layer_id in layer_ids
+    }
+
+    def edit(model, _update, _scene_updater):
+        editor = model.layers_editor()
+
+        def apply(section):
+            section.interval.interpolation = target
+
+        for layer_id in layer_ids:
+            for frame in touched[context["id_string"](layer_id)]:
+                editor.change_section(frame, layer_id, apply)
+
+    transact(domain.modify, "Cascadeur Complete: set interpolation " + expected, edit)
+    observed = {
+        context["id_string"](layer_id): _interpolation_rows(
+            domain, layer_id, touched[context["id_string"](layer_id)], context
+        )
+        for layer_id in layer_ids
+    }
+    if any(value != expected for rows in observed.values() for value in rows.values()):
+        raise AssertionError("POSTCONDITION_FAILED: interval interpolation differs from " + expected)
+    changed = sum(
+        1
+        for layer_text, rows in before.items()
+        for frame, value in rows.items()
+        if value != observed[layer_text][frame]
+    )
+    return {
+        "interpolation": expected,
+        "first_frame": first,
+        "last_frame": last,
+        "interval_count": sum(len(rows) for rows in observed.values()),
+        "changed_count": changed,
+        "before": {layer: _count(rows) for layer, rows in before.items()},
+    }, []
+
+
+def _count(rows):
+    counts = {}
+    for value in rows.values():
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
 @handler("timeline.interval_edit", postconditions=("frame_count_changed_by_request",))
 def interval_edit(scene, arguments, _request, context):
     """Insert or remove frames inside a selected interval (Timeline interval edit)."""

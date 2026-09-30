@@ -55,6 +55,39 @@ def _is_cascadeur_window_title(title: str) -> bool:
     return normalized == "cascadeur" or normalized.endswith(" - cascadeur")
 
 
+def _press(control) -> str:
+    """Press a dialog control without requiring the foreground window.
+
+    Cascadeur's QML buttons and native dialog buttons expose UIA InvokePattern,
+    and list items expose SelectionItemPattern; neither needs focus, so dialogs
+    can be answered while the MCP client stays in front (Windows refuses to
+    hand the foreground to a background process). The physical click remains
+    the fallback for controls that expose neither pattern. Callers still verify
+    the dialog's own postcondition (it closed, the item is selected).
+    """
+    wrapper = control.wrapper_object() if hasattr(control, "wrapper_object") else control
+    with suppress(Exception):
+        wrapper.invoke()
+        return "invoke"
+    with suppress(Exception):
+        wrapper.select()
+        return "select"
+    wrapper.click_input()
+    return "click"
+
+
+def _post_default_action(dialog) -> bool:
+    """Send IDOK to a native dialog, which runs its default button without focus."""
+    import ctypes
+
+    wrapper = dialog.wrapper_object() if hasattr(dialog, "wrapper_object") else dialog
+    handle = int(getattr(wrapper, "handle", 0) or 0)
+    if not handle:
+        return False
+    user32 = ctypes.windll.user32
+    return bool(user32.PostMessageW(handle, 0x0111, 1, 0))  # WM_COMMAND, IDOK
+
+
 def _native_cascadeur_handles() -> list[int]:
     """Find visible Cascadeur top-level windows without scanning the UIA tree."""
     try:
@@ -610,7 +643,7 @@ def resolve_autophysics_snap_warning(*, turn_off_single_use_features: bool = Tru
     if not yes.exists(timeout=0.5, retry_interval=0.05) or not no.exists(timeout=0.5, retry_interval=0.05):
         raise UIAutomationError("AutoPhysics Warning dialog did not expose exact Yes/No buttons")
     button_name = "Yes" if turn_off_single_use_features else "No"
-    (yes if turn_off_single_use_features else no).click_input()
+    _press(yes if turn_off_single_use_features else no)
     if warning.exists(timeout=2.0, retry_interval=0.05):
         raise UIAutomationError("AutoPhysics Warning dialog did not close after confirmation")
     return ModalEvidence(window_title="Warning", button=button_name, dismissed_at=time.time())
@@ -671,7 +704,7 @@ def complete_file_dialog(
         )
         if not accept_options.exists(timeout=min(2.0, remaining()), retry_interval=0.05):
             raise UIAutomationError(f"Expected options button did not appear: {options_title} > {options_accept_title}")
-        accept_options.click_input()
+        _press(accept_options)
 
     # A trailing "*" pins a title prefix: some 2026.1 dialogs append the scene
     # name ("Save Scene <name>"). Everything before it must still match exactly.
@@ -783,7 +816,7 @@ def complete_file_dialog(
                     f"File type {file_type_extension} did not match exactly one visible item: {observed}"
                 )
             selected_file_type = matches[0].window_text()
-            matches[0].click_input()
+            _press(matches[0])
     filename_automation_id = str(filename.element_info.automation_id or "1001")
     filename.set_edit_text(path)
     # The Windows 11 Open dialog publishes its ID 1 button only after a valid
@@ -794,10 +827,13 @@ def complete_file_dialog(
         # valid path is entered. The dialog title and owner are verified above,
         # so Enter in the filename field invokes its default action without
         # relying on localized button text.
-        filename.type_keys("{ENTER}")
-        accept_automation_id = "ENTER(default action)"
+        # Posting IDOK runs the same default action without keyboard focus;
+        # Enter in the filename field stays the fallback.
+        if not (_post_default_action(dialog) and not dialog.exists(timeout=2.0, retry_interval=0.05)):
+            filename.type_keys("{ENTER}")
+        accept_automation_id = "IDOK(default action)"
     else:
-        accept.click_input()
+        _press(accept)
         accept_automation_id = "1"
     if dialog.exists(timeout=min(5.0, remaining()), retry_interval=0.05):
         raise UIAutomationError(f"File dialog did not close after accepting path: {expected_dialog_title}")
@@ -807,7 +843,7 @@ def complete_file_dialog(
         finish = options.child_window(title=after_accept_title, control_type="Button")
         if not finish.exists(timeout=min(5.0, remaining()), retry_interval=0.05):
             raise UIAutomationError(f"Expected button did not appear: {options_title} > {after_accept_title}")
-        finish.click_input()
+        _press(finish)
         if options.exists(timeout=min(10.0, remaining()), retry_interval=0.1):
             raise UIAutomationError(f"Options window did not close after {after_accept_title}: {options_title}")
     return FileDialogEvidence(
@@ -896,14 +932,14 @@ def complete_export_video_form(
     same_row = abs(folder_edit.rectangle().top - choose.rectangle().top) <= 4
     if not same_row or not width_edit.window_text().isdigit() or not height_edit.window_text().isdigit():
         raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} layout differs from the verified 2026.1 form")
-    button("VIDEO FILE").click_input()
+    _press(button("VIDEO FILE"))
     for edit, value in ((folder_edit, folder), (name_edit, name), (width_edit, str(width)), (height_edit, str(height))):
         edit.iface_value.SetValue(value)
         time.sleep(0.1)
         if edit.window_text() != value:
             raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} field did not accept {value!r}: {edit.window_text()!r}")
-    button(quality).click_input()
-    button("Start rendering").click_input()
+    _press(button(quality))
+    _press(button("Start rendering"))
     return FileDialogEvidence(
         action_id=action_id,
         options_title=None,
@@ -926,7 +962,7 @@ def finish_export_video_form(timeout: float = 60.0) -> bool:
     done = window.child_window(title="Ok", control_type="Button")
     if not done.exists(timeout=max(1.0, timeout), retry_interval=0.2):
         raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} did not reach its completion screen")
-    done.click_input()
+    _press(done)
     if window.exists(timeout=5.0, retry_interval=0.1):
         raise UIAutomationError(f"{EXPORT_VIDEO_TITLE} did not close after Ok")
     return True
@@ -951,7 +987,7 @@ def dismiss_feature_gate() -> str | None:
         wrapper = gate.wrapper_object()
         texts = [item.window_text() for item in wrapper.descendants() if item.window_text()]
         detail = " / ".join(text for text in texts if text not in ("Upgrade", "Sync", "Close"))[:300]
-        gate.child_window(title="Close", control_type="Button").click_input()
+        _press(gate.child_window(title="Close", control_type="Button"))
         gate.wait_not("exists", timeout=5, retry_interval=0.1)
         return detail or FEATURE_GATE_TITLE
     except Exception:  # pragma: no cover - diagnostics must not mask the caller's error
@@ -990,7 +1026,7 @@ def cancel_owned_file_dialogs() -> list[str]:
                 item for item in window.descendants(control_type="Button") if item.element_info.automation_id == "2"
             ]
             if len(buttons) == 1:
-                buttons[0].click_input()
+                _press(buttons[0])
                 canceled.append(window.window_text())
     except Exception:  # pragma: no cover - best effort recovery
         pass
@@ -1026,7 +1062,7 @@ def cancel_file_flow(*, expected_dialog_title: str, options_title: str | None = 
         wrapper = window.wrapper_object()
         cancel = [item for item in wrapper.descendants(control_type="Button") if item.element_info.automation_id == "2"]
         if len(cancel) == 1:
-            cancel[0].click_input()
+            _press(cancel[0])
         else:
             wrapper.close()
         canceled = True
@@ -1068,5 +1104,5 @@ def resolve_optional_rig_mode_helper(*, enter_rig_mode: bool = False, timeout: f
     if len(yes) != 1 or len(no) != 1:
         raise UIAutomationError("Rig Mode Helper did not expose exact Yes/No buttons")
     button_name = "Yes" if enter_rig_mode else "No"
-    (yes[0] if enter_rig_mode else no[0]).click_input()
+    _press(yes[0] if enter_rig_mode else no[0])
     return ModalEvidence(window_title="Rig Mode Helper", button=button_name, dismissed_at=time.time())

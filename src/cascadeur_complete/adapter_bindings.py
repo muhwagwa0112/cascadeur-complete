@@ -133,6 +133,12 @@ BINDINGS: tuple[AdapterBinding, ...] = (
         fixed={"state": "Free"},
         arguments=LAYER_INTERVAL,
     ),
+    _b(
+        "interpolation_range",
+        "timeline.interpolation_range",
+        ("interval_interpolation_equals_request",),
+        arguments={**LAYER_INTERVAL, "interpolation": "Interpolation name (e.g. CLAMPED_BEZIER, LINEAR)"},
+    ),
     _b("timeline_play", "timeline.playback", ("playback_frames_advance",), fixed={"state": "play"}),
     _b("timeline_stop", "timeline.playback", ("playback_frame_stable",), fixed={"state": "stop"}),
     _b("layer_activate", "layer.activate", ("active_layer_equals_request",), arguments={"layer_id": "layer GUID"}),

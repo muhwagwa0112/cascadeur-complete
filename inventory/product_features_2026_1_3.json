@@ -2749,6 +2749,42 @@
       }
     },
     {
+      "id": "interpolation_range",
+      "family": "animation",
+      "name": "Interpolation range",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "timeline.interpolation_range",
+      "action": "timeline.interpolation_range",
+      "operation": "timeline.interpolation_range",
+      "mutation": true,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "interval_interpolation_equals_request"
+      ],
+      "adapter_id": "cascadeur_2026_1.timeline.interpolation_range",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[interpolation_range]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "layer_ids": "layer GUIDs (default: all)",
+        "first_frame": "int",
+        "last_frame": "int",
+        "interpolation": "Interpolation name (e.g. CLAMPED_BEZIER, LINEAR)"
+      },
+      "fixed_arguments": {}
+    },
+    {
       "id": "key_reduction",
       "family": "generation",
       "name": "Key reduction",
