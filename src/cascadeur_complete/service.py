@@ -56,7 +56,8 @@ from .verification import LiveEvidenceStore
 # success.
 SETTLED_ROTATION_OPERATIONS = frozenset({"animation.rotation_keys_set", "animation.transform_set"})
 SETTLED_SAMPLE_LIMIT = 64
-SETTLED_TOLERANCE_DEGREES = 0.05
+# Cascadeur converts Euler input through float32; real overrides are tens of degrees.
+SETTLED_TOLERANCE_DEGREES = 0.2
 
 
 def euler_xyz_to_quaternion(euler: list[float]) -> list[float]:

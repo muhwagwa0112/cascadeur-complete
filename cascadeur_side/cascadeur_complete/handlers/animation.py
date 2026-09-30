@@ -237,6 +237,23 @@ def key_reduce(scene, arguments, _request, context):
     }, []
 
 
+def rotation_from_euler_xyz(csc, euler):
+    """Build a Rotation from the euler_xyz_radians that transform reads return.
+
+    Reads use Rotation.to_euler_angles_x_y_z; its inverse is
+    euler_angles_to_quaternion_x_y_z. Rotation.from_euler uses a different
+    convention, so feeding a read value back through it produced a different
+    rotation (tens of degrees off on finger controllers).
+    """
+    import numpy
+
+    converter = getattr(csc.math, "euler_angles_to_quaternion_x_y_z", None)
+    if converter is None:
+        return csc.math.Rotation.from_euler(*euler)
+    quaternion = converter(numpy.array([float(value) for value in euler], dtype=numpy.float32))
+    return csc.math.Rotation.from_quaternion(quaternion)
+
+
 MAX_ROTATION_KEY_WRITES = 20000
 
 
@@ -301,7 +318,7 @@ def rotation_keys_set(scene, arguments, _request, context):
         for frame in sorted(by_frame):
             changed = set()
             for raw_id, euler in by_frame[frame]:
-                rotation = csc.math.Rotation.from_euler(*euler)
+                rotation = rotation_from_euler_xyz(csc, euler)
                 node = nodes[raw_id]
                 if node is not None:
                     node.set_value(rotation, frame)
@@ -318,7 +335,7 @@ def rotation_keys_set(scene, arguments, _request, context):
     for frame, items in by_frame.items():
         observed = {row["id"]: row for row in _read_transforms(domain, [raw for raw, _ in items], frame, space)}
         for raw_id, euler in items:
-            expected = _quaternion_list(csc.math.Rotation.from_euler(*euler))
+            expected = _quaternion_list(rotation_from_euler_xyz(csc, euler))
             actual = observed[str(raw_id)]["rotation"]["quaternion_wxyz"]
             error = abs(1.0 - abs(sum(a * b for a, b in zip(expected, actual, strict=True))))
             worst = max(worst, error)

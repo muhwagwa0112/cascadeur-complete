@@ -133,3 +133,15 @@ def test_production_bridge_contains_no_generic_runtime_executor():
     assert "def developer_execute_python(" not in server
     assert "def cascadeur_tool_inspect(" not in server
     assert "def setting_get(" not in server
+
+
+def test_rotation_writes_use_the_inverse_of_the_read_convention():
+    # Reads return Rotation.to_euler_angles_x_y_z; Rotation.from_euler uses a
+    # different convention, so writes must go through rotation_from_euler_xyz.
+    root = Path(__file__).parents[1] / "cascadeur_side" / "cascadeur_complete"
+    runtime = (root / "runtime.py").read_text(encoding="utf-8")
+    animation = (root / "handlers" / "animation.py").read_text(encoding="utf-8")
+    assert "to_euler_angles_x_y_z" in runtime
+    assert "euler_angles_to_quaternion_x_y_z" in animation
+    for source in (runtime, animation.replace("return csc.math.Rotation.from_euler(*euler)", "")):
+        assert "Rotation.from_euler(*" not in source

@@ -1121,6 +1121,8 @@ def _run_operation(scene, operation, request):
                 raise ValueError(key + " must contain exactly three numbers")
             provided[key] = [float(item) for item in value]
 
+        from .handlers.animation import rotation_from_euler_xyz
+
         targets = []
         for raw_id in ids:
             object_id = _object_id(raw_id)
@@ -1137,7 +1139,7 @@ def _run_operation(scene, operation, request):
                     editor.set_data_value(data_ids["position"], frame, tuple(provided["position"]))
                     changed.add(data_ids["position"])
                 if "rotation_euler_xyz_radians" in provided:
-                    rotation = csc.math.Rotation.from_euler(*provided["rotation_euler_xyz_radians"])
+                    rotation = rotation_from_euler_xyz(csc, provided["rotation_euler_xyz_radians"])
                     editor.set_data_value(data_ids["rotation"], frame, rotation)
                     changed.add(data_ids["rotation"])
                 if "scale" in provided:
@@ -1159,7 +1161,7 @@ def _run_operation(scene, operation, request):
             ):
                 raise AssertionError("POSTCONDITION_FAILED: scale differs")
             if "rotation_euler_xyz_radians" in provided:
-                expected_rotation = csc.math.Rotation.from_euler(*provided["rotation_euler_xyz_radians"])
+                expected_rotation = rotation_from_euler_xyz(csc, provided["rotation_euler_xyz_radians"])
                 expected_quaternion = _quaternion_list(expected_rotation)
                 observed_quaternion = item["rotation"]["quaternion_wxyz"]
                 dot = abs(sum(a * b for a, b in zip(expected_quaternion, observed_quaternion, strict=True)))
