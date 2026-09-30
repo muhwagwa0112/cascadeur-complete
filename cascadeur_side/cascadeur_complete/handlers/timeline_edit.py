@@ -306,11 +306,16 @@ def interpolation_range(scene, arguments, _request, context):
     viewer = domain.layers_viewer()
     touched = {}
     fixed_frames = {}
+    skipped_adjacent = {}
     for layer_id in layer_ids:
         layer_text = context["id_string"](layer_id)
         layer = viewer.layer(layer_id)
         all_keys = _keys(domain, layer_id)
-        starts = [frame for frame in all_keys if first <= frame < last]
+        # An interval between adjacent keys has no in-between frame to
+        # interpolate; Cascadeur normalizes it to STEP, so it is skipped.
+        adjacent = {frame for frame in all_keys if frame + 1 in all_keys}
+        starts = [frame for frame in all_keys if first <= frame < last and frame not in adjacent]
+        skipped_adjacent[layer_text] = sorted(frame for frame in adjacent if first <= frame < last)
         touched[layer_text] = starts
         fixed = []
         if clear_fixed:
@@ -378,6 +383,7 @@ def interpolation_range(scene, arguments, _request, context):
         "interval_count": sum(len(rows) for rows in observed.values()),
         "changed_count": changed,
         "fixed_frames_cleared": sum(len(frames) for frames in fixed_frames.values()),
+        "adjacent_key_intervals_skipped": sum(len(frames) for frames in skipped_adjacent.values()),
         "before": {layer: _count(rows) for layer, rows in before.items()},
     }, []
 
