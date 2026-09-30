@@ -18,6 +18,7 @@ pump off without reinstalling.
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import sys
 import time
@@ -110,9 +111,7 @@ def _write_heartbeat(now=None):
     now = time.time() if now is None else now
     _state["last_heartbeat"] = now
     with suppress(Exception):
-        from .runtime import atomic_json
-
-        atomic_json(
+        _replace_json(
             _runtime_state_dir() / "pump.json",
             {
                 "schema": PUMP_SCHEMA,
@@ -123,10 +122,30 @@ def _write_heartbeat(now=None):
                 "wake_message": WM_APP_WAKE,
                 "interval_ms": INTERVAL_MS,
                 "heartbeat": now,
+                "busy": _state["busy"],
                 "processed": _state["processed"],
                 "last_error": _state["last_error"],
             },
         )
+
+
+def _replace_json(path, payload):
+    """Replace ``path`` atomically, retrying while the host has it open.
+
+    Windows refuses to replace a file another process is reading, and a lost
+    heartbeat makes the host fall back to the menu trigger. The heartbeat is
+    rewritten every second, so it skips fsync.
+    """
+    temporary = path.with_name("." + path.name + ".tmp")
+    temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    for attempt in range(5):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.005)
 
 
 def _modal_window_open(user32):
@@ -165,6 +184,9 @@ def _drain(user32):
     if _scene_view() is None:
         return
     _state["busy"] = True
+    # Announce the drain so the host keeps waiting instead of falling back to
+    # the menu trigger while an earlier request is still executing.
+    _write_heartbeat()
     try:
         _state["processed"] += process_pending(None, matching_scene_only=True, linger=False)
         _state["last_error"] = None

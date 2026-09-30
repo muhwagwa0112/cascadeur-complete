@@ -26,6 +26,7 @@ class PumpInfo:
     hwnd: int
     wake_message: int
     heartbeat: float
+    busy: bool = False
 
     def age(self, now: float | None = None) -> float:
         return (time.time() if now is None else now) - self.heartbeat
@@ -42,13 +43,36 @@ def read_pump(paths: RuntimePaths, *, fresh_seconds: float = PUMP_FRESH_SECONDS)
             hwnd=int(data.get("hwnd") or 0),
             wake_message=int(data.get("wake_message") or 0),
             heartbeat=float(data["heartbeat"]),
+            busy=bool(data.get("busy", False)),
         )
     except (OSError, ValueError, TypeError, KeyError):
         return None
     age = info.age()
-    if age < -1.0 or age > fresh_seconds:
+    # A draining pump cannot refresh its heartbeat until the request returns;
+    # it stays usable as long as the Cascadeur process that owns it is alive.
+    if age < -1.0 or (age > fresh_seconds and not (info.busy and _process_alive(info.pid))):
         return None
     return info
+
+
+def _process_alive(pid: int) -> bool:
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        code = wintypes.DWORD()
+        return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def wake_pump(info: PumpInfo) -> bool:

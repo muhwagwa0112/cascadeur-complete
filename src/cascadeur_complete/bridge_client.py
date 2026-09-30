@@ -92,7 +92,12 @@ class BridgeClient:
             # A live pump drains on Cascadeur's UI thread from its own timer; the
             # wake-up post only shortens the wait. No window is activated.
             wake_pump(pump)
-            response = self._wait_claim_or_response(request, request_path, min(timeout, PUMP_CLAIM_SECONDS))
+            response = self._wait_claim_or_response(
+                request,
+                request_path,
+                min(timeout, PUMP_CLAIM_SECONDS),
+                timeout - (time.monotonic() - started),
+            )
             if response is not None:
                 response.duration_ms = int((time.monotonic() - started) * 1000)
                 return response
@@ -218,13 +223,28 @@ class BridgeClient:
             return {"active": False}
         return {"active": True, "pid": pump.pid, "heartbeat_age_s": round(pump.age(), 2)}
 
-    def _wait_claim_or_response(self, request: BridgeRequest, request_path, timeout: float) -> ResultEnvelope | None:
-        """Wait until the bridge answers or claims the request; None if claimed or unclaimed."""
-        deadline = time.monotonic() + timeout
+    def _wait_claim_or_response(
+        self, request: BridgeRequest, request_path, timeout: float, limit: float
+    ) -> ResultEnvelope | None:
+        """Wait until the bridge answers or claims the request; None if claimed or unclaimed.
+
+        The claim window is extended while the pump reports that it is busy with
+        an earlier request (the UI thread could not run the menu trigger then
+        either), but never beyond ``limit``.
+        """
+        started = time.monotonic()
+        deadline = started + timeout
         while True:
             response = self._wait_response_once(request, 0.03)
-            if response is not None or not request_path.exists() or time.monotonic() >= deadline:
+            if response is not None or not request_path.exists():
                 return response
+            now = time.monotonic()
+            if now < deadline:
+                continue
+            pump = read_pump(self.paths)
+            if pump is None or not pump.busy or now - started >= limit:
+                return None
+            deadline = now + 0.25
 
     def _wait_response(self, request: BridgeRequest, timeout: float) -> ResultEnvelope | None:
         if self.gate_probe is None or timeout < 2.0:
