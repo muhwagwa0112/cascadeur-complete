@@ -114,3 +114,54 @@ def test_pump_never_installs_outside_cascadeur():
     finally:
         if previous is None:
             sys.modules.pop("csc", None)
+
+
+def test_pump_hot_reloads_changed_handler_modules(tmp_path):
+    import importlib
+    import importlib.util
+    import shutil
+    import sys
+    import time
+    import types
+
+    source = Path(__file__).parents[1] / "cascadeur_side" / "cascadeur_complete"
+    package_root = tmp_path / "hotreload_bridge"
+    shutil.copytree(source, package_root, ignore=shutil.ignore_patterns("__pycache__"))
+    name = "hotreload_bridge"
+    previous_csc = sys.modules.get("csc")
+    sys.modules["csc"] = types.ModuleType("csc")
+    spec = importlib.util.spec_from_file_location(
+        name, package_root / "__init__.py", submodule_search_locations=[str(package_root)]
+    )
+    package = importlib.util.module_from_spec(spec)
+    sys.modules[name] = package
+    try:
+        spec.loader.exec_module(package)
+        importlib.import_module(name + ".runtime")
+        pump = importlib.import_module(name + ".pump")
+        registry = importlib.import_module(name + ".handler_registry")
+        before = set(registry.registered_operations())
+        assert "test.hot_reloaded" not in before
+        pump._reload_handlers_if_changed()  # records the baseline stamp
+
+        system = package_root / "handlers" / "system.py"
+        system.write_text(
+            system.read_text(encoding="utf-8")
+            + '\n\n@handler("test.hot_reloaded")\ndef _hot_reloaded(scene, arguments, request, context):\n'
+            + "    return {}, []\n",
+            encoding="utf-8",
+        )
+        time.sleep(0.01)
+        pump._reload_handlers_if_changed()
+
+        assert "test.hot_reloaded" in registry.registered_operations()
+        assert before < set(registry.registered_operations())
+        assert pump.status()["processed"] == 0
+        assert pump._state["handlers_reloaded"] == 1
+    finally:
+        for module in [item for item in sys.modules if item == name or item.startswith(name + ".")]:
+            del sys.modules[module]
+        if previous_csc is None:
+            sys.modules.pop("csc", None)
+        else:
+            sys.modules["csc"] = previous_csc

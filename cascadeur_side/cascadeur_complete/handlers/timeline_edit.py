@@ -282,11 +282,13 @@ def _interpolation_rows(domain, layer_id, frames, context):
 def interpolation_range(scene, arguments, _request, context):
     """Set the interpolation of every key interval starting inside first..last.
 
-    Animation Unbaking leaves most intervals FIXED (the baked samples between
-    sparse keys). Converting them one section per protected call is impractical,
-    so this edits every interval that starts at a key in [first, last) on the
-    requested layers in one transaction. The interval of a key at ``last`` runs
-    past the range and is left untouched.
+    Animation Unbaking leaves most intervals FIXED: sparse keys with the baked
+    samples kept as fixed (non-key) frames in between. Cascadeur keeps such an
+    interval FIXED while those frames exist, so converting it to another mode
+    first unsets the fixed frames, then sets the interval interpolation. Every
+    interval that starts at a key in [first, last) on the requested layers is
+    edited in one transaction; the interval of a key at ``last`` runs past the
+    range and is left untouched.
     """
     domain = context["domain_scene"](scene)
     layer_ids = _layers(domain, arguments.get("layer_ids", []), context)
@@ -300,11 +302,25 @@ def interpolation_range(scene, arguments, _request, context):
         raise ValueError("Unsupported interpolation. Expected one of: " + ", ".join(allowed)) from exc
     target = getattr(enum_class, enum_name)
     expected = str(context["read_member"](target, "name"))
+    clear_fixed = expected != "FIXED"
+    viewer = domain.layers_viewer()
     touched = {}
+    fixed_frames = {}
     for layer_id in layer_ids:
-        touched[context["id_string"](layer_id)] = [
-            frame for frame in _keys(domain, layer_id, first, last) if frame < last
-        ]
+        layer_text = context["id_string"](layer_id)
+        layer = viewer.layer(layer_id)
+        all_keys = _keys(domain, layer_id)
+        starts = [frame for frame in all_keys if first <= frame < last]
+        touched[layer_text] = starts
+        fixed = []
+        if clear_fixed:
+            for frame in starts:
+                following = [key for key in all_keys if key > frame]
+                end = following[0] if following else frame + 1
+                fixed.extend(
+                    inner for inner in range(frame + 1, end) if layer.is_key_or_fixed(inner) and not layer.is_key(inner)
+                )
+        fixed_frames[layer_text] = fixed
     if not any(touched.values()):
         raise ValueError("No key intervals start inside the requested range")
     before = {
@@ -321,7 +337,10 @@ def interpolation_range(scene, arguments, _request, context):
             section.interval.interpolation = target
 
         for layer_id in layer_ids:
-            for frame in touched[context["id_string"](layer_id)]:
+            layer_text = context["id_string"](layer_id)
+            for frame in fixed_frames[layer_text]:
+                editor.unset_section(frame, layer_id)
+            for frame in touched[layer_text]:
                 editor.change_section(frame, layer_id, apply)
 
     transact(domain.modify, "Cascadeur Complete: set interpolation " + expected, edit)
@@ -331,8 +350,21 @@ def interpolation_range(scene, arguments, _request, context):
         )
         for layer_id in layer_ids
     }
-    if any(value != expected for rows in observed.values() for value in rows.values()):
-        raise AssertionError("POSTCONDITION_FAILED: interval interpolation differs from " + expected)
+    mismatches = [
+        (layer_text, frame, value)
+        for layer_text, rows in observed.items()
+        for frame, value in rows.items()
+        if value != expected
+    ]
+    if mismatches:
+        summary = {
+            "observed": {layer: _count(rows) for layer, rows in observed.items()},
+            "first_mismatches": mismatches[:8],
+            "fixed_frames_cleared": {layer: len(frames) for layer, frames in fixed_frames.items()},
+        }
+        raise AssertionError(
+            "POSTCONDITION_FAILED: interval interpolation differs from " + expected + ": " + json.dumps(summary)[:1500]
+        )
     changed = sum(
         1
         for layer_text, rows in before.items()
@@ -345,6 +377,7 @@ def interpolation_range(scene, arguments, _request, context):
         "last_frame": last,
         "interval_count": sum(len(rows) for rows in observed.values()),
         "changed_count": changed,
+        "fixed_frames_cleared": sum(len(frames) for frames in fixed_frames.values()),
         "before": {layer: _count(rows) for layer, rows in before.items()},
     }, []
 

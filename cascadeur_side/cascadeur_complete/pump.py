@@ -63,6 +63,8 @@ _state = {
     "last_heartbeat": 0.0,
     "processed": 0,
     "last_error": None,
+    "handler_stamp": None,
+    "handlers_reloaded": 0,
 }
 
 
@@ -124,6 +126,7 @@ def _write_heartbeat(now=None):
                 "heartbeat": now,
                 "busy": _state["busy"],
                 "processed": _state["processed"],
+                "handlers_reloaded": _state["handlers_reloaded"],
                 "last_error": _state["last_error"],
             },
         )
@@ -168,11 +171,64 @@ def _modal_window_open(user32):
     return bool(blocked)
 
 
+def _handler_stamp():
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "handlers")
+    entries = []
+    for name in sorted(os.listdir(root)):
+        if name.endswith(".py"):
+            info = os.stat(os.path.join(root, name))
+            entries.append((name, info.st_size, info.st_mtime_ns))
+    return tuple(entries)
+
+
+def _reload_handlers_if_changed():
+    """Hot-reload the handler modules after a reinstall replaced them on disk.
+
+    Cascadeur imports Python modules once at startup, so handler fixes used to
+    require restarting Cascadeur. Handlers register into the registry's dicts,
+    which runtime dispatches through, so clearing those dicts and re-executing
+    the handler modules swaps the implementations in place. A failed reload
+    restores the previous handlers. runtime.py and this module still need a
+    restart to change.
+    """
+    import importlib
+    import sys
+
+    stamp = _handler_stamp()
+    if _state["handler_stamp"] is None or stamp == _state["handler_stamp"]:
+        _state["handler_stamp"] = stamp
+        return
+    _state["handler_stamp"] = stamp
+    from . import handler_registry, handlers
+
+    saved = (dict(handler_registry._HANDLERS), dict(handler_registry._POSTCONDITIONS))
+    handler_registry._HANDLERS.clear()
+    handler_registry._POSTCONDITIONS.clear()
+    try:
+        for name in list(handlers.__all__):
+            module = sys.modules.get(handlers.__name__ + "." + name)
+            if module is not None:
+                importlib.reload(module)
+        # Re-executing the package imports submodules added by the new version.
+        importlib.reload(handlers)
+    except Exception as exc:
+        handler_registry._HANDLERS.clear()
+        handler_registry._HANDLERS.update(saved[0])
+        handler_registry._POSTCONDITIONS.clear()
+        handler_registry._POSTCONDITIONS.update(saved[1])
+        _state["last_error"] = f"handler reload: {type(exc).__name__}: {exc}"
+        print("[cascadeur-complete-pump] handler reload failed:", exc)
+        return
+    _state["handlers_reloaded"] += 1
+
+
 def _drain(user32):
     if _state["busy"]:
         return
     now = time.time()
     if now - _state["last_heartbeat"] >= HEARTBEAT_SECONDS:
+        with suppress(Exception):
+            _reload_handlers_if_changed()
         _write_heartbeat(now)
     state_dir = _runtime_state_dir()
     if _disabled(state_dir) or not any((state_dir / "requests").glob("*.json")):
