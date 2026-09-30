@@ -534,3 +534,92 @@ def finger_stats(quaternions_wxyz: dict[str, np.ndarray], spike_deg: float = 10.
             }
         )
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Finger fan (gaps between neighbouring fingers)
+
+FAN_FINGERS = ("Index", "Middle", "Ring", "Pinky")
+FAN_PAIRS = (("Index", "Middle"), ("Middle", "Ring"), ("Ring", "Pinky"))
+
+
+def _unit(vectors):
+    return vectors / np.maximum(np.linalg.norm(vectors, axis=-1, keepdims=True), 1e-9)
+
+
+def fan_joint_names(side: str) -> list[str]:
+    """Skeleton joints that define the palm plane and each finger's proximal bone."""
+    return [f"{side}Hand"] + [f"{side}Hand{finger}{index}" for finger in FAN_FINGERS for index in (1, 2)]
+
+
+def finger_gaps(joints: dict[str, np.ndarray], side: str) -> dict[str, Any]:
+    """Signed angles (deg) between neighbouring proximal finger bones in the palm plane.
+
+    The palm normal comes from the knuckle line (index to pinky) and the wrist
+    to knuckle direction. Positive means the pair spreads apart. A static
+    offset here is what a spread limit around the clip's own median pose
+    cannot see (e.g. an index finger held away from the middle finger for
+    the whole clip, which reads as a claw).
+    """
+    knuckle = {finger: joints[f"{side}Hand{finger}1"] for finger in FAN_FINGERS}
+    direction = {finger: _unit(joints[f"{side}Hand{finger}2"] - knuckle[finger]) for finger in FAN_FINGERS}
+    across = _unit(knuckle["Pinky"] - knuckle["Index"])
+    along = _unit((knuckle["Index"] + knuckle["Pinky"]) / 2 - joints[f"{side}Hand"])
+    normal = _unit(np.cross(across, along))
+
+    def planar(vectors):
+        return _unit(vectors - (vectors * normal).sum(1, keepdims=True) * normal)
+
+    gaps = {}
+    for first, second in FAN_PAIRS:
+        a, b = planar(direction[first]), planar(direction[second])
+        gaps[first + second] = np.degrees(np.arctan2((np.cross(b, a) * normal).sum(1), (a * b).sum(1)))
+    return {"gaps": gaps, "normal": normal}
+
+
+def gap_summary(gaps: dict[str, np.ndarray]) -> dict[str, Any]:
+    return {
+        pair: {
+            "median_deg": round(float(np.median(values)), 1),
+            "p5_deg": round(float(np.percentile(values, 5)), 1),
+            "p95_deg": round(float(np.percentile(values, 95)), 1),
+        }
+        for pair, values in gaps.items()
+    }
+
+
+def close_index_gap(
+    joints: dict[str, np.ndarray],
+    hand_box_wxyz: np.ndarray,
+    index_box_wxyz: np.ndarray,
+    side: str,
+    target_deg: float = 3.0,
+    keep: float = 0.2,
+    sigma: float = 3.0,
+) -> dict[str, Any]:
+    """Rotate the index knuckle box about the palm normal so the index-middle gap becomes natural.
+
+    New gap = ``target_deg`` + ``keep`` x (smoothed gap - its median): the
+    static splay goes, a little of the slow spread motion stays, frame noise
+    goes. The box's children follow through the hierarchy. Returns the new
+    local rotation (relative to the hand box) as Cascadeur Euler XYZ radians.
+    """
+    from scipy.ndimage import gaussian_filter1d
+    from scipy.spatial.transform import Rotation
+
+    measured = finger_gaps(joints, side)
+    gap = measured["gaps"]["IndexMiddle"]
+    wanted = target_deg + keep * (gaussian_filter1d(gap, sigma, mode="nearest") - np.median(gap))
+    correction = Rotation.from_rotvec(measured["normal"] * np.radians(wanted - gap)[:, None])
+    hand = Rotation.from_quat(np.asarray(hand_box_wxyz, dtype=float)[:, [1, 2, 3, 0]])
+    index = Rotation.from_quat(np.asarray(index_box_wxyz, dtype=float)[:, [1, 2, 3, 0]])
+    local = hand.inv() * correction * index
+    return {
+        "euler_xyz": local.as_euler("xyz"),
+        "gap_before": gap,
+        "gap_after": wanted,
+        "rotation_deg": {
+            "median": round(float(np.median(np.abs(gap - wanted))), 1),
+            "max": round(float(np.abs(gap - wanted).max()), 1),
+        },
+    }

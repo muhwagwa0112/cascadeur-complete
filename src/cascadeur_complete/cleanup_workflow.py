@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from .service import CascadeurService
 
 READ_CHUNK = 25
+# An index-middle gap this wide for most of the clip reads as a claw.
+FAN_FLAG_DEG = 10.0
 
 
 class CleanupError(RuntimeError):
@@ -237,7 +239,69 @@ class CleanupWorkflow:
             for row in rows
             if row["steps_over_spike"] or (row["spread_range_deg"] > 15 and "Thumb" not in row["joint"])
         ]
-        return {"frames": frames, "joints": rows, "flagged": [row["joint"] for row in flagged]}
+        result = {"frames": frames, "joints": rows, "flagged": [row["joint"] for row in flagged]}
+        try:
+            fan = self._fan_track(object_ids)
+        except CleanupError as exc:
+            result["gaps_unavailable"] = str(exc)
+            return result
+        result["gaps"] = {side: mc.gap_summary(mc.finger_gaps(fan[2], side)["gaps"]) for side in mc.SIDES}
+        for side, pairs in result["gaps"].items():
+            if abs(pairs["IndexMiddle"]["median_deg"]) > FAN_FLAG_DEG:
+                result["flagged"].append(f"{side}IndexMiddle gap")
+        return result
+
+    # -- finger fan --------------------------------------------------------
+
+    def _fan_track(self, object_ids):
+        objects = self.objects(object_ids)
+        joint_names = [name for side in mc.SIDES for name in mc.fan_joint_names(side)]
+        box_names = [f"{side}{suffix}" for side in mc.SIDES for suffix in ("Hand_Box", "HandIndex1_Box")]
+        joints = self.by_name([item for item in objects if item["type"] == "Joint"], joint_names)
+        boxes = self.by_name([item for item in objects if item["type"] == "Box"], box_names)
+        frames = self.frame_count()
+        sampled = self.sample(list(joints.values()) + list(boxes.values()), frames, space="global")
+        positions = {name: sampled["position"][object_id] for name, object_id in joints.items()}
+        rotations = {name: sampled["quaternion"][object_id] for name, object_id in boxes.items()}
+        return boxes, frames, positions, rotations
+
+    def prepare_finger_fan(self, object_ids=None, target_deg: float = 3.0, keep: float = 0.2, ttl: float = 900.0):
+        boxes, frames, positions, rotations = self._fan_track(object_ids)
+        index_ids = [boxes[f"{side}HandIndex1_Box"] for side in mc.SIDES]
+        keys = self.key_frames(index_ids)
+        writes = []
+        sides = {}
+        for side in mc.SIDES:
+            closed = mc.close_index_gap(
+                positions,
+                rotations[f"{side}Hand_Box"],
+                rotations[f"{side}HandIndex1_Box"],
+                side,
+                target_deg,
+                keep,
+            )
+            object_id = boxes[f"{side}HandIndex1_Box"]
+            for frame in keys[object_id]:
+                if 0 <= frame < frames:
+                    writes.append(
+                        {
+                            "id": object_id,
+                            "frame": frame,
+                            "rotation_euler_xyz_radians": [float(v) for v in closed["euler_xyz"][frame]],
+                        }
+                    )
+            sides[side] = {
+                "index_middle_gap": {
+                    "before": mc.gap_summary({"gap": closed["gap_before"]})["gap"],
+                    "after": mc.gap_summary({"gap": closed["gap_after"]})["gap"],
+                },
+                "index_rotation_deg": closed["rotation_deg"],
+            }
+        prepared = self.service.prepare_change(
+            "rotation_keys", "animation.rotation_keys_set", {"writes": writes, "space": "local"}, ttl
+        )
+        prepared["cleanup"] = {"kind": "finger_fan", "frames": frames, "write_count": len(writes), "sides": sides}
+        return prepared
 
     def prepare_fingers(self, object_ids=None, joints=None, spike_deg: float = 10.0, ttl: float = 900.0):
         boxes, frames, quaternions = self._finger_quaternions(object_ids, joints)

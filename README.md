@@ -54,6 +54,8 @@ write (commit it with `change_commit`):
   and per-foot offsets that stop planted feet sliding while keeping each leg within
   its original reach; leftover one-foot drags become short steps.
 - `fingers`: soft-limits knuckle spread/twist and removes spikes while keeping curl.
+- `finger_fan`: rotates each index knuckle about the palm normal so a claw-like
+  index–middle splay settles near a natural gap (3° by default).
 
 On a 986-frame clip this took mean foot skating from 0.98 to 0.34 cm/frame with no
 remaining slides or drags. The [`cascadeur-mocap-cleanup`](skills/cascadeur-mocap-cleanup/SKILL.md)

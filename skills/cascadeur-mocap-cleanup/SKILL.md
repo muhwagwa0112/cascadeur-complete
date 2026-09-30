@@ -1,6 +1,6 @@
 ---
 name: cascadeur-mocap-cleanup
-description: Clean up imported mocap in Cascadeur through the cascadeur-complete MCP as one measured pipeline — key reduction, spline interpolation, AutoPhysics, finger spread/spike cleanup and whole-clip foot-sliding correction, each verified by numbers over every frame. Use when the user asks to clean up, polish or fix mocap/imported motion, foot sliding/skating, root-motion glide, jittery or splayed fingers, or to apply AutoPhysics to captured motion.
+description: Clean up imported mocap in Cascadeur through the cascadeur-complete MCP as one measured pipeline — key reduction, spline interpolation, AutoPhysics, finger spread/spike cleanup and whole-clip foot-sliding correction, each verified by numbers over every frame. Use when the user asks to clean up, polish or fix mocap/imported motion, foot sliding/skating, root-motion glide, jittery, splayed or claw-like fingers, or to apply AutoPhysics to captured motion.
 ---
 
 # Cascadeur Mocap Cleanup
@@ -15,7 +15,7 @@ This skill sits on top of `cascadeur-mcp-workflows` (general routing, safety con
 |---|---|
 | Full pipeline order, exact tool calls per stage | [pipeline.md](references/pipeline.md) |
 | Foot sliding / skating / root glide (the global contact solve) | [foot-contacts.md](references/foot-contacts.md) |
-| Finger spread, twist, spikes | [fingers.md](references/fingers.md) |
+| Finger spread, twist, spikes, claw-like index splay | [fingers.md](references/fingers.md) |
 | Cascadeur and MCP quirks that silently break cleanup | [pitfalls.md](references/pitfalls.md) |
 | Metrics, thresholds, what to report | [verification.md](references/verification.md) |
 
@@ -34,7 +34,7 @@ This skill sits on top of `cascadeur-mcp-workflows` (general routing, safety con
 1. `cascadeur_status` → pump alive, correct build; `scene_file list` → active tab.
 2. Bake the clip, reduce keys every 3 frames on every layer, set interpolation to BEZIER over the range, refresh interpolation.
 3. AutoPhysics enable + snap (removes jitter, balances the Center of Mass). It does **not** fix foot sliding.
-4. Fingers: switch AutoPosing off for the finger controllers, `motion_cleanup_prepare(kind="fingers")`, commit.
+4. Fingers: switch AutoPosing off for the finger controllers, `motion_cleanup_prepare(kind="fingers")`, commit; if `gaps` flags an index–middle splay (claw look), `motion_cleanup_prepare(kind="finger_fan")`, commit.
 5. Feet: `motion_cleanup_prepare(kind="foot_contacts")`, commit, refresh, re-analyze.
 6. Save as a new file; close stale working tabs with `feature_prepare("close_working_tabs")`.
 

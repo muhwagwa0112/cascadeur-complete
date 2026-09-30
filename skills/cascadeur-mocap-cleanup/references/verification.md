@@ -10,6 +10,7 @@
 | Drags | `feet.survey.drags` | one foot < 1.5 cm high moving > 0.8 cm/frame while the other is planted | 0 |
 | Leg reach | `cleanup.solve.leg_over_cm` | worst hip-ankle overshoot after the solve | < 0.3 cm |
 | Finger spread / twist range | `fingers.joints` | p1–p99 range relative to rest | knuckles ≲ 2 × limit |
+| Index–middle gap | `fingers.gaps.<Side>.IndexMiddle` | signed angle between index and middle proximal bones in the palm plane | median 2–6° |
 | Finger spikes | `fingers.joints[*].steps_over_spike` | frames jumping > 10° | 0 (fast flicks may stay) |
 
 Foot skating is the standard metric in motion-generation work; use it to confirm a user-reported range is actually flagged before fixing anything.

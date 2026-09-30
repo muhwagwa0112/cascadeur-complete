@@ -37,7 +37,7 @@ Save as `<clip>_clean_physics.casc`.
 
 ## 3. Fingers
 
-See [fingers.md](fingers.md). In short: switch AutoPosing off for the finger controllers, `motion_cleanup_prepare(kind="fingers")`, commit, refresh, re-analyze. Save as `<clip>_clean_fingers.casc`.
+See [fingers.md](fingers.md). In short: switch AutoPosing off for the finger controllers, `motion_cleanup_prepare(kind="fingers")`, commit, refresh, re-analyze; then check `gaps` and run `kind="finger_fan"` when the index–middle gap is flagged. Save as `<clip>_clean_fingers.casc`.
 
 ## 4. Feet
 

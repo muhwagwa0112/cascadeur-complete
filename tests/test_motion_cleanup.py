@@ -191,3 +191,43 @@ def test_reads_fail_when_the_active_tab_changes():
     client = _FakeClient(_standing_track(), [0], scene_ids=["s1", "s2"])
     with pytest.raises(CleanupError, match="active scene tab changed"):
         CleanupWorkflow(_FakeService(client)).analyze_feet()
+
+
+def _splayed_hand(splay_deg=20.0):
+    """Right hand, palm facing down, fingers along +Z; the index is splayed away from the middle finger."""
+    from scipy.spatial.transform import Rotation
+
+    frames = 60
+    joints = {"RightHand": np.zeros((frames, 3))}
+    for finger, x in (("Index", 0.0), ("Middle", 2.0), ("Ring", 4.0), ("Pinky", 6.0)):
+        joints[f"RightHand{finger}1"] = np.tile([x, 0.0, 10.0], (frames, 1))
+        joints[f"RightHand{finger}2"] = np.tile([x, 0.0, 14.0], (frames, 1))
+    normal = mc.finger_gaps(joints, "Right")["normal"][0]
+    wobble = splay_deg + 3 * np.sin(np.linspace(0, 6, frames))
+    index_box = Rotation.from_rotvec(normal[None, :] * np.radians(wobble)[:, None])
+    bone = np.array([0.0, 0.0, 4.0])
+    joints["RightHandIndex2"] = joints["RightHandIndex1"] + index_box.apply(bone)
+    identity = np.tile([1.0, 0.0, 0.0, 0.0], (frames, 1))
+    return joints, identity, index_box.as_quat()[:, [3, 0, 1, 2]]
+
+
+def test_finger_gaps_see_a_static_index_splay():
+    joints, _, _ = _splayed_hand()
+    gaps = mc.gap_summary(mc.finger_gaps(joints, "Right")["gaps"])
+    assert 15 < gaps["IndexMiddle"]["median_deg"] < 25
+    assert abs(gaps["MiddleRing"]["median_deg"]) < 0.1
+
+
+def test_close_index_gap_rotates_the_knuckle_to_the_target_gap():
+    from scipy.spatial.transform import Rotation
+
+    joints, hand, index = _splayed_hand()
+    closed = mc.close_index_gap(joints, hand, index, "Right", target_deg=3.0)
+    new_index = Rotation.from_quat(hand[:, [1, 2, 3, 0]]) * Rotation.from_euler("xyz", closed["euler_xyz"])
+    old_index = Rotation.from_quat(index[:, [1, 2, 3, 0]])
+    moved = dict(joints)
+    base = joints["RightHandIndex1"]
+    moved["RightHandIndex2"] = base + (new_index * old_index.inv()).apply(joints["RightHandIndex2"] - base)
+    after = mc.finger_gaps(moved, "Right")["gaps"]["IndexMiddle"]
+    assert np.abs(after - closed["gap_after"]).max() < 1e-6
+    assert abs(np.median(after) - 3.0) < 0.5 and after.max() < 5.0

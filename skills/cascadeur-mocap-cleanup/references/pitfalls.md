@@ -15,6 +15,12 @@ Each of these cost hours once. Check them before assuming the math is wrong.
 - **AutoPosing overrides.** Controllers with an AutoPosing link are re-posed after the write. Switch AutoPosing off for exactly the controllers you rewrite (`auto_posing_state`).
 - **Settled read-back.** Rotation/position commits are re-read in a separate request (0.2° / tolerance cm). A failure there triggers automatic restore — treat it as "something overrode the value", not a flaky test.
 
+## Measuring the right thing
+
+- **Median-relative limits miss static offsets.** A pose error present in every frame (the index splayed 20° from the middle finger) is the median, so limits around the median leave it. Measure anatomical relations between parts (finger gaps in the palm plane) as well as each joint's own variation.
+- **Leg reach ends the foot solve.** Where the leg is already at its longest (a push-off, heel rising, toe on the floor), the solve cannot pin the toe without stretching the leg; the residual is a timing/placement issue, not a solver setting.
+- **Skate numbers depend on the floor estimate.** The floor is the 3rd percentile of each contact point in the clip being measured; compare before/after with the same floors (`motion_cleanup_prepare` does) and expect small shifts between separate analyze runs.
+
 ## Interpolation and physics
 
 - **Unbaking** leaves `FIXED` intervals with fixed frames inside; changing interpolation alone does nothing. `interpolation_range` clears them. Adjacent-key intervals stay STEP.

@@ -1517,7 +1517,7 @@ def motion_cleanup_analyze(
     segments: list[list[int]] | None = None,
     spike_deg: float = 10.0,
 ) -> dict[str, Any]:
-    """Measure a mocap clip over every frame: foot skating (cm/frame), slides, drags, finger spread/spikes.
+    """Measure a mocap clip over every frame: foot skating (cm/frame), slides, drags, finger spread/spikes/gaps.
 
     Read-only. Samples the active scene's Quick Rigging Tool character (pass
     object_ids to restrict to one character). segments are [first, last]
@@ -1541,13 +1541,14 @@ def motion_cleanup_analyze(
 
 @mcp.tool()
 def motion_cleanup_prepare(
-    kind: Literal["foot_contacts", "fingers"],
+    kind: Literal["foot_contacts", "fingers", "finger_fan"],
     object_ids: list[str] | None = None,
     steps: bool = True,
     max_foot_offset_cm: float = 10.0,
     body_smoothness: float = 2.0,
     joints: list[str] | None = None,
     spike_deg: float = 10.0,
+    index_gap_deg: float = 3.0,
     segments: list[list[int]] | None = None,
     ttl: float = 900,
 ) -> dict[str, Any]:
@@ -1558,6 +1559,9 @@ def motion_cleanup_prepare(
     their original reach; with steps=true, remaining one-foot drags become
     short steps. fingers: soft-limit knuckle spread/twist and remove spikes,
     keeping curl (switch AutoPosing off for the finger controllers first).
+    finger_fan: rotate each index knuckle about the palm normal so the
+    index-middle gap settles near index_gap_deg (removes a claw-like splay
+    that spread limits around the clip's own median pose cannot see).
     Writes only existing keys. The result carries predicted before/after
     metrics under "cleanup". Commit with a long timeout (e.g. 900 s).
     """
@@ -1569,6 +1573,8 @@ def motion_cleanup_prepare(
         if kind == "foot_contacts":
             params = ContactParams(max_foot_offset=max_foot_offset_cm, body_smoothness=body_smoothness)
             return workflow.prepare_feet(object_ids, params, steps, _segments(segments), ttl)
+        if kind == "finger_fan":
+            return workflow.prepare_finger_fan(object_ids, index_gap_deg, ttl=ttl)
         return workflow.prepare_fingers(object_ids, joints, spike_deg, ttl)
     except (RuntimeError, ImportError) as exc:
         return _cleanup_error(exc)
