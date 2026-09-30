@@ -1,14 +1,31 @@
 # Cascadeur MCP
 
+<p align="center">
+  <strong>If Cascadeur MCP saves you time, consider supporting its continued development, testing, and maintenance.</strong>
+</p>
+
+<p align="center">
+  <a href="https://ko-fi.com/muhwagwa0112">
+    <img src="docs/assets/kofi-support-red.png"
+         alt="Support Muhwagwa0112 on Ko-fi"
+         width="420">
+  </a>
+</p>
+
 `cascadeur-complete` is the compatibility package name for a clean-room MCP
 server and in-process bridge targeting Cascadeur `2026.1.3.0.15619` on Windows.
 The project is pre-1.0 and provides a **verified subset** of Cascadeur automation;
 it does not claim that every user-facing Cascadeur feature is implemented.
 
 The host uses MCP over stdio. A Python 3.11-compatible command package runs in
-Cascadeur and drains the Local AppData request queue on the UI thread. One UI
-trigger drains a whole burst of requests: the bridge lingers briefly for
-follow-up requests and yields to Cascadeur's event loop after rendering, file
+Cascadeur and drains the Local AppData request queue on the UI thread. A hidden
+message-only window with a Win32 timer on that thread (the UI-thread pump)
+claims requests as they arrive, so Cascadeur is never brought to the foreground
+and nothing is clicked; the host posts a wake-up message and waits for the claim
+while the pump's heartbeat in `state/pump.json` is fresh. When the pump is stale,
+disabled (`state/pump.disabled`), or cannot claim a request (another scene tab,
+a modal dialog), the host falls back to invoking `Process Pending` through UI
+Automation. The bridge yields to Cascadeur's event loop after rendering, file
 dialogs, scene loads and view toggles. Capability
 discovery is not counted as feature support: a feature is supported only when a
 dedicated adapter, exact postcondition, and version-matched live evidence exist.
@@ -33,11 +50,10 @@ truth; neither tool count nor discovered Python symbols imply support.
 2. Verify the installer signature and checksum as described in
    [release verification](docs/RELEASE.md).
 3. Run the per-user installer. It installs the isolated host and Cascadeur bridge,
-   updates Cascadeur's user command registration, and registers the MCP with Codex
-   when the `codex` command is available.
-4. Restart Cascadeur and invoke
-   `Commands > Cascadeur Complete > Process Pending` once if event-driven draining
-   is not active.
+   updates Cascadeur's user command registration and Python path, and registers
+   the MCP with Codex when the `codex` command is available.
+4. Restart Cascadeur. The UI-thread pump starts with it; `ui_pump.active` in
+   `cascadeur_status` confirms it.
 5. Run `scripts\verify-install.ps1` or the installed Start Menu verification link.
 
 The installer does not require Python, `uv`, or Poppet. Poppet is neither modified
@@ -71,6 +87,7 @@ gates defined in `.github/workflows/release.yml`.
 - Host: `%LOCALAPPDATA%\CascadeurMCP\cascadeur-complete`
 - Bridge: `%LOCALAPPDATA%\Nekki Limited\Cascadeur\user_scripts\cascadeur_complete`
 - Queue/snapshots: `%LOCALAPPDATA%\CascadeurMCP\cascadeur-complete\state`
+- Pump heartbeat: `state\pump.json` (create `state\pump.disabled` to turn the pump off)
 - Backups: `%LOCALAPPDATA%\CascadeurMCP\backups`
 
 ## Security and license
