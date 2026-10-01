@@ -38,6 +38,7 @@ Check `feature_describe` for the live state: only `available` rows have live evi
 | `interpolation_range` | Interpolation range | `timeline.interpolation_range` | `layer_ids`: layer GUIDs (default: all), `first_frame`: int, `last_frame`: int, `interpolation`: Interpolation name (e.g. CLAMPED_BEZIER, LINEAR) | — | `interval_interpolation_equals_request` |
 | `interpolation_refresh` | Interpolation refresh | `animation.interpolation_refresh` | — | — | `interpolation_refreshed` |
 | `layer_activate` | Activate layer | `layer.activate` | `layer_id`: layer GUID | — | `active_layer_equals_request` |
+| `mesh_sample` | Sample skinned mesh | `animation.mesh_sample` | `frames`: frame numbers to sample, `name`: file stem under state/mesh (A-Z, a-z, 0-9, _ or -), `id`: mesh object ID (default: the scene's single mesh) | — | `mesh_sample_written` |
 | `node_editor` | Node Editor | `view.node_editor` | `state`: on\|off | — | `viewport_render_changed` |
 | `position_keys` | Position keys | `animation.position_keys_set` | `writes`: [{id, frame (existing key), position}], `space`: global\|local (default global) | — | `position_keys_equal_request` |
 | `rotation_keys` | Rotation keys | `animation.rotation_keys_set` | `writes`: [{id, frame (existing key), rotation_euler_xyz_radians (local)}] | — | `rotation_keys_equal_request` |

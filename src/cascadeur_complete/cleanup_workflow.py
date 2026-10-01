@@ -21,6 +21,14 @@ if TYPE_CHECKING:
 READ_CHUNK = 25
 # An index-middle gap this wide for most of the clip reads as a claw.
 FAN_FLAG_DEG = 10.0
+# Arm controllers moved by the arm clearance solve (elbow group, then wrist group).
+ARM_POINTS = (
+    "ForeArm_MainPoint",
+    "ForeArm_AdditionalPoint",
+    "Hand_MainPoint",
+    "Hand_DirectionPoint",
+    "Hand_AdditionalPoint",
+)
 
 
 class CleanupError(RuntimeError):
@@ -97,16 +105,27 @@ class CleanupWorkflow:
             out[row["id"]] = keys_by_layer[layer_id]
         return out
 
-    def sample(self, ids: list[str], frames: int, space: str = "global") -> dict[str, dict[str, np.ndarray]]:
-        """Positions and quaternions (wxyz) for every frame; the first read refreshes interpolation."""
+    def sample(
+        self, ids: list[str], frames: int, space: str = "global", only: list[int] | None = None
+    ) -> dict[str, dict[str, np.ndarray]]:
+        """Positions and quaternions (wxyz) per frame (rows of unread frames stay zero).
+
+        Reads every frame, or just ``only``; the first read refreshes interpolation.
+        """
         positions = {object_id: np.zeros((frames, 3)) for object_id in ids}
         quaternions = {object_id: np.zeros((frames, 4)) for object_id in ids}
-        for start in range(0, frames, READ_CHUNK):
-            chunk = list(range(start, min(frames, start + READ_CHUNK)))
+        wanted = list(range(frames)) if only is None else [int(frame) for frame in only]
+        for start in range(0, len(wanted), READ_CHUNK):
+            chunk = wanted[start : start + READ_CHUNK]
             operations = [
                 Operation(
                     name="animation.transform_get",
-                    arguments={"ids": ids, "frame": frame, "space": space, **({"refresh": True} if frame == 0 else {})},
+                    arguments={
+                        "ids": ids,
+                        "frame": frame,
+                        "space": space,
+                        **({"refresh": True} if frame == wanted[0] else {}),
+                    },
                 )
                 for frame in chunk
             ]
@@ -330,4 +349,124 @@ class CleanupWorkflow:
             "note": "Switch AutoPosing off for these controllers first (auto_posing_state inactive); "
             "otherwise the rig re-derives the fingers and the settled read-back rolls the change back.",
         }
+        return prepared
+
+    # -- arm clearance -------------------------------------------------------
+
+    def _arm_points(self, object_ids):
+        objects = self.objects(object_ids)
+        # The shoulder point anchors the solve; only ARM_POINTS are written.
+        names = [f"{s}{name}" for s in mc.SIDES for name in ("Arm_MainPoint", *ARM_POINTS)]
+        points = self.by_name([item for item in objects if item["type"] == "Point"], names)
+        meshes = [item for item in objects if item["type"] == "Mesh Object"]
+        if len(meshes) != 1:
+            raise CleanupError(f"Expected one character mesh, found {len(meshes)}; pass object_ids including the mesh")
+        return points, meshes[0]["id"]
+
+    def _arm_mesh(self, object_ids, name: str, every_frame: bool = False):
+        """Arm controller positions and the skinned mesh at the arm controllers' keys (or every frame)."""
+        points, mesh_id = self._arm_points(object_ids)
+        frames = self.frame_count()
+        keys = self.key_frames(list(points.values()))
+        written = [points[f"{s}{point}"] for s in mc.SIDES for point in ARM_POINTS]
+        common = sorted(set.intersection(*[set(keys[item]) for item in written]))
+        common = [frame for frame in common if 0 <= frame < frames]
+        if len(common) < 3:
+            raise CleanupError("The arm controllers share fewer than three keys; reduce and bake the clip first")
+        keys = np.array(common)
+        if every_frame:
+            common = list(range(frames))
+        sampled = self.sample(list(points.values()), frames, only=common)
+        track = {name_: sampled["position"][object_id][common] for name_, object_id in points.items()}
+        result = self._read(
+            "mesh_sample",
+            [Operation(name="animation.mesh_sample", arguments={"id": mesh_id, "frames": common, "name": name})],
+            timeout=600,
+        )
+        mesh = np.load(result["path"])
+        return points, np.array(common), track, mesh, keys
+
+    def _arm_surface(self, mesh, track, side, params):
+        return mc.MeshSurface(
+            mesh["positions"],
+            mesh["triangles"],
+            mesh["dominant"],
+            mesh["joints"],
+            side,
+            track[f"{side}Arm_MainPoint"],
+            track[f"{side}ForeArm_MainPoint"],
+            track[f"{side}Hand_MainPoint"],
+            params,
+        )
+
+    def analyze_arms(
+        self, object_ids=None, params: mc.ArmParams | None = None, every_frame: bool = False
+    ) -> dict[str, Any]:
+        """Where each arm's mesh is inside the rest of the body, measured on the skinned mesh.
+
+        Samples the arm controllers' key frames, or every frame to check the
+        interpolated frames between keys as well.
+        """
+        params = params or mc.ArmParams()
+        _, frames, track, mesh, _ = self._arm_mesh(object_ids, "arms_analyze", every_frame)
+        zero = np.zeros((2, len(frames), 3))
+        return {
+            "sampled_frames": len(frames),
+            **{
+                side: mc.depth_summary(self._arm_surface(mesh, track, side, params).depth(zero), frames, params.allow)
+                for side in mc.SIDES
+            },
+        }
+
+    def prepare_arm_clearance(self, object_ids=None, params: mc.ArmParams | None = None, ttl: float = 900.0):
+        params = params or mc.ArmParams()
+        # The surface covers every frame so a path that cuts through the body
+        # between two clear keys is seen; the offsets are solved at the keys.
+        points, frames, track, mesh, keys = self._arm_mesh(object_ids, "arms_prepare", every_frame=True)
+        at_keys = np.searchsorted(frames, keys)
+        spread = mc.linear_interpolation(frames, keys)
+        spacing = float(np.median(np.diff(keys)))
+        writes = []
+        sides = {}
+        for side in mc.SIDES:
+            solved = mc.solve_arm_offsets(
+                track[f"{side}Arm_MainPoint"][at_keys],
+                track[f"{side}ForeArm_MainPoint"][at_keys],
+                track[f"{side}Hand_MainPoint"][at_keys],
+                self._arm_surface(mesh, track, side, params),
+                params,
+                spacing,
+                spread,
+            )
+            for name in ARM_POINTS:
+                offset = solved["elbow"] if name.startswith("ForeArm") else solved["wrist"]
+                object_id = points[f"{side}{name}"]
+                for index, frame in enumerate(keys):
+                    if np.abs(offset[index]).max() > 1e-3:
+                        position = track[f"{side}{name}"][at_keys[index]] + offset[index]
+                        writes.append({"id": object_id, "frame": int(frame), "position": [float(v) for v in position]})
+            sides[side] = {
+                "before": mc.depth_summary(solved["depth_before"], frames, params.allow),
+                "predicted_after": mc.depth_summary(solved["depth_after"], frames, params.allow),
+                "elbow_offset_max_cm": round(float(np.linalg.norm(solved["elbow"], axis=1).max()), 1),
+                "wrist_offset_max_cm": round(float(np.linalg.norm(solved["wrist"], axis=1).max()), 1),
+                "iterations": solved["iterations"],
+            }
+        report = {
+            "kind": "arm_clearance",
+            "sampled_frames": len(frames),
+            "write_count": len(writes),
+            "sides": sides,
+        }
+        if not writes:
+            report["note"] = "No arm vertex is inside the body beyond the allowed overlap; nothing to write."
+            return {"ok": True, "cleanup": report}
+        rig_solved = [points[f"{s}ForeArm_AdditionalPoint"] for s in mc.SIDES]
+        prepared = self.service.prepare_change(
+            "position_keys",
+            "animation.position_keys_set",
+            {"writes": writes, "space": "global", "tolerance_cm": 10.0, "rig_solved_ids": rig_solved},
+            ttl,
+        )
+        prepared["cleanup"] = report
         return prepared

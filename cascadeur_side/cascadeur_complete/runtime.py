@@ -38,6 +38,7 @@ READ_ONLY_OPERATIONS = {
     "timeline.get",
     "timeline.range",
     "animation.transform_get",
+    "animation.mesh_sample",
     "animation.key_list",
     "animation.graph_query",
     "animation.cycle_query",

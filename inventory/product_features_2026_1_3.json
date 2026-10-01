@@ -1451,6 +1451,41 @@
       "since": "2026.1"
     },
     {
+      "id": "mesh_sample",
+      "family": "animation",
+      "name": "Sample skinned mesh",
+      "source_url": "https://cascadeur.com/help/tools",
+      "license": "any",
+      "dependency": null,
+      "route": "animation.mesh_sample",
+      "action": "animation.mesh_sample",
+      "operation": "animation.mesh_sample",
+      "mutation": false,
+      "requires_scene": true,
+      "execution_mode": "Native",
+      "implementation_status": "implemented",
+      "preconditions": [
+        "compatible_version"
+      ],
+      "postconditions": [
+        "mesh_sample_written"
+      ],
+      "adapter_id": "cascadeur_2026_1.animation.mesh_sample",
+      "contract_test_ids": [
+        "tests/test_postcondition_contract.py::test_every_live_feature_postcondition_is_asserted",
+        "tests/test_adapter_bindings.py::test_catalog_rows_match_adapter_bindings"
+      ],
+      "live_test_id": "tests/live/test_live_features.py::test_live_feature[mesh_sample]",
+      "fixture_id": "fixture.sample.backflip",
+      "since": "2026.1",
+      "arguments": {
+        "frames": "frame numbers to sample",
+        "name": "file stem under state/mesh (A-Z, a-z, 0-9, _ or -)",
+        "id": "mesh object ID (default: the scene's single mesh)"
+      },
+      "fixed_arguments": {}
+    },
+    {
       "id": "transform_set",
       "family": "animation",
       "name": "Set transform",

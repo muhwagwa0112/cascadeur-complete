@@ -231,3 +231,88 @@ def test_close_index_gap_rotates_the_knuckle_to_the_target_gap():
     after = mc.finger_gaps(moved, "Right")["gaps"]["IndexMiddle"]
     assert np.abs(after - closed["gap_after"]).max() < 1e-6
     assert abs(np.median(after) - 3.0) < 0.5 and after.max() < 5.0
+
+
+def _arm_through_torso(frames=40):
+    """Shoulder beside a vertical torso; the forearm swings through the torso in the middle frames."""
+    shoulder = np.tile([20.0, 140.0, 0.0], (frames, 1))
+    elbow = np.tile([22.0, 115.0, 0.0], (frames, 1))
+    swing = np.clip(1 - np.abs(np.arange(frames) - frames / 2) / 8, 0, 1)
+    wrist = np.tile([22.0, 92.0, 0.0], (frames, 1)) + np.outer(swing, [-20.0, 4.0, 0.0])
+    return shoulder, elbow, wrist
+
+
+def test_linear_interpolation_rows_blend_the_two_neighbouring_keys():
+    spread = mc.linear_interpolation(np.arange(7), np.array([0, 3, 6]))
+    dense = spread.toarray()
+    assert np.allclose(dense.sum(1), 1.0)
+    assert np.allclose(dense[3], [0, 1, 0])
+    assert np.allclose(dense[4], [0, 2 / 3, 1 / 3])
+
+
+def test_arm_solve_lifts_the_forearm_out_of_a_torso_capsule_and_keeps_bone_lengths():
+    shoulder, elbow, wrist = _arm_through_torso()
+    frames = len(shoulder)
+    body = {"Spine_Rigid": (np.tile([0.0, 90.0, 0.0], (frames, 1)), np.tile([0.0, 120.0, 0.0], (frames, 1)), 9.0)}
+    params = mc.ArmParams(margin=0.5, allow=0.1)
+    surface = mc.CapsuleSurface(shoulder, elbow, wrist, wrist, (3.5, 3.3), body, params)
+    solved = mc.solve_arm_offsets(shoulder, elbow, wrist, surface, params)
+    assert solved["depth_before"].max() > 3.0
+    assert solved["depth_after"].max() < 0.3
+    moved_elbow, moved_wrist = elbow + solved["elbow"], wrist + solved["wrist"]
+    upper = np.linalg.norm(moved_elbow - shoulder, axis=1) - np.linalg.norm(elbow - shoulder, axis=1)
+    fore = np.linalg.norm(moved_wrist - moved_elbow, axis=1) - np.linalg.norm(wrist - elbow, axis=1)
+    assert np.abs(upper).max() < 0.5 and np.abs(fore).max() < 0.5
+    # Frames far from the contact stay where they were.
+    assert np.linalg.norm(solved["wrist"][0]) < 0.5 and np.linalg.norm(solved["wrist"][-1]) < 0.5
+    summary = mc.depth_summary(solved["depth_before"], allow=0.3)
+    assert summary["penetrating_samples"] > 0 and summary["spans"]
+
+
+def _sphere_body(radius=10.0, rings=12, segments=24):
+    vertices = [[0.0, radius, 0.0]]
+    for ring in range(1, rings):
+        phi = np.pi * ring / rings
+        for segment in range(segments):
+            theta = 2 * np.pi * segment / segments
+            vertices.append(
+                [radius * np.sin(phi) * np.cos(theta), radius * np.cos(phi), radius * np.sin(phi) * np.sin(theta)]
+            )
+    vertices.append([0.0, -radius, 0.0])
+    triangles = []
+    for segment in range(segments):
+        triangles.append([0, 1 + (segment + 1) % segments, 1 + segment])
+    for ring in range(rings - 2):
+        for segment in range(segments):
+            a = 1 + ring * segments + segment
+            b = 1 + ring * segments + (segment + 1) % segments
+            triangles += [[a, b, a + segments], [b, b + segments, a + segments]]
+    last = len(vertices) - 1
+    base = 1 + (rings - 2) * segments
+    for segment in range(segments):
+        triangles.append([last, base + segment, base + (segment + 1) % segments])
+    return np.array(vertices), np.array(triangles)
+
+
+def test_mesh_surface_pushes_a_hand_out_of_the_body_mesh():
+    body, triangles = _sphere_body()
+    frames = 12
+    shoulder = np.tile([14.0, 30.0, 0.0], (frames, 1))
+    elbow = np.tile([16.0, 12.0, 0.0], (frames, 1))
+    dip = np.clip(1 - np.abs(np.arange(frames) - frames / 2) / 3, 0, 1)
+    wrist = np.tile([14.0, 0.0, 0.0], (frames, 1)) + np.outer(dip, [-8.0, 0.0, 0.0])
+    hand_cloud = np.array([[0.0, 0.0, 0.0], [-1.0, -1.0, 0.5], [-1.0, 1.0, -0.5], [-2.0, 0.0, 0.0]])
+    positions = np.zeros((frames, len(body) + len(hand_cloud), 3), dtype=np.float32)
+    for f in range(frames):
+        positions[f, : len(body)] = body
+        positions[f, len(body) :] = wrist[f] + hand_cloud
+    dominant = np.array([0] * len(body) + [1] * len(hand_cloud))
+    joints = np.array(["Spine", "LeftHand"])
+    params = mc.ArmParams()
+    surface = mc.MeshSurface(positions, triangles, dominant, joints, "Left", shoulder, elbow, wrist, params)
+    zero = np.zeros((2, frames, 3))
+    before = surface.depth(zero)
+    assert before.max() > 3.0 and before[0] == 0.0
+    solved = mc.solve_arm_offsets(shoulder, elbow, wrist, surface, params)
+    assert solved["depth_after"].max() <= params.allow + 0.2
+    assert np.linalg.norm(solved["wrist"], axis=1).max() < 12.0

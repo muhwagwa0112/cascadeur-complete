@@ -21,6 +21,10 @@ Each of these cost hours once. Check them before assuming the math is wrong.
 - **Leg reach ends the foot solve.** Where the leg is already at its longest (a push-off, heel rising, toe on the floor), the solve cannot pin the toe without stretching the leg; the residual is a timing/placement issue, not a solver setting.
 - **Skate numbers depend on the floor estimate.** The floor is the 3rd percentile of each contact point in the clip being measured; compare before/after with the same floors (`motion_cleanup_prepare` does) and expect small shifts between separate analyze runs.
 
+- **Capsules are not the mesh.** The rig's collision capsules missed most arm-through-body cases (hips, chest, fingers). Measure on the skinned mesh (`mesh_sample`).
+- **Keys are not the motion.** A fast limb can cut through the body between two clear keys; measure and constrain every frame, solve at the keys.
+- **Dropping satisfied constraints makes an iterative solve oscillate.** Keep every contact constrained once found and cap the step per iteration.
+
 ## Interpolation and physics
 
 - **Unbaking** leaves `FIXED` intervals with fixed frames inside; changing interpolation alone does nothing. `interpolation_range` clears them. Adjacent-key intervals stay STEP.
@@ -32,4 +36,6 @@ Each of these cost hours once. Check them before assuming the math is wrong.
 - **Working tabs pile up.** Each protected change opens a working clone; many rollbacks drove Cascadeur to 10 GB and a hang. Close them with `close_working_tabs` (safe only from the pump, never from a menu command).
 - **Handler changes hot-reload**; `runtime.py` / `pump.py` changes need a Cascadeur restart.
 - **Rig generation looks like a freeze.** Wait for Quick Rigging Tool bakes to finish.
+- **A minimised Cascadeur screenshots black.** Use `viewport_capture` (renders to a file) to look at a frame.
+- **Fix Collisions does not fix self-penetration**; it returns in milliseconds with no change.
 - **Dialogs** are pressed via UI Automation Invoke without focus; if one still blocks, ask the user to press it.

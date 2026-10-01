@@ -623,3 +623,357 @@ def close_index_gap(
             "max": round(float(np.abs(gap - wanted).max()), 1),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Arm clearance (arms passing through the torso, hips, head or the other arm)
+
+
+@dataclass(frozen=True)
+class ArmParams:
+    margin: float = 0.2  # cm of clearance to restore outside the surface
+    allow: float = 0.3  # cm of overlap tolerated as soft contact
+    band: float = 0.5  # cm; samples closer than this to the surface are constrained too
+    smoothness: float = 2000.0  # second-difference penalty on the offsets (per frame units)
+    velocity: float = 20.0  # first-difference penalty on the offsets
+    hand_radius: float = 2.5  # capsule mode only
+    reach: float = 8.0  # cm; a vertex further than this from the surface is not "inside"
+    per_frame: int = 40  # mesh mode: new constraints added per frame and iteration
+    step: float = 3.0  # cm an offset may change per iteration (per axis)
+    slack_penalty: float = 1000.0  # weight on contacts the solve could not satisfy
+    iterations: int = 8
+
+
+def capsule_segment(position, rotation_wxyz, length):
+    """World-space axis endpoints of a capsule lying on the rigid body's local Z axis, centred on its origin."""
+    from scipy.spatial.transform import Rotation
+
+    axis = Rotation.from_quat(np.asarray(rotation_wxyz, dtype=float)[:, [1, 2, 3, 0]]).apply([0.0, 0.0, 1.0])
+    position = np.asarray(position, dtype=float)
+    return position - axis * length / 2, position + axis * length / 2
+
+
+def _closest_on_segment(a, b, x):
+    ab = b - a
+    t = np.clip(((x - a) * ab).sum(-1) / np.maximum((ab * ab).sum(-1), 1e-9), 0, 1)
+    return a + ab * t[..., None]
+
+
+class CapsuleSurface:
+    """Arm clearance against the rig's collision capsules (coarse: misses hips, chest and fingers)."""
+
+    def __init__(self, shoulder, elbow, wrist, hand, radii, body, params: ArmParams):
+        self.shoulder, self.elbow, self.wrist, self.hand = shoulder, elbow, wrist, hand
+        self.upper_radius, self.fore_radius = radii
+        self.body = body
+        self.params = params
+
+    def _samples(self, offsets):
+        elbow, wrist = self.elbow + offsets[0], self.wrist + offsets[1]
+        out = []
+        for t in (0.5, 0.65, 0.8, 0.95):
+            out.append((self.shoulder + (elbow - self.shoulder) * t, self.upper_radius, t, 0.0))
+        for t in np.linspace(0.0, 1.0, 6):
+            out.append((elbow + (wrist - elbow) * t, self.fore_radius, 1.0 - t, float(t)))
+        out.append((self.hand + offsets[1], self.params.hand_radius, 0.0, 1.0))
+        return out
+
+    def depth(self, offsets) -> np.ndarray:
+        """Deepest penetration (cm, 0 when clear) per frame."""
+        worst = np.zeros(len(self.shoulder))
+        for a, b, radius in self.body.values():
+            for x, r, _, _ in self._samples(offsets):
+                clearance = np.linalg.norm(x - _closest_on_segment(a, b, x), axis=1) - radius - r
+                worst = np.maximum(worst, -clearance)
+        return worst
+
+    def constraints(self, offsets):
+        rows = []
+        for a, b, radius in self.body.values():
+            for x, r, we, ww in self._samples(offsets):
+                gap = x - _closest_on_segment(a, b, x)
+                distance = np.linalg.norm(gap, axis=1)
+                clearance = distance - radius - r
+                normal = gap / np.maximum(distance, 1e-6)[:, None]
+                for f in np.where(clearance < max(self.params.band, 4.0))[0]:
+                    rows.append((int(f), we, ww, normal[f], self.params.margin - clearance[f]))
+        return rows
+
+
+class MeshSurface:
+    """Arm clearance against the character's own skinned mesh.
+
+    The obstacle is every vertex not bound to this arm (or its shoulder), so
+    the torso, hips, head, legs and the other arm all count. A test vertex is
+    inside when it lies behind the nearest obstacle vertex's outward normal.
+    Arm vertices follow the solve by blending the elbow and wrist offsets
+    along the bones; the mesh is re-sampled after the write to verify.
+    """
+
+    def __init__(self, positions, triangles, dominant, joints, side, shoulder, elbow, wrist, params: ArmParams):
+        from scipy.spatial import cKDTree
+
+        self.params = params
+        names = np.array([str(item) for item in joints])[np.asarray(dominant)]
+        upper = np.char.startswith(names, side + "Arm")
+        fore = np.char.startswith(names, side + "ForeArm") | np.char.startswith(names, side + "WristTwist")
+        hand = np.char.startswith(names, side + "Hand")
+        own = upper | fore | hand | np.char.startswith(names, side + "Shoulder")
+        obstacle = np.where(~own)[0]
+        faces = triangles[(~own)[triangles].all(1)]
+        first = positions[0].astype(float)
+        volume = np.einsum("ij,ij->i", first[triangles[:, 0]], np.cross(first[triangles[:, 1]], first[triangles[:, 2]]))
+        sign = 1.0 if volume.sum() > 0 else -1.0
+        import scipy.sparse as sp
+
+        corner_count = len(faces)
+        gather = sp.csr_matrix(
+            (np.ones(3 * corner_count), (faces.T.reshape(-1), np.tile(np.arange(corner_count), 3))),
+            shape=(len(first), corner_count),
+        )
+        self.frames = []
+        # Vertices constrained once stay constrained: dropping one as soon as it
+        # clears the surface lets the next solve relax straight back inside.
+        self.active: list[np.ndarray] = []
+        for f in range(len(positions)):
+            vertices = positions[f].astype(float)
+            face_normal = sign * np.cross(
+                vertices[faces[:, 1]] - vertices[faces[:, 0]], vertices[faces[:, 2]] - vertices[faces[:, 0]]
+            )
+            normal = _unit(gather @ face_normal)[obstacle]
+            groups = []
+            upper_axis = elbow[f] - shoulder[f]
+            fore_axis = wrist[f] - elbow[f]
+            index = np.where(upper)[0]
+            t = ((vertices[index] - shoulder[f]) @ upper_axis) / (upper_axis @ upper_axis)
+            keep = t >= 0.5  # the half next to the shoulder always touches the torso
+            groups.append((vertices[index[keep]], np.clip(t[keep], 0, 1), np.zeros(int(keep.sum()))))
+            index = np.where(fore)[0]
+            t = np.clip(((vertices[index] - elbow[f]) @ fore_axis) / (fore_axis @ fore_axis), 0, 1)
+            groups.append((vertices[index], 1.0 - t, t))
+            index = np.where(hand)[0]
+            groups.append((vertices[index], np.zeros(len(index)), np.ones(len(index))))
+            self.frames.append(
+                {
+                    "tree": cKDTree(vertices[obstacle]),
+                    "surface": vertices[obstacle],
+                    "normal": normal,
+                    "points": np.concatenate([g[0] for g in groups]),
+                    "we": np.concatenate([g[1] for g in groups]),
+                    "ww": np.concatenate([g[2] for g in groups]),
+                }
+            )
+            self.active.append(np.zeros(0, dtype=int))
+
+    def _signed(self, frame, offsets, f):
+        moved = frame["points"] + frame["we"][:, None] * offsets[0][f] + frame["ww"][:, None] * offsets[1][f]
+        distance, nearest = frame["tree"].query(moved)
+        normal = frame["normal"][nearest]
+        signed = np.einsum("ij,ij->i", moved - frame["surface"][nearest], normal)
+        # Further than ``reach`` from any surface is outside, whatever the nearest normal says.
+        signed[distance > self.params.reach] = self.params.reach
+        return signed, normal
+
+    def depth(self, offsets) -> np.ndarray:
+        out = np.zeros(len(self.frames))
+        for f, frame in enumerate(self.frames):
+            signed, _ = self._signed(frame, offsets, f)
+            if len(signed):
+                out[f] = max(0.0, float(-signed.min()))
+        return out
+
+    def constraints(self, offsets):
+        rows = []
+        params = self.params
+        for f, frame in enumerate(self.frames):
+            signed, normal = self._signed(frame, offsets, f)
+            if not len(signed):
+                continue
+            if signed.min() <= -params.allow:
+                near = np.where(signed < params.band)[0]
+                order = near[np.argsort(signed[near])]
+                deepest = order[: params.per_frame // 2]
+                rest = order[params.per_frame // 2 :]
+                spread = rest[:: max(1, len(rest) // max(1, params.per_frame // 2))]
+                self.active[f] = np.union1d(self.active[f], np.concatenate([deepest, spread])).astype(int)
+            for i in self.active[f]:
+                rows.append((f, float(frame["we"][i]), float(frame["ww"][i]), normal[i], params.margin - signed[i]))
+        return rows
+
+
+def solve_arm_offsets(
+    shoulder: np.ndarray,
+    elbow: np.ndarray,
+    wrist: np.ndarray,
+    surface,
+    params: ArmParams | None = None,
+    spacing: float = 1.0,
+    interpolation=None,
+) -> dict[str, Any]:
+    """One QP over the key samples for elbow and wrist offsets that lift the arm out of the body.
+
+    Minimises the offsets plus their first and second differences (a
+    correction ramps in and out over neighbouring samples) subject to the
+    constraints ``surface`` reports (each: outward normal . sample offset >=
+    needed distance, re-evaluated every iteration at the moved pose) and both
+    bone lengths staying constant to first order. The shoulder stays put.
+    ``spacing`` is the number of frames between samples.
+
+    ``shoulder``/``elbow``/``wrist`` are the key samples the offsets are
+    solved (and later written) at. ``surface`` may cover more frames than
+    that: ``interpolation`` is then the (frames x keys) matrix that spreads
+    key offsets onto its frames, so a fast arm whose interpolated path cuts
+    through the body between two clear keys is pushed out as well.
+    """
+    import osqp
+    import scipy.sparse as sp
+
+    params = params or ArmParams()
+    frames = len(shoulder)
+    size = 6 * frames
+
+    def var(block, frame, axis):
+        return block * 3 * frames + frame * 3 + axis
+
+    second = sp.diags([1.0, -2.0, 1.0], [0, 1, 2], shape=(frames - 2, frames))
+    first = sp.diags([-1.0, 1.0], [0, 1], shape=(frames - 1, frames))
+    smooth = (params.smoothness / spacing**3) * (second.T @ second) + (params.velocity / spacing) * (first.T @ first)
+    per_block = spacing * sp.identity(3 * frames) + sp.kron(smooth, sp.identity(3))
+    hessian = sp.triu(sp.block_diag([per_block, per_block]) * 2).tocsc()
+
+    spread = sp.identity(frames, format="csr") if interpolation is None else sp.csr_matrix(interpolation)
+
+    def on_frames(values):
+        return np.stack([spread @ values[0], spread @ values[1]])
+
+    offsets = np.zeros((2, frames, 3))
+    before = surface.depth(on_frames(offsets))
+    log = []
+    for iteration in range(params.iterations):
+        applied = on_frames(offsets)
+        found = surface.constraints(applied)
+        depth = surface.depth(applied)
+        log.append({"iteration": iteration, "max_depth_cm": round(float(depth.max()), 2), "constraints": len(found)})
+        stalled = len(log) > 2 and log[-2]["max_depth_cm"] - log[-1]["max_depth_cm"] < 0.05
+        if not found or (iteration > 0 and (depth.max() <= params.allow or stalled)):
+            break
+        g_rows, g_cols, g_vals, lower, upper = [], [], [], [], []
+        k = 0
+        for f, we, ww, normal, need in found:
+            already = we * (normal @ applied[0][f]) + ww * (normal @ applied[1][f])
+            keys = spread.indices[spread.indptr[f] : spread.indptr[f + 1]]
+            shares = spread.data[spread.indptr[f] : spread.indptr[f + 1]]
+            for block, weight in ((0, we), (1, ww)):
+                if weight == 0.0:
+                    continue
+                for key, share in zip(keys, shares, strict=True):
+                    for axis in range(3):
+                        g_rows.append(k)
+                        g_cols.append(var(block, int(key), axis))
+                        g_vals.append(weight * share * normal[axis])
+            # One slack per contact keeps the QP feasible when normals disagree;
+            # the push is capped to what the trust region allows this iteration.
+            g_rows.append(k)
+            g_cols.append(size + k)
+            g_vals.append(1.0)
+            lower.append(already + min(need, 0.8 * params.step * (we + ww)))
+            upper.append(np.inf)
+            k += 1
+        contacts = k
+        moved_elbow, moved_wrist = elbow + offsets[0], wrist + offsets[1]
+        for f in range(frames):  # bone lengths, linearised at the current pose
+            upper_dir = moved_elbow[f] - shoulder[f]
+            upper_len = float(np.linalg.norm(upper_dir))
+            fore_dir = moved_wrist[f] - moved_elbow[f]
+            fore_len = float(np.linalg.norm(fore_dir))
+            upper_dir, fore_dir = upper_dir / upper_len, fore_dir / fore_len
+            target = float(np.linalg.norm(elbow[f] - shoulder[f])) - upper_len + upper_dir @ offsets[0][f]
+            for axis in range(3):
+                g_rows.append(k)
+                g_cols.append(var(0, f, axis))
+                g_vals.append(upper_dir[axis])
+            lower.append(target)
+            upper.append(target)
+            k += 1
+            target = float(np.linalg.norm(wrist[f] - elbow[f])) - fore_len + fore_dir @ (offsets[1][f] - offsets[0][f])
+            for axis in range(3):
+                g_rows += [k, k]
+                g_cols += [var(1, f, axis), var(0, f, axis)]
+                g_vals += [fore_dir[axis], -fore_dir[axis]]
+            lower.append(target)
+            upper.append(target)
+            k += 1
+        # Trust region: the contact normals are only valid near the current pose.
+        flat = offsets.reshape(-1)
+        for index in range(size):
+            g_rows.append(k)
+            g_cols.append(index)
+            g_vals.append(1.0)
+            lower.append(flat[index] - params.step)
+            upper.append(flat[index] + params.step)
+            k += 1
+        for index in range(contacts):  # slacks are non-negative
+            g_rows.append(k)
+            g_cols.append(size + index)
+            g_vals.append(1.0)
+            lower.append(0.0)
+            upper.append(np.inf)
+            k += 1
+        constraints = sp.csc_matrix((g_vals, (g_rows, g_cols)), shape=(k, size + contacts))
+        penalty = sp.identity(contacts) * (2 * params.slack_penalty)
+        solver = osqp.OSQP()
+        solver.setup(
+            sp.block_diag([hessian, penalty]).tocsc(),
+            np.zeros(size + contacts),
+            constraints,
+            np.array(lower),
+            np.array(upper),
+            verbose=False,
+            eps_abs=1e-4,
+            eps_rel=1e-4,
+            max_iter=60000,
+            polishing=True,
+        )
+        result = solver.solve(raise_error=False)
+        log[-1]["status"] = str(result.info.status)
+        if log[-1]["status"] not in ("solved", "solved inaccurate"):
+            break
+        offsets = result.x[:size].reshape(2, frames, 3)
+    return {
+        "elbow": offsets[0],
+        "wrist": offsets[1],
+        "depth_before": before,
+        "depth_after": surface.depth(on_frames(offsets)),
+        "iterations": log,
+    }
+
+
+def depth_summary(depth: np.ndarray, frames: np.ndarray | None = None, allow: float = 0.3) -> dict[str, Any]:
+    """Frames where the arm is inside the body deeper than ``allow`` and the worst case."""
+    frames = np.arange(len(depth)) if frames is None else np.asarray(frames)
+    worst = int(np.argmax(depth)) if len(depth) else 0
+    return {
+        "penetrating_samples": int((depth > allow).sum()),
+        "sample_count": int(len(depth)),
+        "max_depth_cm": round(float(depth.max()), 1) if len(depth) else 0.0,
+        "worst_frame": int(frames[worst]) if len(depth) else None,
+        "spans": [
+            {"first": int(frames[a]), "last": int(frames[b]), "max_depth_cm": round(float(depth[a : b + 1].max()), 1)}
+            for a, b in _runs(depth > allow, 1, gap=1)
+        ],
+    }
+
+
+def linear_interpolation(frames: np.ndarray, keys: np.ndarray):
+    """Sparse (frames x keys) matrix spreading values at ``keys`` onto ``frames`` linearly (clamped at the ends)."""
+    import scipy.sparse as sp
+
+    frames = np.asarray(frames, dtype=float)
+    keys = np.asarray(keys, dtype=float)
+    right = np.clip(np.searchsorted(keys, frames, side="left"), 1, len(keys) - 1)
+    left = right - 1
+    share = np.clip((frames - keys[left]) / np.maximum(keys[right] - keys[left], 1e-9), 0.0, 1.0)
+    rows = np.concatenate([np.arange(len(frames)), np.arange(len(frames))])
+    return sp.csr_matrix(
+        (np.concatenate([1.0 - share, share]), (rows, np.concatenate([left, right]))), shape=(len(frames), len(keys))
+    )

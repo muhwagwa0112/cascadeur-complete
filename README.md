@@ -57,6 +57,10 @@ write (commit it with `change_commit`):
 - `finger_fan`: rotates each index knuckle about the palm normal so a claw-like
   index–middle splay settles near a natural gap (3° by default).
 
+- `arm_clearance`: measures on the skinned mesh where each arm is inside the rest of
+  the body (every frame) and solves elbow and wrist offsets that lift it out while
+  keeping bone lengths; `mesh_sample` exposes the skinned mesh to the host.
+
 On a 986-frame clip this took mean foot skating from 0.98 to 0.34 cm/frame with no
 remaining slides or drags. The [`cascadeur-mocap-cleanup`](skills/cascadeur-mocap-cleanup/SKILL.md)
 skill documents the full pipeline (key reduction, splines, AutoPhysics, fingers,

@@ -143,6 +143,17 @@ BINDINGS: tuple[AdapterBinding, ...] = (
     _b("dialog_probe", "system.dialog_probe", ("probe_dialog_shown",), arguments={"token": "string echoed back"}),
     _b("interpolation_refresh", "animation.interpolation_refresh", ("interpolation_refreshed",)),
     _b(
+        "mesh_sample",
+        "animation.mesh_sample",
+        ("mesh_sample_written",),
+        arguments={
+            "frames": "frame numbers to sample",
+            "name": "file stem under state/mesh (A-Z, a-z, 0-9, _ or -)",
+            "id": "mesh object ID (default: the scene's single mesh)",
+        },
+        mutation=False,
+    ),
+    _b(
         "position_keys",
         "animation.position_keys_set",
         ("position_keys_equal_request",),

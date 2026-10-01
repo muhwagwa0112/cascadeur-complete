@@ -43,7 +43,11 @@ See [fingers.md](fingers.md). In short: switch AutoPosing off for the finger con
 
 See [foot-contacts.md](foot-contacts.md). In short: `motion_cleanup_prepare(kind="foot_contacts", segments=[...])`, check the predicted numbers, commit with `timeout=900`, refresh, re-analyze. Save as `<clip>_clean_final.casc`.
 
-## 5. Wrap up
+## 5. Arms
+
+See [arms.md](arms.md). In short: `motion_cleanup_analyze(checks=["arms"], every_frame=true)`; when an arm is inside the body, `motion_cleanup_prepare(kind="arm_clearance")`, commit with `timeout=900`, refresh, re-analyze on every frame, render the worst frames. Run it after the feet (the foot solve moves the whole body, arms included). Save as `<clip>_clean_final.casc`.
+
+## 6. Wrap up
 
 1. Verify the active tab once more, then `change_prepare("scene_save_as", "scene.save_as", {"path": ..., "tab_id": ...})` → commit.
 2. `feature_prepare("close_working_tabs")` → commit. Each prepare leaves a working-clone tab; dozens of them pushed Cascadeur past 10 GB and hung it.
