@@ -48,12 +48,23 @@ A hand that stays within 14 cm of the waist, hips or thighs and barely moves rel
 
 Reference clip: left hand 11.4 cm off the hip for frames 0–139 → on the hip, matching the video.
 
+## 6. Flicks the capture could not see (`motion_cleanup_prepare(kind="wrist_accent")`)
+
+A mitten hides the wrist: on the reference clip the right wrist sat at a constant −20° through the whole intro while the video shows the paw "knocking" on the beat. Such accents have to be authored, timed from the reference.
+
+1. **Time them from the video.** Pick a pixel signal that follows the gesture and read it per frame from the paused, seeked video (a canvas in the browser tab is enough). Here: the count of pink paw-pad pixels in the region of the raised paw — high when the paw is upright (pads to the camera), low when it is knocked forward. Runs of low values gave nine pulses, ~6–7 frames each, one beat (≈12.9 frames at 140 BPM) apart, grouped in "knock knock" pairs: `[4,10] [16,22] [41,47] [53,58] [66,72] [80,86] [92,98] [118,125] [133,139]`.
+2. **Check the hand can do it.** The palm must face the direction the flick should go (`palm·front` ≈ 0.7–0.8 here, fingers up), otherwise fix the hand's orientation first.
+3. **Bake the hand's layer over the span.** A 6-frame flick does not survive keys every 3 frames: `feature_prepare("bake", {"layer_ids": [<Hand_R layer>], "first_frame": 0, "last_frame": 147})`. The tool refuses and names the layer when keys are missing.
+4. `motion_cleanup_prepare(kind="wrist_accent", side="Right", pulses=[...], accent_deg=55)`: each pulse snaps on over 2 frames, holds, and eases back over 3 (correlation 0.91 with the video signal); the wrist flexes by `accent_deg` but never past 40° of flexion, so a flick that starts from an already flexed wrist does not over-bend.
+5. Sample the mesh over the span and render it frame by frame from the side: upright, down, upright, down must be readable. Then check `arms` again.
+
 ## Order and checks
 
 1. `hand_pose` (finger shapes do not depend on where the hand is).
 2. `hand_rest`, then `arm_clearance`: both move the wrist and the elbow, which changes the forearm direction and therefore the wrist bend.
 3. `wrist_soften` **after** the hand positions are final. Softening first and placing the hand afterwards re-bent the left wrist from 40° back to 68° on the reference clip.
 4. `motion_cleanup_analyze(checks=["arms"], every_frame=true)` again: turning a hand that rests on the hip pushed its fingers 1.7 cm into the body. One more `arm_clearance` pass fixes that with centimetre-sized moves; re-check the wrists once.
-5. Re-analyze feet, fingers, hands; sample the mesh, render the same sheets as before and compare with the reference stills.
+5. `wrist_accent` last, on top of the softened wrist (softening afterwards would flatten the flicks).
+6. Re-analyze feet, fingers, hands; sample the mesh, render the same sheets as before and compare with the reference stills.
 
 Tell the user what was a judgement call (hand shape, limits, which spans were treated as contact) so they can ask for a different one.

@@ -630,3 +630,56 @@ class CleanupWorkflow:
         )
         prepared["cleanup"] = report
         return prepared
+
+    # -- wrist accents -------------------------------------------------------
+
+    def prepare_wrist_accent(
+        self, side: str, pulses: list[list[int]], amplitude_deg: float = 55.0, object_ids=None, ttl: float = 900.0
+    ):
+        """Add wrist flexion flicks (knocks) at the given [first, last] frame pulses to one hand."""
+        if side not in mc.SIDES:
+            raise CleanupError("side must be Left or Right")
+        spans = sorted((int(item[0]), int(item[1])) for item in pulses)
+        if not spans or any(first > last for first, last in spans):
+            raise CleanupError("pulses must be a non-empty list of [first, last] frame pairs")
+        track = self._hand_track(object_ids)
+        frames = track["frames"]
+        envelope = mc.pulse_envelope(frames, spans)
+        active = np.where(envelope > 1e-3)[0]
+        rotated = [track["point_ids"][f"{side}{name}"] for name in HAND_POINTS[1:]]
+        keys = self.key_frames(rotated)
+        missing = sorted(set(active.tolist()) - set(keys[rotated[0]]))
+        if missing:
+            layer = self._read(
+                "object_properties", [Operation(name="object.properties", arguments={"ids": [rotated[0]]})]
+            )["items"][0].get("layer_id")
+            raise CleanupError(
+                f"A flick lasts a few frames but {len(missing)} of the frames it covers have no key on the hand's "
+                f"layer. Bake that layer first: feature_prepare('bake', {{'layer_ids': ['{layer}'], "
+                f"'first_frame': {int(active.min())}, 'last_frame': {int(active.max())}}})"
+            )
+        accented = mc.accent_wrist(mc.HandGeometry(track["joints"], track["boxes"], side), envelope, amplitude_deg)
+        wrist = track["points"][f"{side}{HAND_POINTS[0]}"]
+        writes = []
+        for name in HAND_POINTS[1:]:
+            object_id = track["point_ids"][f"{side}{name}"]
+            moved = wrist + accented["rotation"].apply(track["points"][f"{side}{name}"] - wrist)
+            for frame in active:
+                writes.append({"id": object_id, "frame": int(frame), "position": [float(v) for v in moved[frame]]})
+        prepared = self.service.prepare_change(
+            "position_keys",
+            "animation.position_keys_set",
+            {"writes": writes, "space": "global", "tolerance_cm": 1.0},
+            ttl,
+        )
+        prepared["cleanup"] = {
+            "kind": "wrist_accent",
+            "side": side,
+            "pulses": [list(item) for item in spans],
+            "write_count": len(writes),
+            "flexion_deg": {
+                "rest": round(float(np.median(accented["flexion_before"][active])), 1),
+                "peak": round(float(accented["flexion_after"][active].max()), 1),
+            },
+        }
+        return prepared

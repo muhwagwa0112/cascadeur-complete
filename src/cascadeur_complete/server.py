@@ -1545,7 +1545,16 @@ def motion_cleanup_analyze(
 
 @mcp.tool()
 def motion_cleanup_prepare(
-    kind: Literal["foot_contacts", "fingers", "finger_fan", "arm_clearance", "wrist_soften", "hand_pose", "hand_rest"],
+    kind: Literal[
+        "foot_contacts",
+        "fingers",
+        "finger_fan",
+        "arm_clearance",
+        "wrist_soften",
+        "hand_pose",
+        "hand_rest",
+        "wrist_accent",
+    ],
     object_ids: list[str] | None = None,
     steps: bool = True,
     max_foot_offset_cm: float = 10.0,
@@ -1560,6 +1569,9 @@ def motion_cleanup_prepare(
     hand_contrast: float = 2.2,
     hand_fixed_closure: float | None = None,
     wrap_thumb: bool = True,
+    side: Literal["Left", "Right"] | None = None,
+    pulses: list[list[int]] | None = None,
+    accent_deg: float = 55.0,
     segments: list[list[int]] | None = None,
     ttl: float = 900,
 ) -> dict[str, Any]:
@@ -1588,6 +1600,11 @@ def motion_cleanup_prepare(
     hand_rest: a hand that holds still within ~14 cm of the waist, hips or thighs
     (a hand on the hip captured through a bulky glove) is moved into contact
     for that span; the elbow is re-solved to keep both bone lengths.
+    wrist_accent: adds wrist flexion flicks (a "knock") of accent_deg to one
+    hand (side) at the given pulses ([first, last] frames each): fast down,
+    hold, softer return. For choreography a glove hid from the capture; time
+    the pulses from the reference. The hand's layer needs a key on every
+    frame the flicks cover (bake that span first).
     Writes only existing keys. The result carries predicted before/after
     metrics under "cleanup". Commit with a long timeout (e.g. 900 s).
     """
@@ -1603,6 +1620,14 @@ def motion_cleanup_prepare(
             from .motion_cleanup import ArmParams
 
             return workflow.prepare_arm_clearance(object_ids, ArmParams(allow=arm_allow_cm, margin=arm_margin_cm), ttl)
+        if kind == "wrist_accent":
+            if side is None or not pulses:
+                return {
+                    "ok": False,
+                    "error_code": ErrorCode.INVALID_REQUEST,
+                    "error_message": "wrist_accent requires side and pulses ([first, last] frame pairs)",
+                }
+            return workflow.prepare_wrist_accent(side, pulses, accent_deg, object_ids, ttl)
         if kind == "hand_rest":
             return workflow.prepare_hand_rest(object_ids, ttl=ttl)
         if kind == "wrist_soften":

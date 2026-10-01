@@ -442,3 +442,25 @@ def test_pose_hand_fixed_closure_holds_one_shape():
     assert np.allclose(posed["closure"], 0.85)
     euler = posed["euler_xyz"]["HandMiddle2_Box"]
     assert np.abs(euler - euler[0]).max() < 1e-9
+
+
+def test_pulse_envelope_snaps_on_and_eases_off_around_each_pulse():
+    envelope = mc.pulse_envelope(40, [(4, 10), (16, 22)])
+    assert envelope[:4].max() == 0.0 and envelope[13:16].max() == 0.0 and envelope[25:].max() == 0.0
+    assert np.allclose(envelope[5:10], 1.0) and np.allclose(envelope[17:22], 1.0)
+    assert 0.0 < envelope[4] < 1.0 and 0.0 < envelope[11] < envelope[10] <= 1.0
+
+
+def test_accent_wrist_flicks_toward_the_palm_and_stops_at_the_limit():
+    joints, boxes, wrist_flex, _ = _synthetic_hand()
+    hand = mc.HandGeometry(joints, boxes, "Right")
+    before, _ = hand.wrist_angles()
+    envelope = mc.pulse_envelope(len(before), [(5, 10), (38, 42)])
+    accented = mc.accent_wrist(hand, envelope, amplitude_deg=30.0, peak_limit_deg=40.0)
+    assert accented["turned_deg"][0] < 1e-6 and accented["turned_deg"][7] == pytest.approx(30.0, abs=0.5)
+    # The flick stops at the limit: a wrist already flexed past it gets no extra bend, an extended one the full flick.
+    expected = before[40] + np.clip(40.0 - before[40], 0.0, 30.0) * envelope[40]
+    assert accented["flexion_after"][40] == pytest.approx(expected)
+    assert envelope[40] == 1.0 and abs(before[40]) > 60
+    limited = mc.accent_wrist(hand, envelope, amplitude_deg=30.0, peak_limit_deg=-100.0)
+    assert np.allclose(limited["flexion_after"], before)

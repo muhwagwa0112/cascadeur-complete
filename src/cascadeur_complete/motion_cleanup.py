@@ -1488,3 +1488,51 @@ def settle_resting_hand(
         )
         elbow_offset[f] = moved - elbow[f]
     return {"wrist": wrist_offset, "elbow": elbow_offset, "spans": report}
+
+
+# ---------------------------------------------------------------------------
+# Wrist accents: choreographed flicks ("knocks") the capture could not see
+
+
+def pulse_envelope(frames: int, pulses, attack: float = 2.0, release: float = 3.0) -> np.ndarray:
+    """0..1 envelope over ``frames`` that snaps up at each [first, last] pulse and eases back after it.
+
+    The envelope leaves 0 one frame before ``first``, is fully on ``attack``
+    frames later, holds, and returns over ``release`` frames ending two frames
+    after ``last``: a quick knock and a slightly softer recovery.
+    """
+    position = np.arange(frames, dtype=float)
+    envelope = np.zeros(frames)
+
+    def smoothstep(x):
+        x = np.clip(x, 0.0, 1.0)
+        return x * x * (3 - 2 * x)
+
+    for first, last in pulses:
+        rise = smoothstep((position - (first - 1.0)) / attack)
+        fall = 1.0 - smoothstep((position - (last + 2.0 - release)) / release)
+        envelope = np.maximum(envelope, np.minimum(rise, fall))
+    return envelope
+
+
+def accent_wrist(
+    hand: HandGeometry, envelope: np.ndarray, amplitude_deg: float = 55.0, peak_limit_deg: float = 40.0
+) -> dict[str, Any]:
+    """Wrist flexion pulses on top of the current pose: the hand tips toward the palm by ``amplitude_deg`` x envelope.
+
+    A hand in a mitten, glove or sleeve hides the wrist, so flicks that carry
+    the rhythm (a paw "knocking") are missing from the capture. The flick
+    never takes the wrist past ``peak_limit_deg`` of flexion. Returns the
+    global rotation per frame to apply to the hand's points about the wrist.
+    """
+    flexion, deviation = hand.wrist_angles()
+    # A flick starting from an already flexed wrist stops at the limit instead of over-bending.
+    reach = np.clip(peak_limit_deg - flexion, 0.0, amplitude_deg)
+    target = flexion + reach * np.asarray(envelope, dtype=float)
+    rotation = hand.wrist_rotation(target, deviation)
+    return {
+        "rotation": rotation,
+        "turned_deg": np.degrees(rotation.magnitude()),
+        "flexion_before": flexion,
+        "flexion_after": target,
+    }

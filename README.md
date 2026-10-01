@@ -64,7 +64,8 @@ write (commit it with `change_commit`):
 - `wrist_soften`, `hand_pose`, `hand_rest`: styling passes for clips where the capture
   misread the hands (gloves, mittens, props) — soft wrist limits, coordinated finger
   poses between a relaxed hand and a loose fist (or one fixed shape), and hands that
-  hover near the hips brought into contact.
+  hover near the hips brought into contact; `wrist_accent` authors beat-timed wrist
+  flicks (a "knock") that the capture could not see.
 
 On a 986-frame clip this took mean foot skating from 0.98 to 0.34 cm/frame with no
 remaining slides or drags. The [`cascadeur-mocap-cleanup`](skills/cascadeur-mocap-cleanup/SKILL.md)
