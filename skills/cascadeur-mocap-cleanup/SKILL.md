@@ -21,6 +21,8 @@ This skill sits on top of `cascadeur-mcp-workflows` (general routing, safety con
 | Cascadeur and MCP quirks that silently break cleanup | [pitfalls.md](references/pitfalls.md) |
 | Metrics, thresholds, what to report | [verification.md](references/verification.md) |
 
+The stage order, gates and report shape are standardised in the repository's [`docs/MOCAP_CLEANUP_WORKFLOW.md`](https://github.com/muhwagwa0112/cascadeur-complete/blob/main/docs/MOCAP_CLEANUP_WORKFLOW.md); follow it and review a finished run against its acceptance table.
+
 ## Operating rules
 
 1. **Protect the user's files.** Never overwrite the source or an earlier result. Save each accepted stage with `scene_file` save_as under a new name (e.g. `clip_clean_physics.casc`, `clip_clean_final_v3.casc`).
@@ -42,6 +44,7 @@ This skill sits on top of `cascadeur-mcp-workflows` (general routing, safety con
 5. Feet: `motion_cleanup_prepare(kind="foot_contacts")`, commit, refresh, re-analyze.
 6. Arms: `motion_cleanup_analyze(checks=["arms"], every_frame=true)`; if an arm is inside the body, `motion_cleanup_prepare(kind="arm_clearance")`, commit, refresh, re-analyze.
 7. Only when asked to go beyond cleanup: get the reference video, read the intent, then `wrist_soften` → `hand_pose` → `hand_rest` → `arm_clearance` again, checking rendered sheets against the reference ([styling.md](references/styling.md)).
-8. Save as a new file; close stale working tabs with `feature_prepare("close_working_tabs")`.
+8. Verify every gate again on the active tab, save as a new file, close stale working tabs with `feature_prepare("close_working_tabs")`.
+9. Deliver: `change_prepare("export_fbx", "io.export_fbx", {"path": ...})`, then `scripts/fbx_check.py <file.fbx>` (one take, keys per curve = frame count, joints and mesh present).
 
 Details, arguments and the evidence to collect at each step are in [pipeline.md](references/pipeline.md).

@@ -51,4 +51,5 @@ See [arms.md](arms.md). In short: `motion_cleanup_analyze(checks=["arms"], every
 
 1. Verify the active tab once more, then `change_prepare("scene_save_as", "scene.save_as", {"path": ..., "tab_id": ...})` → commit.
 2. `feature_prepare("close_working_tabs")` → commit. Each prepare leaves a working-clone tab; dozens of them pushed Cascadeur past 10 GB and hung it.
-3. Report per stage: file name, metric before/after, remaining hot spans, snapshots kept, anything the user should look at in the viewport.
+3. Export when asked for a deliverable: `change_prepare("export_fbx", "io.export_fbx", {"path": "<clip>_clean_final_vN.fbx"})` → commit (about 10 s for 1000 frames). Check it with `scripts/fbx_check.py`: on the reference clip FBX 7.7, one take, 1062 curves × 986 keys (0–32.83 s), 116 joints, one skinned mesh. The writer leaves the file's global time span at one second although the curves cover the clip; mention that a DCC may need its range set to the take.
+4. Report per stage: file name, metric before/after, remaining hot spans, snapshots kept, anything the user should look at in the viewport.

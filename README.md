@@ -73,6 +73,9 @@ skill documents the full pipeline (key reduction, splines, AutoPhysics, fingers,
 feet, arms, styling against a reference video) and the pitfalls behind it; its
 `scripts/mesh_preview.py` renders contact sheets from a `mesh_sample` file.
 
+The stage order, acceptance gates and report template are standardised in
+[docs/MOCAP_CLEANUP_WORKFLOW.md](docs/MOCAP_CLEANUP_WORKFLOW.md).
+
 ## Install an official release
 
 1. Download the signed installer, SHA-256 manifest, SBOM, and provenance from the
