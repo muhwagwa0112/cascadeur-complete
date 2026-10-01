@@ -61,10 +61,16 @@ write (commit it with `change_commit`):
   the body (every frame) and solves elbow and wrist offsets that lift it out while
   keeping bone lengths; `mesh_sample` exposes the skinned mesh to the host.
 
+- `wrist_soften`, `hand_pose`, `hand_rest`: styling passes for clips where the capture
+  misread the hands (gloves, mittens, props) — soft wrist limits, coordinated finger
+  poses between a relaxed hand and a loose fist (or one fixed shape), and hands that
+  hover near the hips brought into contact.
+
 On a 986-frame clip this took mean foot skating from 0.98 to 0.34 cm/frame with no
 remaining slides or drags. The [`cascadeur-mocap-cleanup`](skills/cascadeur-mocap-cleanup/SKILL.md)
 skill documents the full pipeline (key reduction, splines, AutoPhysics, fingers,
-feet) and the pitfalls behind it.
+feet, arms, styling against a reference video) and the pitfalls behind it; its
+`scripts/mesh_preview.py` renders contact sheets from a `mesh_sample` file.
 
 ## Install an official release
 

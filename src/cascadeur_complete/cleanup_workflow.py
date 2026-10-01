@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 READ_CHUNK = 25
 # An index-middle gap this wide for most of the clip reads as a claw.
 FAN_FLAG_DEG = 10.0
+# Hand controllers: the wrist point, then the two that orient the hand around it.
+HAND_POINTS = ("Hand_MainPoint", "Hand_DirectionPoint", "Hand_AdditionalPoint")
 # Arm controllers moved by the arm clearance solve (elbow group, then wrist group).
 ARM_POINTS = (
     "ForeArm_MainPoint",
@@ -460,6 +462,164 @@ class CleanupWorkflow:
         }
         if not writes:
             report["note"] = "No arm vertex is inside the body beyond the allowed overlap; nothing to write."
+            return {"ok": True, "cleanup": report}
+        rig_solved = [points[f"{s}ForeArm_AdditionalPoint"] for s in mc.SIDES]
+        prepared = self.service.prepare_change(
+            "position_keys",
+            "animation.position_keys_set",
+            {"writes": writes, "space": "global", "tolerance_cm": 10.0, "rig_solved_ids": rig_solved},
+            ttl,
+        )
+        prepared["cleanup"] = report
+        return prepared
+
+    # -- hand styling --------------------------------------------------------
+
+    def _hand_track(self, object_ids):
+        """Joint positions, box orientations and hand points for both hands on every frame."""
+        objects = self.objects(object_ids)
+        fingers = ("Thumb", *mc.FOUR_FINGERS)
+        joint_names = [
+            name
+            for side in mc.SIDES
+            for name in (
+                f"{side}ForeArm",
+                f"{side}Hand",
+                *[f"{side}Hand{finger}{index}" for finger in fingers for index in (1, 2, 3, 4)],
+            )
+        ]
+        box_names = [
+            name
+            for side in mc.SIDES
+            for name in (
+                f"{side}Hand_Box",
+                *[f"{side}Hand{finger}{index}_Box" for finger in fingers for index in (1, 2, 3)],
+            )
+        ]
+        point_names = [f"{side}{name}" for side in mc.SIDES for name in HAND_POINTS]
+        joints = self.by_name([item for item in objects if item["type"] == "Joint"], joint_names)
+        boxes = self.by_name([item for item in objects if item["type"] == "Box"], box_names)
+        points = self.by_name([item for item in objects if item["type"] == "Point"], point_names)
+        frames = self.frame_count()
+        sampled = self.sample([*joints.values(), *boxes.values(), *points.values()], frames)
+        return {
+            "frames": frames,
+            "joints": {name: sampled["position"][object_id] for name, object_id in joints.items()},
+            "boxes": {name: sampled["quaternion"][object_id] for name, object_id in boxes.items()},
+            "points": {name: sampled["position"][object_id] for name, object_id in points.items()},
+            "box_ids": boxes,
+            "point_ids": points,
+        }
+
+    def analyze_hands(self, object_ids=None) -> dict[str, Any]:
+        """Wrist bend ranges and how the hands split between open, half-closed and fist."""
+        track = self._hand_track(object_ids)
+        out: dict[str, Any] = {"frames": track["frames"]}
+        for side in mc.SIDES:
+            hand = mc.HandGeometry(track["joints"], track["boxes"], side)
+            closure = hand.closure()
+            out[side] = {
+                "wrist": mc.wrist_summary(hand),
+                "closure_deg": [round(float(item)) for item in np.percentile(closure, [5, 50, 95])],
+            }
+        return out
+
+    def prepare_wrists(self, object_ids=None, params: mc.WristParams | None = None, ttl: float = 900.0):
+        track = self._hand_track(object_ids)
+        frames = track["frames"]
+        rotated = [track["point_ids"][f"{side}{name}"] for side in mc.SIDES for name in HAND_POINTS[1:]]
+        keys = self.key_frames(rotated)
+        writes = []
+        sides = {}
+        for side in mc.SIDES:
+            softened = mc.soften_wrist(mc.HandGeometry(track["joints"], track["boxes"], side), params)
+            wrist = track["points"][f"{side}{HAND_POINTS[0]}"]
+            for name in HAND_POINTS[1:]:
+                object_id = track["point_ids"][f"{side}{name}"]
+                moved = wrist + softened["rotation"].apply(track["points"][f"{side}{name}"] - wrist)
+                for frame in keys[object_id]:
+                    if 0 <= frame < frames and softened["turned_deg"][frame] > 0.3:
+                        writes.append({"id": object_id, "frame": frame, "position": [float(v) for v in moved[frame]]})
+            sides[side] = softened["report"]
+        report = {"kind": "wrist_soften", "frames": frames, "write_count": len(writes), "sides": sides}
+        if not writes:
+            report["note"] = "Both wrists already stay inside the limits; nothing to write."
+            return {"ok": True, "cleanup": report}
+        prepared = self.service.prepare_change(
+            "position_keys",
+            "animation.position_keys_set",
+            {"writes": writes, "space": "global", "tolerance_cm": 1.0},
+            ttl,
+        )
+        prepared["cleanup"] = report
+        return prepared
+
+    def prepare_hand_pose(self, object_ids=None, params: mc.HandPoseParams | None = None, ttl: float = 900.0):
+        track = self._hand_track(object_ids)
+        frames = track["frames"]
+        finger_boxes = {
+            name: object_id for name, object_id in track["box_ids"].items() if not name.endswith("Hand_Box")
+        }
+        keys = self.key_frames(list(finger_boxes.values()))
+        writes = []
+        sides = {}
+        for side in mc.SIDES:
+            posed = mc.pose_hand(mc.HandGeometry(track["joints"], track["boxes"], side), params)
+            for suffix, euler in posed["euler_xyz"].items():
+                object_id = finger_boxes[side + suffix]
+                for frame in keys[object_id]:
+                    if 0 <= frame < frames:
+                        writes.append(
+                            {
+                                "id": object_id,
+                                "frame": frame,
+                                "rotation_euler_xyz_radians": [float(v) for v in euler[frame]],
+                            }
+                        )
+            sides[side] = posed["report"]
+        prepared = self.service.prepare_change(
+            "rotation_keys", "animation.rotation_keys_set", {"writes": writes, "space": "local"}, ttl
+        )
+        prepared["cleanup"] = {
+            "kind": "hand_pose",
+            "frames": frames,
+            "write_count": len(writes),
+            "sides": sides,
+            "note": "Finger AutoPosing must be off for these controllers (auto_posing_state inactive).",
+        }
+        return prepared
+
+    # -- resting hands -------------------------------------------------------
+
+    def prepare_hand_rest(self, object_ids=None, near_cm: float = 14.0, touch_cm: float = 0.4, ttl: float = 900.0):
+        """Bring hands that hover near the body while holding still into contact with it."""
+        points, frames, track, mesh, _ = self._arm_mesh(object_ids, "hand_rest", every_frame=True)
+        keys = self.key_frames(list(points.values()))
+        writes = []
+        sides = {}
+        for side in mc.SIDES:
+            contact = mc.hand_body_clearance(
+                mesh["positions"], mesh["triangles"], mesh["dominant"], mesh["joints"], side
+            )
+            settled = mc.settle_resting_hand(
+                track[f"{side}Arm_MainPoint"],
+                track[f"{side}ForeArm_MainPoint"],
+                track[f"{side}Hand_MainPoint"],
+                contact,
+                near_cm,
+                touch_cm,
+            )
+            for name in ARM_POINTS:
+                offset = settled["elbow"] if name.startswith("ForeArm") else settled["wrist"]
+                object_id = points[f"{side}{name}"]
+                for frame in keys[object_id]:
+                    if 0 <= frame < len(frames) and np.abs(offset[frame]).max() > 1e-3:
+                        position = track[f"{side}{name}"][frame] + offset[frame]
+                        writes.append({"id": object_id, "frame": int(frame), "position": [float(v) for v in position]})
+            sides[side] = {"resting_spans": settled["spans"]}
+        report = {"kind": "hand_rest", "frames": len(frames), "write_count": len(writes), "sides": sides}
+        if not writes:
+            report["note"] = "No hand rests near the body with a gap to close; nothing to write."
             return {"ok": True, "cleanup": report}
         rig_solved = [points[f"{s}ForeArm_AdditionalPoint"] for s in mc.SIDES]
         prepared = self.service.prepare_change(

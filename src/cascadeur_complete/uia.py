@@ -440,6 +440,18 @@ def _scene_id_from_window_title(title: str) -> str | None:
     return hashlib.sha256(path_or_name.encode("utf-8")).hexdigest()[:24] if path_or_name else None
 
 
+def _should_cycle_tab(target_scene_ids: set[str], active_scene_id: str | None) -> bool:
+    """Whether the fallback trigger has to change scene tabs to reach the queued request.
+
+    Requests bound to one scene are only claimed while that scene is in front,
+    so another tab has to be cycled to. When the target is already in front the
+    request is merely waiting for a busy UI thread (autosave, a long handler):
+    cycling then walks away from the scene the caller is working in and leaves
+    a different tab active afterwards, so later unbound reads hit the wrong scene.
+    """
+    return len(target_scene_ids) == 1 and next(iter(target_scene_ids)) != active_scene_id
+
+
 def invoke_process_pending() -> TriggerEvidence:
     """Invoke Commands > Cascadeur Complete > Process Pending through UI Automation."""
     try:
@@ -549,7 +561,8 @@ def invoke_process_pending() -> TriggerEvidence:
             )
         event_nudged = False
         target_scene_ids = _queued_request_scene_ids()
-        if len(target_scene_ids) == 1:
+        active_scene_id = _scene_id_from_window_title(_native_window_title(int(wrapper.handle)))
+        if _should_cycle_tab(target_scene_ids, active_scene_id):
             # Cycle exactly one tab with a native Ctrl+Tab chord. The
             # scene_activated bridge handler claims only requests matching the
             # newly active scene; repeated idempotent dispatches walk all open

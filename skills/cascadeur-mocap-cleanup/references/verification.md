@@ -12,6 +12,7 @@
 | Finger spread / twist range | `fingers.joints` | p1–p99 range relative to rest | knuckles ≲ 2 × limit |
 | Index–middle gap | `fingers.gaps.<Side>.IndexMiddle` | signed angle between index and middle proximal bones in the palm plane | median 2–6° |
 | Arm inside the body | `motion_cleanup_analyze(checks=["arms"], every_frame=true)` → `arms.<Side>` | frames where an arm vertex is behind the body surface deeper than 0.3 cm, and the deepest value | 0 frames (a single frame < 1 cm is tolerable) |
+| Wrist bend | `motion_cleanup_analyze(checks=["hands"])` → `hands.<Side>.wrist` | flexion/extension and deviation p1–p99, frames over the limits, largest per-frame change | within ±40° / ±22° unless the reference shows more |
 | Finger spikes | `fingers.joints[*].steps_over_spike` | frames jumping > 10° | 0 (fast flicks may stay) |
 
 Foot skating is the standard metric in motion-generation work; use it to confirm a user-reported range is actually flagged before fixing anything.

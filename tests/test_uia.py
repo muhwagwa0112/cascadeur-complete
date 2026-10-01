@@ -1,4 +1,4 @@
-from cascadeur_complete.uia import _is_cascadeur_window_title, _scene_id_from_window_title
+from cascadeur_complete.uia import _is_cascadeur_window_title, _scene_id_from_window_title, _should_cycle_tab
 
 
 def test_cascadeur_window_title_is_exact_and_does_not_match_codex_tasks():
@@ -46,3 +46,12 @@ def test_press_prefers_focus_free_patterns_over_a_physical_click():
     assert _press(Selectable()) == "select"
     assert _press(ClickOnly()) == "click"
     assert calls == ["invoke", "select", "click"]
+
+
+def test_fallback_trigger_does_not_leave_the_scene_that_is_already_in_front():
+    front = _scene_id_from_window_title("C:/work/dance.casc - Cascadeur")
+    assert not _should_cycle_tab({front}, front)  # waiting on a busy UI thread, not on a tab change
+    assert _should_cycle_tab({"another-scene"}, front)
+    assert _should_cycle_tab({"another-scene"}, None)
+    assert not _should_cycle_tab(set(), front)
+    assert not _should_cycle_tab({"a", "b"}, front)

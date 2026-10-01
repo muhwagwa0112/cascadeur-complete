@@ -5,7 +5,7 @@ Each of these cost hours once. Check them before assuming the math is wrong.
 ## Reads
 
 - **Stale frames past the playhead.** After an edit Cascadeur re-interpolates only from 0 to the playhead; later frames keep old values. Read with `transform_edit(get, refresh=true)` or commit `interpolation_refresh` first. `motion_cleanup_analyze` refreshes on its first read.
-- **Wrong tab.** Measurements from one tab and writes into another look like "the write didn't persist". Check `scene_file list` before writing; the cleanup tools abort if the active scene changes mid-read.
+- **Wrong tab.** Measurements from one tab and writes into another look like "the write didn't persist" or "the styling vanished". Check `scene_file list` before writing *and before a final verification*; the cleanup tools abort if the active scene changes mid-read. Until 2026-10 the host itself could cause this: when a scene-bound request waited on a busy UI thread (autosave), the fallback trigger pressed Ctrl+Tab even though the target tab was already in front and left another tab active. Keep few tabs open (`close_working_tabs`) and re-check the active tab after long operations.
 
 ## Writes
 
@@ -24,6 +24,10 @@ Each of these cost hours once. Check them before assuming the math is wrong.
 - **Capsules are not the mesh.** The rig's collision capsules missed most arm-through-body cases (hips, chest, fingers). Measure on the skinned mesh (`mesh_sample`).
 - **Keys are not the motion.** A fast limb can cut through the body between two clear keys; measure and constrain every frame, solve at the keys.
 - **Dropping satisfied constraints makes an iterative solve oscillate.** Keep every contact constrained once found and cap the step per iteration.
+
+- **The capture is not the choreography.** Mittens, gloves, props and loose sleeves are read as fingers and wrists. Check the reference before deciding that a hand shape or a hovering hand is what the performer did.
+- **A wide "near the body" test pulls poses onto the body.** A raised hand 17 cm from the chest is a pose. Restrict resting-hand detection to the waist, hips and thighs and require a close seed.
+- **Constraint normals do not survive deep penetration alone.** Keep contacts once found, cap the step, add slack; otherwise the arm solve oscillates and offsets grow to tens of centimetres.
 
 ## Interpolation and physics
 

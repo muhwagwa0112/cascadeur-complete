@@ -316,3 +316,129 @@ def test_mesh_surface_pushes_a_hand_out_of_the_body_mesh():
     solved = mc.solve_arm_offsets(shoulder, elbow, wrist, surface, params)
     assert solved["depth_after"].max() <= params.allow + 0.2
     assert np.linalg.norm(solved["wrist"], axis=1).max() < 12.0
+
+
+def _synthetic_hand(frames=80, side="Right"):
+    """A hand whose wrist over-flexes mid-clip and whose fingers go from open to fist with uneven joints."""
+    from scipy.spatial.transform import Rotation
+
+    wrist_flex = np.concatenate([np.full(20, 5.0), np.linspace(5, 75, 20), np.linspace(75, 5, 20), np.full(20, 5.0)])
+    curl = np.concatenate([np.full(30, 5.0), np.linspace(5, 80, 20), np.full(30, 80.0)])
+
+    def turn(axis, degrees):
+        angles = np.radians(np.broadcast_to(np.asarray(degrees, dtype=float), (frames,)))
+        return Rotation.from_rotvec(np.asarray(axis, dtype=float)[None, :] * angles[:, None])
+
+    hand_rotation = turn([0, 1, 0], np.linspace(0, 40, frames))
+    joints = {f"{side}Hand": np.zeros((frames, 3))}
+    # Hand frame: fingers along +Z, index toward +X, back of the hand +Y (fingers curl toward -Y).
+    forearm_local = turn([1, 0, 0], -wrist_flex).apply([0.0, 0.0, 1.0])
+    joints[f"{side}ForeArm"] = -hand_rotation.apply(forearm_local) * 25.0
+    boxes = {f"{side}Hand_Box": hand_rotation.as_quat()[:, [3, 0, 1, 2]]}
+    layout = {"Thumb": (3.0, 2.0), "Index": (3.0, 9.0), "Middle": (1.0, 9.5), "Ring": (-1.0, 9.0), "Pinky": (-3.0, 8.0)}
+    for finger, (x, z) in layout.items():
+        uneven = {"Index": 0.4, "Pinky": 1.3}.get(finger, 1.0)  # the index barely curls: the "claw" look
+        angle = curl * uneven if finger != "Thumb" else np.full(frames, 10.0)
+        local = turn([1, 0, 0], angle)
+        position = hand_rotation.apply(np.tile([x, 0.0, z], (frames, 1)))
+        rotation = hand_rotation * turn([0, 1, 0], 50.0 if finger == "Thumb" else 0.0)
+        for index in (1, 2, 3):
+            rotation = rotation * local
+            joints[f"{side}Hand{finger}{index}"] = position
+            boxes[f"{side}Hand{finger}{index}_Box"] = rotation.as_quat()[:, [3, 0, 1, 2]]
+            position = position + rotation.apply([0.0, 0.0, 3.0 - 0.5 * index])
+        joints[f"{side}Hand{finger}4"] = position
+    return joints, boxes, wrist_flex, curl
+
+
+def test_soft_limit_leaves_small_angles_and_bounds_large_ones():
+    values = np.array([-90.0, -30.0, -10.0, 0.0, 15.0, 60.0])
+    limited = mc.soft_limit(values, 20.0, 40.0)
+    assert np.allclose(limited[[2, 3, 4]], values[[2, 3, 4]])
+    assert np.all(np.abs(limited) < 40.0) and limited[0] < -35 and limited[5] > 30
+
+
+def test_soften_wrist_reduces_an_over_flexed_wrist_and_keeps_a_neutral_one():
+    joints, boxes, wrist_flex, _ = _synthetic_hand()
+    hand = mc.HandGeometry(joints, boxes, "Right")
+    flexion, deviation = hand.wrist_angles()
+    assert np.allclose(np.abs(flexion), wrist_flex, atol=1.0) and np.abs(deviation).max() < 1.0
+    softened = mc.soften_wrist(hand)
+    assert softened["turned_deg"][:10].max() < 1.0  # neutral frames stay
+    assert 30 < softened["turned_deg"].max() < 45  # 75 deg squeezed to ~40
+    report = softened["report"]["flexion_p1_p99_deg"]
+    assert max(abs(v) for v in report[1]) <= 40
+    assert mc.wrist_summary(hand)["frames_over_flex_limit"] > 0
+
+
+def test_pose_hand_gives_coordinated_fingers_and_wraps_the_thumb_in_a_fist():
+    joints, boxes, _, _ = _synthetic_hand()
+    hand = mc.HandGeometry(joints, boxes, "Right")
+    posed = mc.pose_hand(hand)
+    assert set(posed["euler_xyz"]) == {
+        f"Hand{finger}{index}_Box" for finger in ("Thumb", *mc.FOUR_FINGERS) for index in (1, 2, 3)
+    }
+    closure = posed["closure"]
+    assert closure[:20].max() < 0.1 and closure[-20:].min() > 0.9
+    report = posed["report"]
+    assert report["closure_frames"]["open"] >= 30 and report["closure_frames"]["fist"] >= 30
+    # The generated pose measures as requested: the index now curls with the others.
+    from scipy.spatial.transform import Rotation
+
+    params = mc.HandPoseParams()
+    setup = hand.finger_setup("Index")
+    local = [Rotation.from_euler("xyz", posed["euler_xyz"][f"HandIndex{i}_Box"]) for i in (1, 2, 3)]
+    mcp, _, pip, dip = hand.finger_angles("Index", setup, local)
+    assert abs(pip[-1] - (params.fist_pose[1] + params.cascade[0] * 0.4)) < 1.0
+    assert abs(dip[-1] - params.fist_pose[2]) < 1.0 and abs(mcp[0] - (params.open_pose[0] + params.cascade[0])) < 1.5
+    assert report["thumb_fit"]["min_clearance_cm"] > 0.8
+
+
+def test_resting_spans_extend_while_the_hand_stays_calm_and_within_reach():
+    gap = np.concatenate([np.full(40, 11.0), np.full(20, 17.0), np.full(20, 40.0)])
+    speed = np.concatenate([np.full(60, 0.2), np.full(20, 5.0)])
+    # The span reaches into the looser 17 cm stretch and ends as the hand speeds up (7-frame average).
+    assert mc.resting_spans(gap, speed) == [(0, 57)]
+    # Never close enough to seed a span: a hand held 17 cm away is a pose, not a hand at rest.
+    assert mc.resting_spans(np.full(80, 17.0), np.full(80, 0.2)) == []
+
+
+def test_two_bone_elbow_keeps_both_lengths_and_stays_near_the_old_elbow():
+    shoulder, elbow, wrist = np.array([0.0, 140.0, 0.0]), np.array([20.0, 120.0, 0.0]), np.array([15.0, 98.0, 5.0])
+    upper, fore = np.linalg.norm(elbow - shoulder), np.linalg.norm(wrist - elbow)
+    moved_wrist = wrist + np.array([-9.0, 0.0, 0.0])
+    moved = mc.two_bone_elbow(shoulder, elbow, moved_wrist, upper, fore)
+    assert np.linalg.norm(moved - shoulder) == pytest.approx(upper, abs=1e-6)
+    assert np.linalg.norm(moved_wrist - moved) == pytest.approx(fore, abs=1e-6)
+    assert np.linalg.norm(moved - elbow) < 9.0
+
+
+def test_settle_resting_hand_closes_the_gap_only_inside_the_resting_span():
+    frames = 80
+    shoulder = np.tile([20.0, 140.0, 0.0], (frames, 1))
+    elbow = np.tile([32.0, 120.0, 0.0], (frames, 1))
+    wrist = np.tile([24.0, 100.0, 0.0], (frames, 1))
+    contact = {
+        "gap": np.concatenate([np.full(50, 10.0), np.full(30, 45.0)]),
+        "normal": np.tile([1.0, 0.0, 0.0], (frames, 1)),  # the body surface faces +X, toward the hand
+        "speed": np.concatenate([np.full(50, 0.1), np.full(30, 6.0)]),
+    }
+    settled = mc.settle_resting_hand(shoulder, elbow, wrist, contact)
+    assert settled["spans"] == [{"first": 0, "last": 47, "gap_cm": 10.0}]
+    assert settled["wrist"][10] == pytest.approx([-9.6, 0.0, 0.0], abs=0.2)  # 10 cm gap closed to 0.4 cm
+    assert np.abs(settled["wrist"][70]).max() == 0.0
+    moved_elbow, moved_wrist = elbow + settled["elbow"], wrist + settled["wrist"]
+    assert np.linalg.norm(moved_elbow[10] - shoulder[10]) == pytest.approx(
+        np.linalg.norm(elbow[10] - shoulder[10]), abs=1e-6
+    )
+    assert np.linalg.norm(moved_wrist[10] - moved_elbow[10]) == pytest.approx(
+        np.linalg.norm(wrist[10] - elbow[10]), abs=1e-6
+    )
+
+
+def test_pose_hand_fixed_closure_holds_one_shape():
+    joints, boxes, _, _ = _synthetic_hand()
+    posed = mc.pose_hand(mc.HandGeometry(joints, boxes, "Right"), mc.HandPoseParams(fixed_closure=0.85))
+    assert np.allclose(posed["closure"], 0.85)
+    euler = posed["euler_xyz"]["HandMiddle2_Box"]
+    assert np.abs(euler - euler[0]).max() < 1e-9

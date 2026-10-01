@@ -1,6 +1,6 @@
 ---
 name: cascadeur-mocap-cleanup
-description: Clean up imported mocap in Cascadeur through the cascadeur-complete MCP as one measured pipeline — key reduction, spline interpolation, AutoPhysics, finger spread/spike cleanup, whole-clip foot-sliding correction and arm-through-body clearance, each verified by numbers over every frame. Use when the user asks to clean up, polish or fix mocap/imported motion, foot sliding/skating, root-motion glide, jittery, splayed or claw-like fingers, arms or hands clipping through the body mesh, or to apply AutoPhysics to captured motion.
+description: Clean up imported mocap in Cascadeur through the cascadeur-complete MCP as one measured pipeline — key reduction, spline interpolation, AutoPhysics, finger spread/spike cleanup, whole-clip foot-sliding correction and arm-through-body clearance, each verified by numbers over every frame. Use when the user asks to clean up, polish or fix mocap/imported motion, foot sliding/skating, root-motion glide, jittery, splayed or claw-like fingers, arms or hands clipping through the body mesh, over-bent wrists or hand shapes that do not fit the dance (matching a reference video), or to apply AutoPhysics to captured motion.
 ---
 
 # Cascadeur Mocap Cleanup
@@ -17,6 +17,7 @@ This skill sits on top of `cascadeur-mcp-workflows` (general routing, safety con
 | Foot sliding / skating / root glide (the global contact solve) | [foot-contacts.md](references/foot-contacts.md) |
 | Finger spread, twist, spikes, claw-like index splay | [fingers.md](references/fingers.md) |
 | Arms passing through the torso, hips or the other arm (mesh-based clearance solve) | [arms.md](references/arms.md) |
+| Matching a reference: wrists, hand shapes, hands resting on the body, looking at the result | [styling.md](references/styling.md) |
 | Cascadeur and MCP quirks that silently break cleanup | [pitfalls.md](references/pitfalls.md) |
 | Metrics, thresholds, what to report | [verification.md](references/verification.md) |
 
@@ -28,7 +29,9 @@ This skill sits on top of `cascadeur-mcp-workflows` (general routing, safety con
 4. **Fix classes, not spots.** When the user reports a frame range, treat it as a symptom: find the metric that catches it (skate per frame, survey, finger steps), confirm the metric flags it, then fix the whole clip with one solve.
 5. **One stage per commit, snapshot kept.** Each commit returns a `snapshot_id`; keep it until the user accepts the stage. Roll back with `change_rollback_prepare` + `change_rollback` when a stage makes things worse.
 6. **Long commits need long timeouts.** Whole-clip key writes (10k+ writes) take minutes: `change_commit(token, timeout=900)`.
-7. **Report honestly.** Say which frames were processed, what remains above threshold, and what was predicted vs. re-measured. Never claim "all frames fixed" from a detector that only covers some frames.
+7. **Ask for the reference before styling.** What the hands should be, where they rest and which bends are choreography come from the source video, not from the capture (mittens, gloves and props are read as fingers).
+8. **Look, don't only measure.** Sample the skinned mesh and render contact sheets with `scripts/mesh_preview.py`; a metric at zero does not mean the pose reads right.
+9. **Report honestly.** Say which frames were processed, what remains above threshold, and what was predicted vs. re-measured. Never claim "all frames fixed" from a detector that only covers some frames.
 
 ## Default pipeline (summary)
 
@@ -38,6 +41,7 @@ This skill sits on top of `cascadeur-mcp-workflows` (general routing, safety con
 4. Fingers: switch AutoPosing off for the finger controllers, `motion_cleanup_prepare(kind="fingers")`, commit; if `gaps` flags an index–middle splay (claw look), `motion_cleanup_prepare(kind="finger_fan")`, commit.
 5. Feet: `motion_cleanup_prepare(kind="foot_contacts")`, commit, refresh, re-analyze.
 6. Arms: `motion_cleanup_analyze(checks=["arms"], every_frame=true)`; if an arm is inside the body, `motion_cleanup_prepare(kind="arm_clearance")`, commit, refresh, re-analyze.
-7. Save as a new file; close stale working tabs with `feature_prepare("close_working_tabs")`.
+7. Only when asked to go beyond cleanup: get the reference video, read the intent, then `wrist_soften` → `hand_pose` → `hand_rest` → `arm_clearance` again, checking rendered sheets against the reference ([styling.md](references/styling.md)).
+8. Save as a new file; close stale working tabs with `feature_prepare("close_working_tabs")`.
 
 Details, arguments and the evidence to collect at each step are in [pipeline.md](references/pipeline.md).

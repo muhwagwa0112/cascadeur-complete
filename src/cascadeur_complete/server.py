@@ -1507,7 +1507,7 @@ def _segments(segments: list[list[int]] | None) -> list[tuple[int, int]] | None:
 
 @mcp.tool()
 def motion_cleanup_analyze(
-    checks: list[Literal["feet", "fingers", "arms"]] | None = None,
+    checks: list[Literal["feet", "fingers", "arms", "hands"]] | None = None,
     object_ids: list[str] | None = None,
     segments: list[list[int]] | None = None,
     spike_deg: float = 10.0,
@@ -1520,7 +1520,8 @@ def motion_cleanup_analyze(
     frame pairs to report separately. Takes ~1-2 minutes for 1000 frames.
     checks defaults to feet and fingers; "arms" (opt-in, a few minutes)
     measures on the skinned mesh where each arm is inside the rest of the
-    body, at the arm keys or with every_frame=true on all frames.
+    body, at the arm keys or with every_frame=true on all frames; "hands"
+    (opt-in) reports wrist bend ranges and how closed the hands are.
     """
     from .cleanup_workflow import CleanupWorkflow
 
@@ -1532,6 +1533,8 @@ def motion_cleanup_analyze(
             result["feet"] = workflow.analyze_feet(object_ids, _segments(segments))
         if "fingers" in wanted:
             result["fingers"] = workflow.analyze_fingers(object_ids, spike_deg)
+        if "hands" in wanted:
+            result["hands"] = workflow.analyze_hands(object_ids)
         if "arms" in wanted:
             result["arms"] = workflow.analyze_arms(object_ids, every_frame=every_frame)
         result["scene_id"] = workflow.scene_id
@@ -1542,7 +1545,7 @@ def motion_cleanup_analyze(
 
 @mcp.tool()
 def motion_cleanup_prepare(
-    kind: Literal["foot_contacts", "fingers", "finger_fan", "arm_clearance"],
+    kind: Literal["foot_contacts", "fingers", "finger_fan", "arm_clearance", "wrist_soften", "hand_pose", "hand_rest"],
     object_ids: list[str] | None = None,
     steps: bool = True,
     max_foot_offset_cm: float = 10.0,
@@ -1552,6 +1555,11 @@ def motion_cleanup_prepare(
     index_gap_deg: float = 3.0,
     arm_allow_cm: float = 0.3,
     arm_margin_cm: float = 0.2,
+    wrist_flex_limit_deg: float = 40.0,
+    wrist_deviation_limit_deg: float = 22.0,
+    hand_contrast: float = 2.2,
+    hand_fixed_closure: float | None = None,
+    wrap_thumb: bool = True,
     segments: list[list[int]] | None = None,
     ttl: float = 900,
 ) -> dict[str, Any]:
@@ -1569,6 +1577,17 @@ def motion_cleanup_prepare(
     out of the rest of the body, measured on the skinned mesh at every frame
     (overlap up to arm_allow_cm is treated as soft contact; bone lengths
     kept; takes several minutes).
+    wrist_soften: smooths both wrists and squeezes flexion/extension and
+    sideways bends under soft limits by turning the hand about the wrist.
+    hand_pose: replaces noisy mocap fingers with coordinated poses between
+    a relaxed open hand and a loose fist, timed by the mocap's own open/close
+    (hand_contrast pushes half-closed hands toward one or the other); the
+    thumb wraps over the fingers in a fist; hand_fixed_closure (0 open .. 1
+    fist) holds one shape for the whole clip. Styling, not cleanup: use for
+    dance or other clips where hand shape matters more than finger fidelity.
+    hand_rest: a hand that holds still within ~14 cm of the waist, hips or thighs
+    (a hand on the hip captured through a bulky glove) is moved into contact
+    for that span; the elbow is re-solved to keep both bone lengths.
     Writes only existing keys. The result carries predicted before/after
     metrics under "cleanup". Commit with a long timeout (e.g. 900 s).
     """
@@ -1584,6 +1603,21 @@ def motion_cleanup_prepare(
             from .motion_cleanup import ArmParams
 
             return workflow.prepare_arm_clearance(object_ids, ArmParams(allow=arm_allow_cm, margin=arm_margin_cm), ttl)
+        if kind == "hand_rest":
+            return workflow.prepare_hand_rest(object_ids, ttl=ttl)
+        if kind == "wrist_soften":
+            from .motion_cleanup import WristParams
+
+            limits = WristParams(flex_limit=wrist_flex_limit_deg, deviation_limit=wrist_deviation_limit_deg)
+            return workflow.prepare_wrists(object_ids, limits, ttl)
+        if kind == "hand_pose":
+            from .motion_cleanup import HandPoseParams
+
+            return workflow.prepare_hand_pose(
+                object_ids,
+                HandPoseParams(contrast=hand_contrast, wrap_thumb=wrap_thumb, fixed_closure=hand_fixed_closure),
+                ttl,
+            )
         if kind == "finger_fan":
             return workflow.prepare_finger_fan(object_ids, index_gap_deg, ttl=ttl)
         return workflow.prepare_fingers(object_ids, joints, spike_deg, ttl)
