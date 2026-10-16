@@ -1,0 +1,3762 @@
+{
+  "resource_templates": {
+    "cascadeur://jobs/{job_id}": {
+      "description": "Long-running job progress, logs, and result.",
+      "mime_type": "text/plain",
+      "name": "job_resource",
+      "uri_template": "cascadeur://jobs/{job_id}"
+    },
+    "cascadeur://snapshots/{snapshot_id}": {
+      "description": "Snapshot metadata without exposing file contents.",
+      "mime_type": "text/plain",
+      "name": "snapshot_resource",
+      "uri_template": "cascadeur://snapshots/{snapshot_id}"
+    }
+  },
+  "resources": {
+    "cascadeur://actions": {
+      "description": "Installed Python commands and GUI/action routes.",
+      "mime_type": "text/plain",
+      "name": "actions_resource",
+      "uri": "cascadeur://actions"
+    },
+    "cascadeur://capabilities": {
+      "description": "Version, license, bridge, dependency, and policy status.",
+      "mime_type": "text/plain",
+      "name": "capabilities_resource",
+      "uri": "cascadeur://capabilities"
+    },
+    "cascadeur://csc/schema": {
+      "description": "Normalized schema discovered from the installed csc API.",
+      "mime_type": "text/plain",
+      "name": "csc_schema_resource",
+      "uri": "cascadeur://csc/schema"
+    },
+    "cascadeur://features": {
+      "description": "Complete generated feature matrix.",
+      "mime_type": "text/plain",
+      "name": "features_resource",
+      "uri": "cascadeur://features"
+    },
+    "cascadeur://scene/objects": {
+      "description": "First page of current objects and controllers.",
+      "mime_type": "text/plain",
+      "name": "scene_objects_resource",
+      "uri": "cascadeur://scene/objects"
+    },
+    "cascadeur://scene/summary": {
+      "description": "Current scene state and revision.",
+      "mime_type": "text/plain",
+      "name": "scene_summary_resource",
+      "uri": "cascadeur://scene/summary"
+    }
+  },
+  "tools": {
+    "action_invoke": {
+      "description": "Invoke a known action and require an observable change or explicit postcondition.",
+      "input_schema": {
+        "properties": {
+          "action_id": {
+            "title": "Action Id",
+            "type": "string"
+          },
+          "confirmation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Token"
+          },
+          "expect_change": {
+            "default": true,
+            "title": "Expect Change",
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "postcondition": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Postcondition"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "timeout": {
+            "default": 60,
+            "title": "Timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature_id",
+          "action_id"
+        ],
+        "title": "action_invokeArguments",
+        "type": "object"
+      },
+      "name": "action_invoke",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "action_invokeDictOutput",
+        "type": "object"
+      }
+    },
+    "additional_box_controller_prepare": {
+      "description": "Prepare one additional Box controller on an exact manual-rig element.",
+      "input_schema": {
+        "properties": {
+          "rig_element_id": {
+            "title": "Rig Element Id",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rig_element_id"
+        ],
+        "title": "additional_box_controller_prepareArguments",
+        "type": "object"
+      },
+      "name": "additional_box_controller_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "additional_box_controller_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "additional_point_controller_prepare": {
+      "description": "Prepare one additional Point controller on an exact manual-rig element.",
+      "input_schema": {
+        "properties": {
+          "rig_element_id": {
+            "title": "Rig Element Id",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rig_element_id"
+        ],
+        "title": "additional_point_controller_prepareArguments",
+        "type": "object"
+      },
+      "name": "additional_point_controller_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "additional_point_controller_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "animation_curve": {
+      "description": "Query layer sections or set interpolation and tangent modes with postcondition verification.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "query",
+              "set_interpolation",
+              "set_tangent"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "first_frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "First Frame"
+          },
+          "frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Frame"
+          },
+          "last_frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Frame"
+          },
+          "layer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Id"
+          },
+          "layer_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Ids"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "animation_curveArguments",
+        "type": "object"
+      },
+      "name": "animation_curve",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "animation_curveDictOutput",
+        "type": "object"
+      }
+    },
+    "animation_unbaking_prepare": {
+      "description": "Snapshot and prepare one documented Animation Unbaking stage.",
+      "input_schema": {
+        "properties": {
+          "step": {
+            "default": "adjust_keys_and_interpolation",
+            "enum": [
+              "prepare_keys_by_fulcrums",
+              "adjust_keys_and_interpolation",
+              "adjust_autoposing_lock_state"
+            ],
+            "title": "Step",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "title": "animation_unbaking_prepareArguments",
+        "type": "object"
+      },
+      "name": "animation_unbaking_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "animation_unbaking_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "auto_physics_enable": {
+      "description": "Select the main Center of Mass and enable Physics Assistant before snapping.",
+      "input_schema": {
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "string"
+          },
+          "scene_id": {
+            "title": "Scene Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id",
+          "expected_revision"
+        ],
+        "title": "auto_physics_enableArguments",
+        "type": "object"
+      },
+      "name": "auto_physics_enable",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "auto_physics_enableDictOutput",
+        "type": "object"
+      }
+    },
+    "auto_physics_snap": {
+      "description": "Snap a working AutoPhysics simulation; run auto_physics_state and auto_physics_enable first.",
+      "input_schema": {
+        "properties": {
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          }
+        },
+        "title": "auto_physics_snapArguments",
+        "type": "object"
+      },
+      "name": "auto_physics_snap",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "auto_physics_snapDictOutput",
+        "type": "object"
+      }
+    },
+    "auto_physics_state": {
+      "description": "Inspect Center of Mass, animation length, selection, and AutoPhysics prerequisites.",
+      "input_schema": {
+        "properties": {},
+        "title": "auto_physics_stateArguments",
+        "type": "object"
+      },
+      "name": "auto_physics_state",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "auto_physics_stateDictOutput",
+        "type": "object"
+      }
+    },
+    "auto_posing": {
+      "description": "Add or update AutoPosing through Cascadeur's session API; use change_prepare/change_commit.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "update"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "auto_posingArguments",
+        "type": "object"
+      },
+      "name": "auto_posing",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "auto_posingDictOutput",
+        "type": "object"
+      }
+    },
+    "ballistic_create_prepare": {
+      "description": "Snapshot and prepare a persisted Ballistic Trajectory for an exact CoM and interval.",
+      "input_schema": {
+        "properties": {
+          "center_of_mass_id": {
+            "title": "Center Of Mass Id",
+            "type": "string"
+          },
+          "first_frame": {
+            "title": "First Frame",
+            "type": "integer"
+          },
+          "last_frame": {
+            "title": "Last Frame",
+            "type": "integer"
+          },
+          "layer_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Ids"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "center_of_mass_id",
+          "first_frame",
+          "last_frame"
+        ],
+        "title": "ballistic_create_prepareArguments",
+        "type": "object"
+      },
+      "name": "ballistic_create_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "ballistic_create_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "cascadeur_logs": {
+      "description": "Return bounded level-only diagnostics; pattern may be a log level, never arbitrary text.",
+      "input_schema": {
+        "properties": {
+          "lines": {
+            "default": 200,
+            "title": "Lines",
+            "type": "integer"
+          },
+          "pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pattern"
+          }
+        },
+        "title": "cascadeur_logsArguments",
+        "type": "object"
+      },
+      "name": "cascadeur_logs",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "cascadeur_logsDictOutput",
+        "type": "object"
+      }
+    },
+    "cascadeur_status": {
+      "description": "Get bridge health, installed version baseline, license, scene and capability counts.",
+      "input_schema": {
+        "properties": {
+          "refresh": {
+            "default": true,
+            "title": "Refresh",
+            "type": "boolean"
+          }
+        },
+        "title": "cascadeur_statusArguments",
+        "type": "object"
+      },
+      "name": "cascadeur_status",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "cascadeur_statusDictOutput",
+        "type": "object"
+      }
+    },
+    "center_of_mass_prepare": {
+      "description": "Snapshot and prepare an explicit Center of Mass construction or binding operation.",
+      "input_schema": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "from_rigids",
+              "composite",
+              "connect_direction_controllers",
+              "snap_mesh"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mode",
+          "ids"
+        ],
+        "title": "center_of_mass_prepareArguments",
+        "type": "object"
+      },
+      "name": "center_of_mass_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "center_of_mass_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "change_cancel": {
+      "description": "Cancel an unused confirmation token without touching the scene.",
+      "input_schema": {
+        "properties": {
+          "confirmation_token": {
+            "title": "Confirmation Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_token"
+        ],
+        "title": "change_cancelArguments",
+        "type": "object"
+      },
+      "name": "change_cancel",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "change_cancelDictOutput",
+        "type": "object"
+      }
+    },
+    "change_commit": {
+      "description": "Commit exactly the prepared operation if scene revision and selection still match.",
+      "input_schema": {
+        "properties": {
+          "confirmation_token": {
+            "title": "Confirmation Token",
+            "type": "string"
+          },
+          "timeout": {
+            "default": 120,
+            "title": "Timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "confirmation_token"
+        ],
+        "title": "change_commitArguments",
+        "type": "object"
+      },
+      "name": "change_commit",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "change_commitDictOutput",
+        "type": "object"
+      }
+    },
+    "change_prepare": {
+      "description": "Dry-run a destructive change, save a CASC snapshot, and return an expiring token.",
+      "input_schema": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "operation_name": {
+            "title": "Operation Name",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature_id",
+          "operation_name",
+          "arguments"
+        ],
+        "title": "change_prepareArguments",
+        "type": "object"
+      },
+      "name": "change_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "change_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "change_rollback": {
+      "description": "Execute exactly the prepared snapshot rollback once.",
+      "input_schema": {
+        "properties": {
+          "confirmation_token": {
+            "title": "Confirmation Token",
+            "type": "string"
+          },
+          "timeout": {
+            "default": 120,
+            "title": "Timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "confirmation_token"
+        ],
+        "title": "change_rollbackArguments",
+        "type": "object"
+      },
+      "name": "change_rollback",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "change_rollbackDictOutput",
+        "type": "object"
+      }
+    },
+    "change_rollback_prepare": {
+      "description": "Bind a snapshot rollback to the current scene/revision/selection and return a one-use token.",
+      "input_schema": {
+        "properties": {
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ],
+        "title": "change_rollback_prepareArguments",
+        "type": "object"
+      },
+      "name": "change_rollback_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "change_rollback_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "collision_create_prepare": {
+      "description": "Snapshot and prepare collision generation with explicit targets and numeric options.",
+      "input_schema": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Options"
+          },
+          "shape": {
+            "enum": [
+              "box",
+              "capsule",
+              "kinematic_mesh",
+              "convex_decomposition",
+              "convex_by_skinning"
+            ],
+            "title": "Shape",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "shape",
+          "ids"
+        ],
+        "title": "collision_create_prepareArguments",
+        "type": "object"
+      },
+      "name": "collision_create_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "collision_create_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "collision_delete_prepare": {
+      "description": "Snapshot and prepare removal of every supported collision behaviour from exact objects.",
+      "input_schema": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "collision_delete_prepareArguments",
+        "type": "object"
+      },
+      "name": "collision_delete_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "collision_delete_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "constraint_driver_catalog": {
+      "description": "List actual update-graph Triangle objects eligible to drive Point Constraints.",
+      "input_schema": {
+        "properties": {},
+        "title": "constraint_driver_catalogArguments",
+        "type": "object"
+      },
+      "name": "constraint_driver_catalog",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "constraint_driver_catalogDictOutput",
+        "type": "object"
+      }
+    },
+    "cycle_list": {
+      "description": "List normalized cycles for explicit layers and an optional frame interval.",
+      "input_schema": {
+        "properties": {
+          "first_frame": {
+            "default": 0,
+            "title": "First Frame",
+            "type": "integer"
+          },
+          "last_frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Frame"
+          },
+          "layer_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Ids"
+          }
+        },
+        "title": "cycle_listArguments",
+        "type": "object"
+      },
+      "name": "cycle_list",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "cycle_listDictOutput",
+        "type": "object"
+      }
+    },
+    "external_workflow": {
+      "description": "Describe or run a registered DCC/LiveLink workflow; returns an exact dependency gate when absent.",
+      "input_schema": {
+        "properties": {
+          "configuration": {
+            "additionalProperties": true,
+            "title": "Configuration",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "configuration"
+        ],
+        "title": "external_workflowArguments",
+        "type": "object"
+      },
+      "name": "external_workflow",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "external_workflowDictOutput",
+        "type": "object"
+      }
+    },
+    "feature_describe": {
+      "description": "Describe route, safety, license/dependency state, and test identity for one feature.",
+      "input_schema": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "feature_describeArguments",
+        "type": "object"
+      },
+      "name": "feature_describe",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "feature_describeDictOutput",
+        "type": "object"
+      }
+    },
+    "feature_prepare": {
+      "description": "Snapshot and prepare any adapter-bound feature by id; see feature_describe for its arguments.",
+      "input_schema": {
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Arguments"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "feature_prepareArguments",
+        "type": "object"
+      },
+      "name": "feature_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "feature_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "feature_read": {
+      "description": "Run a read-only adapter-bound feature by id (mutating features must use feature_prepare).",
+      "input_schema": {
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Arguments"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "timeout": {
+            "default": 60,
+            "title": "Timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "feature_readArguments",
+        "type": "object"
+      },
+      "name": "feature_read",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "feature_readDictOutput",
+        "type": "object"
+      }
+    },
+    "feature_search": {
+      "description": "Search product support by default, or explicitly query discovered inventory.",
+      "input_schema": {
+        "properties": {
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Family"
+          },
+          "layer": {
+            "default": "product",
+            "enum": [
+              "product",
+              "discovered",
+              "all"
+            ],
+            "title": "Layer",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          }
+        },
+        "title": "feature_searchArguments",
+        "type": "object"
+      },
+      "name": "feature_search",
+      "output_schema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "feature_searchOutput",
+        "type": "object"
+      }
+    },
+    "file_dialog_prepare": {
+      "description": "Prepare a registered Cascadeur file dialog flow (exact action and owned dialog); commit with change_commit.\n\n    export_video/render_video fill Cascadeur's Export video window: ``path`` is the output folder plus\n    file name without extension, and width/height/quality set the render.\n    ",
+      "input_schema": {
+        "properties": {
+          "allow_overwrite": {
+            "default": false,
+            "title": "Allow Overwrite",
+            "type": "boolean"
+          },
+          "feature_id": {
+            "enum": [
+              "save_as_without_assets",
+              "import_scene_to_current",
+              "selection_groups_export",
+              "scene_parts_export",
+              "scene_parts_import",
+              "import_image",
+              "import_video",
+              "export_video",
+              "render_video"
+            ],
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "height": {
+            "default": 180,
+            "title": "Height",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "quality": {
+            "default": "LOW",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH"
+            ],
+            "title": "Quality",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          },
+          "width": {
+            "default": 320,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "path"
+        ],
+        "title": "file_dialog_prepareArguments",
+        "type": "object"
+      },
+      "name": "file_dialog_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "file_dialog_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "generation_state": {
+      "description": "Inspect selected layers, interval, keys, rig support, and generation prerequisites.",
+      "input_schema": {
+        "properties": {},
+        "title": "generation_stateArguments",
+        "type": "object"
+      },
+      "name": "generation_state",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "generation_stateDictOutput",
+        "type": "object"
+      }
+    },
+    "ik_chain_create_prepare": {
+      "description": "Snapshot and prepare IK with explicit main end, middle links, and secondary end order.",
+      "input_schema": {
+        "properties": {
+          "ordered_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ordered Ids",
+            "type": "array"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ordered_ids"
+        ],
+        "title": "ik_chain_create_prepareArguments",
+        "type": "object"
+      },
+      "name": "ik_chain_create_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "ik_chain_create_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "inbetweening_prepare": {
+      "description": "Snapshot and prepare Pro Inbetweening for the selected timeline interval.",
+      "input_schema": {
+        "properties": {
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "title": "inbetweening_prepareArguments",
+        "type": "object"
+      },
+      "name": "inbetweening_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "inbetweening_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "inventory_refresh": {
+      "description": "Rebuild the csc schema and feature matrix from the running installed Cascadeur.",
+      "input_schema": {
+        "properties": {
+          "timeout": {
+            "default": 120,
+            "title": "Timeout",
+            "type": "number"
+          }
+        },
+        "title": "inventory_refreshArguments",
+        "type": "object"
+      },
+      "name": "inventory_refresh",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "inventory_refreshDictOutput",
+        "type": "object"
+      }
+    },
+    "io_transfer": {
+      "description": "Run a registered import/export feature with path validation and postcondition checks.",
+      "input_schema": {
+        "properties": {
+          "confirmation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Token"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Options"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "timeout": {
+            "default": 180,
+            "title": "Timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature_id",
+          "path"
+        ],
+        "title": "io_transferArguments",
+        "type": "object"
+      },
+      "name": "io_transfer",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "io_transferDictOutput",
+        "type": "object"
+      }
+    },
+    "job_cancel": {
+      "description": "Cancel a queued job or request cancellation of an already claimed operation.",
+      "input_schema": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "job_cancelArguments",
+        "type": "object"
+      },
+      "name": "job_cancel",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "job_cancelDictOutput",
+        "type": "object"
+      }
+    },
+    "job_retry": {
+      "description": "Retry a failed or canceled job using its persisted operation contract.",
+      "input_schema": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "job_retryArguments",
+        "type": "object"
+      },
+      "name": "job_retry",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "job_retryDictOutput",
+        "type": "object"
+      }
+    },
+    "job_status": {
+      "description": "Read current progress, logs and retained result for a job.",
+      "input_schema": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "job_statusArguments",
+        "type": "object"
+      },
+      "name": "job_status",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "job_statusDictOutput",
+        "type": "object"
+      }
+    },
+    "job_submit": {
+      "description": "Submit a non-destructive operation as a persistent background job.",
+      "input_schema": {
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Arguments"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "operation_name": {
+            "title": "Operation Name",
+            "type": "string"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "timeout": {
+            "default": 300,
+            "title": "Timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature_id",
+          "operation_name"
+        ],
+        "title": "job_submitArguments",
+        "type": "object"
+      },
+      "name": "job_submit",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "job_submitDictOutput",
+        "type": "object"
+      }
+    },
+    "joint_create_prepare": {
+      "description": "Snapshot and prepare creation of one Joint using Cascadeur's bundled Add.Joint command.",
+      "input_schema": {
+        "properties": {
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "title": "joint_create_prepareArguments",
+        "type": "object"
+      },
+      "name": "joint_create_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "joint_create_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "key_edit": {
+      "description": "List, add or delete layer keys; deletion uses the protected change contract.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "list",
+              "add",
+              "delete"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "confirmation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Token"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Frame"
+          },
+          "layer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Id"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "key_editArguments",
+        "type": "object"
+      },
+      "name": "key_edit",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "key_editDictOutput",
+        "type": "object"
+      }
+    },
+    "key_reduction_prepare": {
+      "description": "Snapshot and prepare deterministic key reduction without an input dialog.",
+      "input_schema": {
+        "properties": {
+          "every_n": {
+            "default": 2,
+            "title": "Every N",
+            "type": "integer"
+          },
+          "first_frame": {
+            "title": "First Frame",
+            "type": "integer"
+          },
+          "fixed_interpolation": {
+            "default": false,
+            "title": "Fixed Interpolation",
+            "type": "boolean"
+          },
+          "last_frame": {
+            "title": "Last Frame",
+            "type": "integer"
+          },
+          "layer_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Layer Ids",
+            "type": "array"
+          },
+          "preserve_endpoints": {
+            "default": true,
+            "title": "Preserve Endpoints",
+            "type": "boolean"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "first_frame",
+          "last_frame",
+          "layer_ids"
+        ],
+        "title": "key_reduction_prepareArguments",
+        "type": "object"
+      },
+      "name": "key_reduction_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "key_reduction_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "layer_list": {
+      "description": "Read every animation layer with ID, name, parent, visibility, lock and keys.",
+      "input_schema": {
+        "properties": {},
+        "title": "layer_listArguments",
+        "type": "object"
+      },
+      "name": "layer_list",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "layer_listDictOutput",
+        "type": "object"
+      }
+    },
+    "layer_write": {
+      "description": "Create/delete a layer or set visibility/lock with revision and deletion protection.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "delete",
+              "visibility",
+              "lock",
+              "activate",
+              "folder_create",
+              "folder_move",
+              "folder_rename"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "confirmation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Token"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Item Id"
+          },
+          "layer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Id"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Position"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          },
+          "with_default_layer": {
+            "default": true,
+            "title": "With Default Layer",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "layer_writeArguments",
+        "type": "object"
+      },
+      "name": "layer_write",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "layer_writeDictOutput",
+        "type": "object"
+      }
+    },
+    "mirror_prepare": {
+      "description": "Snapshot and prepare an exact frame or interval mirror for Box controllers.",
+      "input_schema": {
+        "properties": {
+          "first_frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "First Frame"
+          },
+          "frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Frame"
+          },
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "last_frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Frame"
+          },
+          "layer_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Ids"
+          },
+          "mode": {
+            "default": "frame",
+            "enum": [
+              "frame",
+              "interval"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "plane_normal": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plane Normal"
+          },
+          "plane_origin": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plane Origin"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "mirror_prepareArguments",
+        "type": "object"
+      },
+      "name": "mirror_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "mirror_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "motion_cleanup_analyze": {
+      "description": "Measure a mocap clip over every frame: foot skating (cm/frame), slides, drags, finger spread/spikes/gaps.\n\n    Read-only. Samples the active scene's Quick Rigging Tool character (pass\n    object_ids to restrict to one character). segments are [first, last]\n    frame pairs to report separately. Takes ~1-2 minutes for 1000 frames.\n    checks defaults to feet and fingers; \"arms\" (opt-in, a few minutes)\n    measures on the skinned mesh where each arm is inside the rest of the\n    body, at the arm keys or with every_frame=true on all frames; \"hands\"\n    (opt-in) reports wrist bend ranges and how closed the hands are.\n    ",
+      "input_schema": {
+        "properties": {
+          "checks": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "feet",
+                    "fingers",
+                    "arms",
+                    "hands"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Checks"
+          },
+          "every_frame": {
+            "default": false,
+            "title": "Every Frame",
+            "type": "boolean"
+          },
+          "object_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Ids"
+          },
+          "segments": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Segments"
+          },
+          "spike_deg": {
+            "default": 10.0,
+            "title": "Spike Deg",
+            "type": "number"
+          }
+        },
+        "title": "motion_cleanup_analyzeArguments",
+        "type": "object"
+      },
+      "name": "motion_cleanup_analyze",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "motion_cleanup_analyzeDictOutput",
+        "type": "object"
+      }
+    },
+    "motion_cleanup_prepare": {
+      "description": "Snapshot and prepare a whole-clip cleanup as one protected key write; commit with change_commit.\n\n    foot_contacts: one global solve over every frame for a whole-body offset\n    and per-foot offsets that stop planted feet sliding, keeping legs within\n    their original reach; with steps=true, remaining one-foot drags become\n    short steps. fingers: soft-limit knuckle spread/twist and remove spikes,\n    keeping curl (switch AutoPosing off for the finger controllers first).\n    finger_fan: rotate each index knuckle about the palm normal so the\n    index-middle gap settles near index_gap_deg (removes a claw-like splay\n    that spread limits around the clip's own median pose cannot see).\n    arm_clearance: one solve for elbow and wrist offsets that lift each arm\n    out of the rest of the body, measured on the skinned mesh at every frame\n    (overlap up to arm_allow_cm is treated as soft contact; bone lengths\n    kept; takes several minutes).\n    wrist_soften: smooths both wrists and squeezes flexion/extension and\n    sideways bends under soft limits by turning the hand about the wrist.\n    hand_pose: replaces noisy mocap fingers with coordinated poses between\n    a relaxed open hand and a loose fist, timed by the mocap's own open/close\n    (hand_contrast pushes half-closed hands toward one or the other); the\n    thumb wraps over the fingers in a fist; hand_fixed_closure (0 open .. 1\n    fist) holds one shape for the whole clip. Styling, not cleanup: use for\n    dance or other clips where hand shape matters more than finger fidelity.\n    hand_rest: a hand that holds still within ~14 cm of the waist, hips or thighs\n    (a hand on the hip captured through a bulky glove) is moved into contact\n    for that span; the elbow is re-solved to keep both bone lengths.\n    wrist_accent: adds wrist flexion flicks (a \"knock\") of accent_deg to one\n    hand (side) at the given pulses ([first, last] frames each): fast down,\n    hold, softer return. For choreography a glove hid from the capture; time\n    the pulses from the reference. The hand's layer needs a key on every\n    frame the flicks cover (bake that span first).\n    Writes only existing keys. The result carries predicted before/after\n    metrics under \"cleanup\". Commit with a long timeout (e.g. 900 s).\n    ",
+      "input_schema": {
+        "properties": {
+          "accent_deg": {
+            "default": 55.0,
+            "title": "Accent Deg",
+            "type": "number"
+          },
+          "arm_allow_cm": {
+            "default": 0.3,
+            "title": "Arm Allow Cm",
+            "type": "number"
+          },
+          "arm_margin_cm": {
+            "default": 0.2,
+            "title": "Arm Margin Cm",
+            "type": "number"
+          },
+          "body_smoothness": {
+            "default": 2.0,
+            "title": "Body Smoothness",
+            "type": "number"
+          },
+          "hand_contrast": {
+            "default": 2.2,
+            "title": "Hand Contrast",
+            "type": "number"
+          },
+          "hand_fixed_closure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hand Fixed Closure"
+          },
+          "index_gap_deg": {
+            "default": 3.0,
+            "title": "Index Gap Deg",
+            "type": "number"
+          },
+          "joints": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Joints"
+          },
+          "kind": {
+            "enum": [
+              "foot_contacts",
+              "fingers",
+              "finger_fan",
+              "arm_clearance",
+              "wrist_soften",
+              "hand_pose",
+              "hand_rest",
+              "wrist_accent"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_foot_offset_cm": {
+            "default": 10.0,
+            "title": "Max Foot Offset Cm",
+            "type": "number"
+          },
+          "object_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Ids"
+          },
+          "pulses": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pulses"
+          },
+          "segments": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Segments"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "Left",
+                  "Right"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Side"
+          },
+          "spike_deg": {
+            "default": 10.0,
+            "title": "Spike Deg",
+            "type": "number"
+          },
+          "steps": {
+            "default": true,
+            "title": "Steps",
+            "type": "boolean"
+          },
+          "ttl": {
+            "default": 900,
+            "title": "Ttl",
+            "type": "number"
+          },
+          "wrap_thumb": {
+            "default": true,
+            "title": "Wrap Thumb",
+            "type": "boolean"
+          },
+          "wrist_deviation_limit_deg": {
+            "default": 22.0,
+            "title": "Wrist Deviation Limit Deg",
+            "type": "number"
+          },
+          "wrist_flex_limit_deg": {
+            "default": 40.0,
+            "title": "Wrist Flex Limit Deg",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "motion_cleanup_prepareArguments",
+        "type": "object"
+      },
+      "name": "motion_cleanup_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "motion_cleanup_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "object_delete_prepare": {
+      "description": "Snapshot and prepare deletion of exact objects (constraints are cleaned like the Delete command).",
+      "input_schema": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "object_delete_prepareArguments",
+        "type": "object"
+      },
+      "name": "object_delete_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "object_delete_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "object_read": {
+      "description": "Read object hierarchy, layer membership, properties, and Behavior metadata.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "hierarchy",
+              "properties",
+              "behaviors"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ids"
+          },
+          "include_values": {
+            "default": false,
+            "title": "Include Values",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "object_readArguments",
+        "type": "object"
+      },
+      "name": "object_read",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "object_readDictOutput",
+        "type": "object"
+      }
+    },
+    "object_write": {
+      "description": "Rename, create, duplicate, reparent, unparent, or delete scene objects with safety checks.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "rename",
+              "create",
+              "duplicate",
+              "parent",
+              "unparent",
+              "delete"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "confirmation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Token"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ids"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Id"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Position"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "size": {
+            "default": 3.0,
+            "title": "Size",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "object_writeArguments",
+        "type": "object"
+      },
+      "name": "object_write",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "object_writeDictOutput",
+        "type": "object"
+      }
+    },
+    "operation_batch": {
+      "description": "Execute multiple registered bridge operations in one Cascadeur UI-thread entry.",
+      "input_schema": {
+        "properties": {
+          "confirmation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Token"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "timeout": {
+            "default": 60,
+            "title": "Timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature_id",
+          "operations"
+        ],
+        "title": "operation_batchArguments",
+        "type": "object"
+      },
+      "name": "operation_batch",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "operation_batchDictOutput",
+        "type": "object"
+      }
+    },
+    "physics_state": {
+      "description": "Inventory rigid bodies, masses, constraints, collisions, and physics behaviours.",
+      "input_schema": {
+        "properties": {},
+        "title": "physics_stateArguments",
+        "type": "object"
+      },
+      "name": "physics_state",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "physics_stateDictOutput",
+        "type": "object"
+      }
+    },
+    "point_constraint_prepare": {
+      "description": "Snapshot and prepare point-controller constraints with an explicit driver.",
+      "input_schema": {
+        "properties": {
+          "driver_id": {
+            "title": "Driver Id",
+            "type": "string"
+          },
+          "point_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Point Ids",
+            "type": "array"
+          },
+          "spherical_position": {
+            "default": false,
+            "title": "Spherical Position",
+            "type": "boolean"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "driver_id",
+          "point_ids"
+        ],
+        "title": "point_constraint_prepareArguments",
+        "type": "object"
+      },
+      "name": "point_constraint_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "point_constraint_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "redo": {
+      "description": "Redo and verify an observable scene revision change.",
+      "input_schema": {
+        "properties": {
+          "expect_change": {
+            "default": true,
+            "title": "Expect Change",
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "string"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "redoArguments",
+        "type": "object"
+      },
+      "name": "redo",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "redoDictOutput",
+        "type": "object"
+      }
+    },
+    "render_object_create_prepare": {
+      "description": "Snapshot and prepare creation of a Camera, aimed Camera rig, Point Light, or Spot Light.",
+      "input_schema": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "camera",
+              "camera_with_aim",
+              "point_light",
+              "spot_light"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "render_object_create_prepareArguments",
+        "type": "object"
+      },
+      "name": "render_object_create_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "render_object_create_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "render_output": {
+      "description": "Render a still or video after change_prepare/change_commit validates the destination and snapshot.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "viewport_capture",
+              "image",
+              "video"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "height": {
+            "default": 1080,
+            "title": "Height",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "samples": {
+            "default": 64,
+            "title": "Samples",
+            "type": "integer"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "width": {
+            "default": 1920,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action",
+          "path"
+        ],
+        "title": "render_outputArguments",
+        "type": "object"
+      },
+      "name": "render_output",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "render_outputDictOutput",
+        "type": "object"
+      }
+    },
+    "rig_elements_create_prepare": {
+      "description": "Prepare deterministic manual-rig elements from explicit Joint/direction-Joint pairs.",
+      "input_schema": {
+        "properties": {
+          "feature": {
+            "default": "manual_rig",
+            "enum": [
+              "manual_rig",
+              "rig_create",
+              "rigid_body"
+            ],
+            "title": "Feature",
+            "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Options"
+          },
+          "pairs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Pairs",
+            "type": "array"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pairs"
+        ],
+        "title": "rig_elements_create_prepareArguments",
+        "type": "object"
+      },
+      "name": "rig_elements_create_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "rig_elements_create_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "rig_info_create_prepare": {
+      "description": "Snapshot and prepare one RigInfo linked to the exact unassigned Joint owners.",
+      "input_schema": {
+        "properties": {
+          "joint_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Joint Ids",
+            "type": "array"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "joint_ids"
+        ],
+        "title": "rig_info_create_prepareArguments",
+        "type": "object"
+      },
+      "name": "rig_info_create_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "rig_info_create_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "rig_state": {
+      "description": "Inventory RigInfo, joints, controllers, rigid bodies, IK, twist, and Quick Rig state.",
+      "input_schema": {
+        "properties": {},
+        "title": "rig_stateArguments",
+        "type": "object"
+      },
+      "name": "rig_state",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "rig_stateDictOutput",
+        "type": "object"
+      }
+    },
+    "rigid_body_mass_prepare": {
+      "description": "Snapshot and prepare proportional rigid-body mass scaling to an exact positive total.",
+      "input_schema": {
+        "properties": {
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ids"
+          },
+          "total_mass": {
+            "title": "Total Mass",
+            "type": "number"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_mass"
+        ],
+        "title": "rigid_body_mass_prepareArguments",
+        "type": "object"
+      },
+      "name": "rigid_body_mass_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "rigid_body_mass_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "root_motion_prepare": {
+      "description": "Snapshot and prepare Root Motion generation for the selected timeline interval.",
+      "input_schema": {
+        "properties": {
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "title": "root_motion_prepareArguments",
+        "type": "object"
+      },
+      "name": "root_motion_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "root_motion_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "scene_exchange_prepare": {
+      "description": "Prepare a protected USD/GLB/GLTF/VRM file flow using exact 2026.1 action and dialog IDs.",
+      "input_schema": {
+        "properties": {
+          "allow_overwrite": {
+            "default": false,
+            "title": "Allow Overwrite",
+            "type": "boolean"
+          },
+          "direction": {
+            "enum": [
+              "import",
+              "export"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "usd",
+              "glb",
+              "gltf",
+              "vrm"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "preset": {
+            "default": "scene",
+            "enum": [
+              "animation",
+              "model",
+              "scene"
+            ],
+            "title": "Preset",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "direction",
+          "format",
+          "path"
+        ],
+        "title": "scene_exchange_prepareArguments",
+        "type": "object"
+      },
+      "name": "scene_exchange_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "scene_exchange_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "scene_file": {
+      "description": "Create, open, or save CASC scenes. New/open use the protected change contract.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "list",
+              "activate",
+              "new",
+              "open",
+              "save",
+              "save_as",
+              "close",
+              "validate"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "confirmation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmation Token"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "tab_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tab Id"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "scene_fileArguments",
+        "type": "object"
+      },
+      "name": "scene_file",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "scene_fileDictOutput",
+        "type": "object"
+      }
+    },
+    "scene_objects": {
+      "description": "Read a paginated page of scene objects, types and IDs.",
+      "input_schema": {
+        "properties": {
+          "limit": {
+            "default": 200,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "title": "scene_objectsArguments",
+        "type": "object"
+      },
+      "name": "scene_objects",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "scene_objectsDictOutput",
+        "type": "object"
+      }
+    },
+    "scene_summary": {
+      "description": "Read current scene, verified frame, selection, objects, layers, and revision.",
+      "input_schema": {
+        "properties": {},
+        "title": "scene_summaryArguments",
+        "type": "object"
+      },
+      "name": "scene_summary",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "scene_summaryDictOutput",
+        "type": "object"
+      }
+    },
+    "selection_edit": {
+      "description": "Read, replace, add, remove, or filter the current object selection.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "get",
+              "set",
+              "add",
+              "remove",
+              "filter"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ids"
+          },
+          "name_contains": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name Contains"
+          },
+          "object_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Type"
+          },
+          "pivot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pivot Id"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "selected_only": {
+            "default": true,
+            "title": "Selected Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "selection_editArguments",
+        "type": "object"
+      },
+      "name": "selection_edit",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "selection_editDictOutput",
+        "type": "object"
+      }
+    },
+    "spline_ik_create_prepare": {
+      "description": "Prepare a Proto Spline IK for two endpoints on one explicitly resolved rig hierarchy.",
+      "input_schema": {
+        "properties": {
+          "end_joint_id": {
+            "title": "End Joint Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "start_joint_id": {
+            "title": "Start Joint Id",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start_joint_id",
+          "end_joint_id"
+        ],
+        "title": "spline_ik_create_prepareArguments",
+        "type": "object"
+      },
+      "name": "spline_ik_create_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "spline_ik_create_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "timeline_get": {
+      "description": "Read unclamped playhead, total layer frame count, and animation boundary.",
+      "input_schema": {
+        "properties": {},
+        "title": "timeline_getArguments",
+        "type": "object"
+      },
+      "name": "timeline_get",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "timeline_getDictOutput",
+        "type": "object"
+      }
+    },
+    "timeline_select_interval": {
+      "description": "Select an exact frame interval across explicit layers, or all layers when omitted.",
+      "input_schema": {
+        "properties": {
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "first_frame": {
+            "title": "First Frame",
+            "type": "integer"
+          },
+          "last_frame": {
+            "title": "Last Frame",
+            "type": "integer"
+          },
+          "layer_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Ids"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          }
+        },
+        "required": [
+          "first_frame",
+          "last_frame"
+        ],
+        "title": "timeline_select_intervalArguments",
+        "type": "object"
+      },
+      "name": "timeline_select_interval",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "timeline_select_intervalDictOutput",
+        "type": "object"
+      }
+    },
+    "timeline_set_frame": {
+      "description": "Set and verify the playhead using the domain scene getter, not cached UI telemetry.",
+      "input_schema": {
+        "properties": {
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "frame": {
+            "title": "Frame",
+            "type": "integer"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          }
+        },
+        "required": [
+          "frame"
+        ],
+        "title": "timeline_set_frameArguments",
+        "type": "object"
+      },
+      "name": "timeline_set_frame",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "timeline_set_frameDictOutput",
+        "type": "object"
+      }
+    },
+    "transform_constraint_prepare": {
+      "description": "Snapshot and prepare a transform constraint without an ambiguous parent-choice dialog.",
+      "input_schema": {
+        "properties": {
+          "constrained_id": {
+            "title": "Constrained Id",
+            "type": "string"
+          },
+          "driver_id": {
+            "title": "Driver Id",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "driver_id",
+          "constrained_id"
+        ],
+        "title": "transform_constraint_prepareArguments",
+        "type": "object"
+      },
+      "name": "transform_constraint_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "transform_constraint_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "transform_edit": {
+      "description": "Read or write position, Euler rotation (radians), and local scale for explicit or selected objects.\n\n    Cascadeur re-interpolates only up to the playhead after an edit; reads past it\n    carry a warning. Pass refresh=true to recompute the whole timeline first.\n    ",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "get",
+              "set"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Frame"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ids"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Position"
+          },
+          "refresh": {
+            "default": false,
+            "title": "Refresh",
+            "type": "boolean"
+          },
+          "rotation_euler_xyz_radians": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rotation Euler Xyz Radians"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scale"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "space": {
+            "default": "local",
+            "enum": [
+              "local",
+              "global"
+            ],
+            "title": "Space",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "transform_editArguments",
+        "type": "object"
+      },
+      "name": "transform_edit",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "transform_editDictOutput",
+        "type": "object"
+      }
+    },
+    "twist_prepare": {
+      "description": "Snapshot and prepare Twist assignment or removal on an explicit ProtoBox.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "set",
+              "remove"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "box_id": {
+            "title": "Box Id",
+            "type": "string"
+          },
+          "joint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Joint Id"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action",
+          "box_id"
+        ],
+        "title": "twist_prepareArguments",
+        "type": "object"
+      },
+      "name": "twist_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "twist_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "ui_flow_prepare": {
+      "description": "Prepare one exact, version-registered UIA file flow; commit it with change_commit.",
+      "input_schema": {
+        "properties": {
+          "allow_overwrite": {
+            "default": false,
+            "title": "Allow Overwrite",
+            "type": "boolean"
+          },
+          "flow_id": {
+            "enum": [
+              "import_usd_animation",
+              "import_usd_model",
+              "import_usd_scene",
+              "export_usd_model",
+              "export_usd_scene",
+              "import_glb",
+              "import_gltf",
+              "import_vrm",
+              "export_glb",
+              "export_gltf"
+            ],
+            "title": "Flow Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "flow_id",
+          "path"
+        ],
+        "title": "ui_flow_prepareArguments",
+        "type": "object"
+      },
+      "name": "ui_flow_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "ui_flow_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "undo": {
+      "description": "Undo and verify an observable scene revision change.",
+      "input_schema": {
+        "properties": {
+          "expect_change": {
+            "default": true,
+            "title": "Expect Change",
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "string"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "undoArguments",
+        "type": "object"
+      },
+      "name": "undo",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "undoDictOutput",
+        "type": "object"
+      }
+    },
+    "viewport_camera": {
+      "description": "Read viewports/cameras or update and verify the active viewport camera.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "viewport_state",
+              "camera_catalog",
+              "camera_view",
+              "camera_activate"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "camera_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Camera Id"
+          },
+          "camera_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "PERSPECTIVE",
+                  "ISOMETRIC"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Camera Type"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Position"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scene Id"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "viewport_cameraArguments",
+        "type": "object"
+      },
+      "name": "viewport_camera",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "viewport_cameraDictOutput",
+        "type": "object"
+      }
+    },
+    "viewport_mode": {
+      "description": "Read or set the active (or every) viewport visualizer mode and verify the observed mode.",
+      "input_schema": {
+        "properties": {
+          "apply_to_all": {
+            "default": false,
+            "title": "Apply To All",
+            "type": "boolean"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "View",
+                  "AutoPosing",
+                  "PointController",
+                  "Controller",
+                  "Joint",
+                  "Mesh",
+                  "Rigging"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mode"
+          }
+        },
+        "title": "viewport_modeArguments",
+        "type": "object"
+      },
+      "name": "viewport_mode",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "viewport_modeDictOutput",
+        "type": "object"
+      }
+    }
+  }
+}
