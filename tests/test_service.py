@@ -910,3 +910,16 @@ def test_prepare_regates_after_the_live_license_replaces_a_cached_one(tmp_path):
     prepared = cached.prepare_change("inbetweening", "generation.inbetweening", {})
     assert (prepared["ok"], prepared["error_code"]) == (False, "LICENSE_GATED")
     assert not any(call[1][0].name == "safety.snapshot" for call in bridge.calls)
+
+
+def test_batch_applies_the_feature_gate_and_rejects_malformed_operations(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    bridge = FakeBridge(paths.snapshots)
+    svc = CascadeurService(paths, client=bridge)
+    gated = svc.batch(
+        "inbetweening", [{"name": "generation.inbetweening"}], scene_id="scene-1", expected_revision="rev-1"
+    )
+    assert gated.error_code == ErrorCode.LICENSE_GATED
+    malformed = svc.batch("scene_summary", ["scene.summary"], scene_id=None, expected_revision=None)
+    assert malformed.error_code == ErrorCode.INVALID_REQUEST
+    assert bridge.calls == []

@@ -8,6 +8,8 @@ from pathlib import Path
 from threading import Thread
 from typing import Any
 
+from pydantic import ValidationError
+
 from .atomic_queue import atomic_write_json, read_json
 from .bridge_client import BridgeClient
 from .build_profile import DEVELOPER_BUILD
@@ -706,20 +708,21 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         build_error = self._supported_build_error(feature_id)
         if build_error:
             return build_error
-        parsed = [Operation.model_validate(item) for item in operations]
+        try:
+            parsed = [Operation.model_validate(item) for item in operations]
+        except ValidationError as exc:
+            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, f"Invalid batch operation: {exc}")
         for item in parsed:
             item.arguments = self._bound_arguments(feature_id, item.arguments)
         try:
             feature = self.feature(feature_id)
         except KeyError:
             return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, "Unknown feature id")
-        binding_errors = [self._operation_binding_error(feature, item.name, item.arguments) for item in parsed]
-        if any(binding_errors):
-            return self._host_error(
-                feature_id,
-                ErrorCode.INVALID_REQUEST,
-                next(item for item in binding_errors if item),
-            )
+        # The same state gate as execute: a batch is not a way around a license or dependency gate.
+        for item in parsed:
+            gate_error = self._feature_gate_error(feature, item.name, item.arguments)
+            if gate_error:
+                return gate_error
         mutating = any(self._operation_is_mutating(item.name) for item in parsed)
         if mutating:
             return self._host_error(
