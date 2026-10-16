@@ -65,7 +65,7 @@ These pairs are useful with `change_prepare` when no dedicated `*_prepare` tool 
 |---|---|---|
 | New/open/close/save-as scene | `scene_new`, `scene_open`, `scene_close`, `scene_save_as` | `scene.new`, `scene.open`, `scene.close`, `scene.save_as` |
 | FBX/DAE import or export | `import_fbx`, `import_dae`, `export_fbx`, `export_dae` | `io.import_fbx`, `io.import_dae`, `io.export_fbx`, `io.export_dae` |
-| Create/parent/unparent/delete object | `object_create`, `object_parent`, `object_unparent`, `object_delete` | `object.create`, `object.parent`, `object.unparent`, `object.delete` |
+| Create/parent/unparent/delete object | `object_create`, `object_parent`, `object_unparent`, `object_delete` | `object.create`, `object.parent`, `object.unparent`, `objects.delete` |
 | Delete key/layer | `key_delete`, `layer_delete` | `animation.key_delete`, `layer.delete` |
 | AutoPosing | `auto_posing` | `generation.auto_posing` |
 | Viewport capture/still render | `viewport_capture`, `render_image` | `render.viewport_capture`, `render.image` |

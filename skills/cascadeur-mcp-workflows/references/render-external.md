@@ -27,16 +27,16 @@ Create and verify the native objects the MCP supports. For Filament render-panel
 
 ## Still capture and render
 
-Output operations are protected because they create or overwrite files. Use a generic protected operation rather than calling a direct output wrapper after it reports `CONFIRMATION_REQUIRED`.
+Output operations are protected because they create or overwrite files.
 
 For a viewport capture:
 
 1. Choose an absolute destination and confirm overwrite intent.
-2. Call `change_prepare(feature_id="viewport_capture", operation_name="render.viewport_capture", arguments={"path": ..., "width": ..., "height": ..., "samples": ..., "allow_overwrite": ...})`.
-3. Commit the token.
+2. Call `render_output_prepare(action="viewport_capture", path=..., width=..., height=..., samples=..., allow_overwrite=...)`.
+3. Commit the token with `change_commit`.
 4. Require a stable non-empty image and bridge/host evidence.
 
-For a Filament still image, use the same flow with `feature_id="render_image"` and `operation_name="render.image"`.
+For a Filament still image, use the same flow with `action="image"`.
 
 Minimum width/height is 16 and samples must be positive. Use dimensions and samples appropriate to the requested deliverable, not the largest values by default. Report output path, dimensions, samples, byte size, and active camera.
 

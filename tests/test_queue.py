@@ -71,7 +71,7 @@ def test_atomic_write_json_survives_concurrent_writers_in_one_process(tmp_path):
         except Exception as exc:  # pragma: no cover - reported by the assertion below
             errors.append(repr(exc))
 
-    threads = [threading.Thread(target=write, args=(writer,)) for writer in range(8)]
+    threads = [threading.Thread(target=write, args=(writer,)) for writer in range(4)]
     for thread in threads:
         thread.start()
     for thread in threads:

@@ -7,17 +7,21 @@ with a recording stand-in for the service, once per value of each enum
 argument, and the operations it hands to ``execute`` and ``prepare_change`` are
 checked: none may reach ``execute`` as a mutation, and each ``*_prepare`` tool
 must bind exactly the feature/operation pairs listed here.
+
+Tools that pass caller-chosen operations on (operation_batch, job_submit,
+feature_read) hand them to service methods that refuse mutations themselves;
+tests/test_service.py covers those refusals.
 """
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from mcp import Client
 
 from cascadeur_complete import server
-from cascadeur_complete.models import ExecutionMode, ResultEnvelope
 from cascadeur_complete.product_catalog import PRODUCT_CATALOG
 from tests.test_operation_contract import OPERATION, _host_is_mutating
 
@@ -88,34 +92,58 @@ PREPARE_TOOL_OPERATIONS = {
 }
 
 
-class RecordingService:
-    """Answers every service call with a successful empty envelope; records ``execute`` and ``prepare_change``."""
+class Anything(dict):
+    """An empty dict that also answers any attribute or call, so every tool can run to completion."""
+
+    ok = True
+    adapter_id = "probe-adapter"
+    route = "probe"
+    dependency = None
+    execution_mode = "Native"
+
+    def __getattr__(self, name: str) -> Anything:
+        if name.startswith("__"):  # leave protocol lookups (pickling, pydantic) alone
+            raise AttributeError(name)
+        return Anything()
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Anything:
+        return Anything()
+
+    @property
+    def result(self) -> dict[str, Any]:
+        return {}
+
+    @property
+    def state(self) -> Any:
+        return SimpleNamespace(value="available")
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        return {"ok": True}
+
+
+class RecordingService(Anything):
+    """Records the operations handed to ``execute`` and ``prepare_change``; answers everything else."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.executed: list[tuple[str, str]] = []
         self.prepared: list[tuple[str, str]] = []
 
-    @staticmethod
-    def _envelope(feature_id: str = "probe") -> ResultEnvelope:
-        return ResultEnvelope(ok=True, feature_id=feature_id, execution_mode=ExecutionMode.NATIVE, result={})
+    def execute(self, feature_id: str, operation: str | None = None, *args: Any, **kwargs: Any) -> Anything:
+        self.executed.append((feature_id, str(operation or kwargs.get("operation_name"))))
+        return Anything()
 
-    def execute(self, feature_id: str, operation: str | None = None, *args: Any, **kwargs: Any) -> ResultEnvelope:
-        operation = operation or kwargs.get("operation_name") or kwargs.get("operation")
-        self.executed.append((feature_id, str(operation)))
-        return self._envelope(feature_id)
+    def action_allowed(self, feature_id: str, action_id: str) -> bool:
+        return True
 
     def prepare_change(self, feature_id: str, operation_name: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         self.prepared.append((feature_id, operation_name))
         return {"ok": True, "confirmation_token": "probe"}
 
-    def __getattr__(self, name: str):
-        def answer(*args: Any, **kwargs: Any) -> ResultEnvelope:
-            return self._envelope()
-
-        return answer
-
 
 def _dummy(schema: dict[str, Any]) -> Any:
+    if "const" in schema:
+        return schema["const"]
     if "enum" in schema:
         return schema["enum"][0]
     for option in schema.get("anyOf", ()):
@@ -123,11 +151,15 @@ def _dummy(schema: dict[str, Any]) -> Any:
             return _dummy(option)
     if schema.get("type") == "array":
         item = schema.get("items", {})
-        return [0.0, 0.0, 0.0] if item.get("type") in ("number", "integer") else ["probe"]
+        if item.get("type") in ("number", "integer"):
+            return [0.0, 0.0, 0.0]
+        return [{}] if item.get("type") == "object" else ["probe"]
     return {"integer": 1, "number": 1.0, "boolean": False, "object": {}}.get(schema.get("type"), "probe")
 
 
 def _enum_values(schema: dict[str, Any]) -> list[Any]:
+    if "const" in schema:
+        return [schema["const"]]
     if "enum" in schema:
         return list(schema["enum"])
     values: list[Any] = []
@@ -157,15 +189,26 @@ def recorder(monkeypatch):
     return recording
 
 
-async def _record_every_tool(recorder) -> tuple[dict[str, set[str]], dict[str, set[tuple[str, str]]]]:
+# Tools the stand-in service cannot drive to completion. Every other tool must run
+# without an error, so the checks below are not vacuous for it.
+KNOWN_STAND_IN_ERRORS = {
+    "feature_search": "returns a list; the stand-in answers with a dict",
+    "motion_cleanup_analyze": "reads real scene objects through the bridge client",
+    "motion_cleanup_prepare": "reads real scene objects through the bridge client",
+}
+
+
+async def _record_every_tool(recorder) -> tuple[dict[str, set[str]], dict[str, set[tuple[str, str]]], set[str]]:
     executed: dict[str, set[str]] = {}
     prepared: dict[str, set[tuple[str, str]]] = {}
+    failed: set[str] = set()
     async with Client(server.mcp) as client:
         for tool in (await client.list_tools()).tools:
             for arguments in _argument_sets(tool.input_schema):
                 recorder.executed.clear()
                 recorder.prepared.clear()
-                await client.call_tool(tool.name, arguments)
+                if (await client.call_tool(tool.name, arguments)).is_error:
+                    failed.add(tool.name)
                 mutating = {
                     operation
                     for _feature, operation in recorder.executed
@@ -176,18 +219,19 @@ async def _record_every_tool(recorder) -> tuple[dict[str, set[str]], dict[str, s
                 bound = {pair for pair in recorder.prepared if OPERATION.match(pair[1])}
                 if bound:
                     prepared.setdefault(tool.name, set()).update(bound)
-    return executed, prepared
+    return executed, prepared, failed
 
 
 @pytest.mark.asyncio
 async def test_no_tool_sends_a_mutation_through_execute(recorder):
-    executed, _prepared = await _record_every_tool(recorder)
+    executed, _prepared, failed = await _record_every_tool(recorder)
+    assert failed == set(KNOWN_STAND_IN_ERRORS)
     assert executed == {}
 
 
 @pytest.mark.asyncio
 async def test_prepare_tools_bind_their_mutating_operations(recorder):
-    _executed, prepared = await _record_every_tool(recorder)
+    _executed, prepared, _failed = await _record_every_tool(recorder)
     assert {name: prepared.get(name) for name in PREPARE_TOOL_OPERATIONS} == PREPARE_TOOL_OPERATIONS
     for name in PREPARE_TOOL_OPERATIONS:
         assert all(_host_is_mutating(operation) for _feature, operation in prepared[name]), name

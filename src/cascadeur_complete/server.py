@@ -791,6 +791,7 @@ def render_output_prepare(
     width: int = 1920,
     height: int = 1080,
     samples: int = 64,
+    allow_overwrite: bool = False,
     ttl_seconds: float = 300,
 ) -> dict[str, Any]:
     """Prepare a viewport capture or still render to a validated path; commit with change_commit.
@@ -801,6 +802,8 @@ def render_output_prepare(
         return _invalid("width/height must be at least 16 and samples must be positive")
     feature_id = "viewport_capture" if action == "viewport_capture" else "render_image"
     arguments = {"path": path, "width": width, "height": height, "samples": samples}
+    if allow_overwrite:
+        arguments["allow_overwrite"] = True
     return _prepare(feature_id, f"render.{action}", arguments, ttl_seconds)
 
 

@@ -2398,6 +2398,11 @@
             "title": "Action",
             "type": "string"
           },
+          "allow_overwrite": {
+            "default": false,
+            "title": "Allow Overwrite",
+            "type": "boolean"
+          },
           "height": {
             "default": 1080,
             "title": "Height",
