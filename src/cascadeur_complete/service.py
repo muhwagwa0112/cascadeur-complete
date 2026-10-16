@@ -72,16 +72,6 @@ MUTATION_VERBS = (
 )
 
 
-
-
-
-
-
-
-
-
-
-
 class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin):
     def __init__(self, paths: RuntimePaths | None = None, client: BridgeClient | None = None):
         self.paths = paths or RuntimePaths.discover()
@@ -221,9 +211,9 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         status = self.refresh_live(timeout=30)
         live = status.result if status.ok and isinstance(status.result, dict) else {}
         self._live_tools = live.get("tools", BASELINE_TOOLS)
-        if "license" in live:
-            self._observe_license(live["license"])
         self._scene_available = bool(live.get("scene_id"))
+        self._rebuild_features()
+        self._write_registry()
         if self.paths.registry.is_file() and self.paths.registry.stat().st_size > 0:
             add_postconditions(result, "Host rebuilt and persisted the feature registry", "feature_registry")
         self._record_live_evidence("inventory_refresh", "system.introspect", result)
@@ -397,6 +387,13 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
                 feature.id,
                 ErrorCode.UNSUPPORTED_VERSION,
                 f"No verified adapter for installed Cascadeur {self.installation.get('version') or 'unknown'}",
+                mode=ExecutionMode.GATED,
+            )
+        if feature.state == CapabilityState.UNSUPPORTED:
+            return self._host_error(
+                feature.id,
+                ErrorCode.UNSUPPORTED_VERSION,
+                f"Cascadeur {self._version_name} has no {feature.name} capability",
                 mode=ExecutionMode.GATED,
             )
         if feature.state == CapabilityState.UI_ONLY and not feature.adapter_id:

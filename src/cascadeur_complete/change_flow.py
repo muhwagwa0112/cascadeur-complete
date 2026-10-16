@@ -7,9 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .host_postconditions import (
-    add_postconditions,
-)
+from .host_postconditions import add_postconditions
 from .models import (
     ErrorCode,
     Evidence,
@@ -70,6 +68,12 @@ class ChangeFlowMixin:
         if not status.ok:
             return status.model_dump(mode="json")
         state = status.result
+        # The live status may change the license (or tools) the first gate saw, e.g.
+        # a cached Pro license on a machine that now reports Basic: gate again.
+        feature = self.feature(feature_id)
+        gate_error = self._feature_gate_error(feature, operation_name, arguments)
+        if gate_error:
+            return gate_error.model_dump(mode="json")
         if feature.requires_scene and not state.get("scene_id"):
             return self._host_error(
                 feature_id,

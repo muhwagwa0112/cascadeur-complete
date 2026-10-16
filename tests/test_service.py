@@ -883,3 +883,30 @@ def test_prepare_and_commit_refuse_a_status_without_scene_state(tmp_path, monkey
     assert (refused["ok"], refused["error_code"]) == (False, "POSTCONDITION_FAILED")
     committed = svc.commit_change(prepared["confirmation_token"])
     assert (committed.ok, committed.error_code) == (False, ErrorCode.POSTCONDITION_FAILED)
+
+
+@pytest.mark.parametrize("feature_id", ["export_vrm", "settings_get", "tool_inspect"])
+def test_unsupported_features_are_refused_before_any_snapshot(tmp_path, feature_id):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    bridge = FakeBridge(paths.snapshots)
+    svc = CascadeurService(paths, client=bridge)
+    assert svc.feature(feature_id).state.value == "unsupported"
+    operation = svc.feature(feature_id).route or "io.export_vrm"
+    prepared = svc.prepare_change(feature_id, operation, {"path": str(tmp_path / "out.vrm")})
+    assert (prepared["ok"], prepared["error_code"]) == (False, "UNSUPPORTED_VERSION")
+    assert not any(call[1][0].name == "safety.snapshot" for call in bridge.calls)
+
+
+def test_prepare_regates_after_the_live_license_replaces_a_cached_one(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    paths.ensure()
+    bridge = FakeBridge(paths.snapshots)
+    svc = CascadeurService(paths, client=bridge)
+    (paths.state / "license.json").write_text(
+        json.dumps({"license": "Pro", "cascadeur_version": svc._version_name, "observed_at": 1.0}), encoding="utf-8"
+    )
+    cached = CascadeurService(paths, client=bridge)
+    assert cached.feature("inbetweening").state.value != "license_gated"
+    prepared = cached.prepare_change("inbetweening", "generation.inbetweening", {})
+    assert (prepared["ok"], prepared["error_code"]) == (False, "LICENSE_GATED")
+    assert not any(call[1][0].name == "safety.snapshot" for call in bridge.calls)

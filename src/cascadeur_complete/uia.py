@@ -400,7 +400,11 @@ def _scene_tab_nudge_points(wrapper) -> tuple[tuple[int, int], tuple[int, int]] 
 
 
 def _queued_requests() -> list[Path]:
-    return sorted(RuntimePaths.discover().requests.glob("*.json"))
+    try:
+        requests = RuntimePaths.discover().requests
+    except RuntimeError:  # neither USERPROFILE nor LOCALAPPDATA is set
+        return []
+    return sorted(requests.glob("*.json"))
 
 
 def _has_unclaimed_requests() -> bool:
