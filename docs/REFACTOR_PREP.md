@@ -164,3 +164,36 @@ route, action, operation, pre/postconditions, fixed_arguments, `contract_test_id
 **Phase 4 — 커버리지 확장**: unhealthy 22개 live 증거 확보, Filament 렌더 설정 어댑터, ui_only 3개 재조사.
 
 각 Phase 끝: `pytest` + `ruff` + (Phase 3 이후) `CASCADEUR_LIVE=1` live 검증, `scripts/support_report.py` 로 상태 문서 재생성.
+
+## 7. 남은 작업 (2026-10-16 리뷰 기준)
+
+이 브랜치(PR #8)의 리뷰에서 나온 수정은 반영했다: `UNSUPPORTED` 게이트 누락, 캐시 라이선스 재게이트,
+`refresh_inventory` 순서, `system.view_mode` + `mode` 토큰 우회, 서명된 형식 오류 요청, `snapshot_required` 거부,
+`render_output_prepare(allow_overwrite)`, 도구 sweep 테스트의 공허한 통과.
+
+**운영 (먼저)**
+- MCP 서버 재설치 + Cascadeur 재시작 후 `CASCADEUR_LIVE=1` live 검증 → `scripts/support_report.py` 로
+  `docs/SUPPORT_STATUS.md` 재생성. 이 브랜치의 어떤 변경도 아직 live 로 확인되지 않았다.
+
+**호스트 (Phase 2 잔여)**
+- mixin 3개(`ChangeFlow`/`HostPostconditions`/`UiFileFlow`)를 명시적 협력 객체로. 지금은 `self` 로 서비스 상태 공유.
+- `batch` 는 기능 상태 게이트 없이 바인딩만 검사한다 — `_feature_gate_error` 적용 여부 결정.
+- `cleanup_workflow` 가 `client.execute` 를 직접 호출해 빌드 핀·게이트를 우회한다(읽기만 하지만 경로가 다르다).
+- `CORE_FEATURES` 의 route/license/scene 이 카탈로그와 중복, `_operation_is_mutating` 의 fallback read-only 목록.
+- `server.py` 반복: 수동 에러 dict(`_invalid` 로 일부만 이전), `.model_dump(mode="json")`, `ttl` vs `ttl_seconds`
+  (`render_object_create_prepare` 등 일부만 `ttl`).
+- 죽은 값: `OUTPUT_OPERATIONS` 의 `render.video` 와 `stable_seconds` 분기(비디오는 UI 파일 흐름으로만 간다).
+- `csc_mutate_allowed` 허용 목록이 개발자 빌드의 `system.csc_mutate` 에 연결되어 있지 않다.
+
+**브리지 (Phase 3)**
+- `runtime._run_operation` 인라인 연산 ~30개를 `handlers/` 로, `dispatch` 가 연산 이름 전달(6곳이 추론 중).
+- 공용 헬퍼(`call_action`, tool editor, ID 검증, 선택) 통합, `generation`→`timeline_edit` private import 정리.
+- `scene_state` 가 요청마다 fingerprint 4종 + `tar` 서브프로세스, `suppress(Exception)` 로 revision 이 약해질 수 있음.
+- 호스트가 보내지 않는 핸들러 5개(`physics.collision_material`, `physics.fulcrum_point`, `physics.mass_set`,
+  `render.mesh_material`, `system.tools`), `scene._TAB_IDENTITIES` 무한 성장.
+
+**커버리지 (Phase 4)**: unhealthy 22개 live 증거, Filament 렌더 설정 9개 어댑터, ui_only 3개 재조사.
+
+**품질**
+- `ruff format --check` 가 CI 에 없고 기존 12개 파일이 미포맷 — 일괄 포맷 커밋 후 CI 에 추가할지 결정.
+- `CascadeurService` 를 만드는 테스트가 실제 `LOCALAPPDATA` 의 `csc_schema.json` 을 먼저 읽는다(`paths.py:81`, import 시 고정).
