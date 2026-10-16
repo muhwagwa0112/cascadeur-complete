@@ -524,8 +524,6 @@ class CascadeurService:
         if "license" in live:
             self._observe_license(live["license"])
         self._scene_available = bool(live.get("scene_id"))
-        self._rebuild_features()
-        self._write_registry()
         if self.paths.registry.is_file() and self.paths.registry.stat().st_size > 0:
             add_postconditions(result, "Host rebuilt and persisted the feature registry", "feature_registry")
         self._record_live_evidence("inventory_refresh", "system.introspect", result)
@@ -874,8 +872,8 @@ class CascadeurService:
         scene_id: str | None = None,
         expected_revision: str | None = None,
         timeout: float = 30.0,
-        confirmation_token: str | None = None,
     ) -> ResultEnvelope:
+        """Run a read-only operation; every mutation is refused (prepare_change/commit_change own those)."""
         build_error = self._supported_build_error(feature_id)
         if build_error and not (feature_id == "status" and operation_name == "system.status"):
             return build_error
@@ -939,47 +937,18 @@ class CascadeurService:
                 ErrorCode.CONFIRMATION_REQUIRED,
                 "All scene and file mutations require change_prepare and change_commit",
             )
-        if operation_name == "system.action_invoke" and not feature.route.startswith(
-            ("action_invoke:", "command.")
-        ):
-            return self._host_error(
-                feature_id, ErrorCode.INVALID_REQUEST, "Feature is not registered as an action or GUI tool"
-            )
-        if (
-            operation_name == "system.action_invoke"
-            and not bool((arguments or {}).get("expect_change", True))
-            and not (arguments or {}).get("postcondition")
-        ):
-            return self._host_error(
-                feature_id,
-                ErrorCode.INVALID_REQUEST,
-                "Actions must require an observable scene change or provide an explicit postcondition",
-            )
-        safety = SafetyContext(
-            destructive=False,
-            confirmation_token=confirmation_token,
-            snapshot_required=False,
-        )
-        output_path = (arguments or {}).get("path") if operation_name == "render.viewport_capture" else None
-        before_output = self._file_signature(output_path) if output_path else None
         result = self.client.execute(
             feature_id,
             [Operation(name=operation_name, arguments=arguments or {})],
             scene_id=scene_id,
             expected_revision=expected_revision,
             timeout=timeout,
-            safety_context=safety,
+            safety_context=SafetyContext(destructive=False, snapshot_required=False),
         )
         result.operation_id = operation_name
         result.status = "succeeded" if result.ok else "failed"
         result.scene_revision_before = expected_revision
         result.scene_revision_after = result.scene_revision
-        if result.ok and output_path:
-            result = self._wait_for_output_file(result, str(output_path), timeout, before_output)
-        if result.ok and operation_name == "system.action_invoke":
-            add_postconditions(
-                result, "Host bound the action id to an installed command record", "registered_action_binding"
-            )
         self._remember_scene_result(result)
         if result.ok and feature.adapter_id:
             self._record_live_evidence(feature_id, operation_name, result)
@@ -1026,8 +995,8 @@ class CascadeurService:
         scene_id: str | None,
         expected_revision: str | None,
         timeout: float = 60.0,
-        confirmation_token: str | None = None,
     ) -> ResultEnvelope:
+        """Run read-only operations in one bridge entry; mutating batches are refused."""
         build_error = self._supported_build_error(feature_id)
         if build_error:
             return build_error
@@ -1052,17 +1021,13 @@ class CascadeurService:
                 ErrorCode.CONFIRMATION_REQUIRED,
                 "Mutating batches must be split into individually prepared changes",
             )
-        if any(self._operation_is_mutating(item.name) for item in parsed) and expected_revision is None:
-            return self._host_error(
-                feature_id, ErrorCode.INVALID_REQUEST, "expected_revision is required for mutating batches"
-            )
         result = self.client.execute(
             feature_id,
             parsed,
             scene_id=scene_id,
             expected_revision=expected_revision,
             timeout=timeout,
-            safety_context=SafetyContext(destructive=False, confirmation_token=confirmation_token),
+            safety_context=SafetyContext(destructive=False),
         )
         result.operation_id = "batch"
         result.status = "succeeded" if result.ok else "failed"

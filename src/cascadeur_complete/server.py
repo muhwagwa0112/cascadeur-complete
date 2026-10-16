@@ -351,9 +351,8 @@ def operation_batch(
     scene_id: str | None = None,
     expected_revision: str | None = None,
     timeout: float = 60,
-    confirmation_token: str | None = None,
 ) -> dict[str, Any]:
-    """Execute multiple registered bridge operations in one Cascadeur UI-thread entry."""
+    """Execute multiple read-only bridge operations in one Cascadeur UI-thread entry."""
     return (
         service()
         .batch(
@@ -362,7 +361,6 @@ def operation_batch(
             scene_id=scene_id,
             expected_revision=expected_revision,
             timeout=timeout,
-            confirmation_token=confirmation_token,
         )
         .model_dump(mode="json")
     )

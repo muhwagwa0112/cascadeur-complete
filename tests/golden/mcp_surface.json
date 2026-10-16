@@ -2215,21 +2215,9 @@
       }
     },
     "operation_batch": {
-      "description": "Execute multiple registered bridge operations in one Cascadeur UI-thread entry.",
+      "description": "Execute multiple read-only bridge operations in one Cascadeur UI-thread entry.",
       "input_schema": {
         "properties": {
-          "confirmation_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Confirmation Token"
-          },
           "expected_revision": {
             "anyOf": [
               {

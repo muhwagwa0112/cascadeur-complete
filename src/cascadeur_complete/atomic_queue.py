@@ -106,17 +106,3 @@ class AtomicQueue:
 
     def pending_count(self) -> int:
         return sum(1 for path in self.paths.requests.glob("*.json") if path.is_file())
-
-    def recover_stale_claims(self, stale_after: float = 60.0) -> int:
-        recovered = 0
-        now = time.time()
-        for path in self.paths.requests.glob("*.processing"):
-            try:
-                if now - path.stat().st_mtime < stale_after:
-                    continue
-                target = path.with_suffix(".json")
-                os.replace(path, target)
-                recovered += 1
-            except FileNotFoundError:
-                continue
-        return recovered

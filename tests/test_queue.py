@@ -1,5 +1,4 @@
 import json
-import os
 import time
 import uuid
 
@@ -57,17 +56,6 @@ def test_forged_or_replayed_response_is_rejected(tmp_path):
     atomic_write_json(queue.response_path(request.request_id), forged.model_dump(mode="json"))
     with pytest.raises(QueueAuthenticationError):
         queue.read_response(request.request_id)
-
-
-def test_stale_claim_recovery(tmp_path):
-    paths = RuntimePaths.discover(tmp_path / "runtime")
-    queue = AtomicQueue(paths)
-    claimed = paths.requests / "stale.processing"
-    claimed.write_text("{}", encoding="utf-8")
-    old = time.time() - 120
-    os.utime(claimed, (old, old))
-    assert queue.recover_stale_claims(stale_after=60) == 1
-    assert (paths.requests / "stale.json").is_file()
 
 
 def test_atomic_write_json_survives_concurrent_writers_in_one_process(tmp_path):
