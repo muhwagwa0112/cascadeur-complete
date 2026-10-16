@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 import time
-import uuid
-from glob import escape as glob_escape
 from pathlib import Path
 from threading import Thread
 from typing import Any
 
-from .atomic_queue import atomic_write_json
+from pydantic import ValidationError
+
+from .atomic_queue import atomic_write_json, read_json
 from .bridge_client import BridgeClient
 from .build_profile import DEVELOPER_BUILD
+from .change_flow import ChangeFlowMixin
 from .discovery import BASELINE_TOOLS, discover_commands, discover_installation, load_csc_schema
-from .external import available_dependencies, verify_blender_fbx
+from .external import available_dependencies
 from .feature_registry import build_registry, registry_json
+from .host_postconditions import HostPostconditionsMixin, add_postconditions
 from .jobs import JobStore
 from .models import (
     PROTOCOL_VERSION,
@@ -31,152 +32,14 @@ from .models import (
 )
 from .paths import RuntimePaths
 from .product_catalog import PRODUCT_CATALOG
-from .safety import ChangeManager, SafetyError, validate_local_input_path, validate_local_path
+from .safety import ChangeManager
+from .ui_file_flow import UiFileFlowMixin, expected_ui_flow
 from .uia import (
     UIAutomationError,
     active_scene_title,
-    cancel_file_flow,
-    cancel_owned_file_dialogs,
-    capture_window_sample,
-    complete_export_video_form,
-    complete_file_dialog,
     cycle_scene_tab,
-    finish_export_video_form,
-    resolve_autophysics_snap_warning,
-    resolve_optional_rig_mode_helper,
-    sample_difference,
 )
 from .verification import LiveEvidenceStore
-
-# View toggles only change what Cascadeur draws; the host proves the effect by
-# comparing captures of the Cascadeur window before and after the action.
-# Writes whose values Cascadeur may re-solve after the transaction (AutoPosing,
-# rig updates). The bridge verifies them inside its own request; the host
-# re-reads a sample in a separate request so an override is not reported as
-# success.
-SETTLED_ROTATION_OPERATIONS = frozenset(
-    {"animation.rotation_keys_set", "animation.transform_set", "animation.position_keys_set"}
-)
-SETTLED_POSITION_TOLERANCE = 0.05
-SETTLED_SAMPLE_LIMIT = 64
-# Cascadeur converts Euler input through float32; real overrides are tens of degrees.
-SETTLED_TOLERANCE_DEGREES = 0.2
-
-
-def euler_xyz_to_quaternion(euler: list[float]) -> list[float]:
-    """Cascadeur's rotation_euler_xyz_radians (extrinsic x, y, z) as wxyz."""
-    half = [value / 2.0 for value in euler]
-    cx, cy, cz = (math.cos(value) for value in half)
-    sx, sy, sz = (math.sin(value) for value in half)
-    return [
-        cx * cy * cz + sx * sy * sz,
-        sx * cy * cz - cx * sy * sz,
-        cx * sy * cz + sx * cy * sz,
-        cx * cy * sz - sx * sy * cz,
-    ]
-
-
-def quaternion_angle_degrees(first: list[float], second: list[float]) -> float:
-    dot = min(1.0, abs(sum(a * b for a, b in zip(first, second, strict=True))))
-    return math.degrees(2.0 * math.acos(dot))
-
-
-def settled_rotation_samples(operation_name: str, arguments: dict[str, Any], frame: int | None) -> list[tuple]:
-    """(object id, frame, expected wxyz) pairs to re-read after a rotation write."""
-    if operation_name == "animation.position_keys_set":
-        writes = list(arguments.get("writes") or [])
-        step = max(1, len(writes) // SETTLED_SAMPLE_LIMIT)
-        return [
-            (str(item["id"]), int(item["frame"]), [float(value) for value in item["position"]])
-            for item in writes[::step][:SETTLED_SAMPLE_LIMIT]
-        ]
-    if operation_name == "animation.rotation_keys_set":
-        writes = list(arguments.get("writes") or [])
-        step = max(1, len(writes) // SETTLED_SAMPLE_LIMIT)
-        return [
-            (str(item["id"]), int(item["frame"]), euler_xyz_to_quaternion(item["rotation_euler_xyz_radians"]))
-            for item in writes[::step][:SETTLED_SAMPLE_LIMIT]
-        ]
-    euler = arguments.get("rotation_euler_xyz_radians")
-    ids = [str(item) for item in arguments.get("ids") or []]
-    if euler is None or not ids or frame is None:
-        return []
-    expected = euler_xyz_to_quaternion([float(value) for value in euler])
-    return [(object_id, int(arguments.get("frame", frame)), expected) for object_id in ids[:SETTLED_SAMPLE_LIMIT]]
-
-
-VIEW_OPERATIONS = frozenset(
-    {
-        "view.silhouette",
-        "view.isometric_grid",
-        "view.composition",
-        "view.trajectory",
-        "view.trajectory_translate",
-        "view.trajectory_rotate",
-        "view.trajectory_direction",
-        "view.trajectory_edit",
-        "view.ballistic_ghosts",
-        "view.fingers_drawing",
-        "physics.autophysics_freeze",
-        "view.ghost",
-        "view.node_editor",
-        "view.control_picker",
-    }
-)
-VIEW_CHANGE_FRACTION = 0.002
-
-# Operations whose success is a new or replaced file at arguments["path"].
-OUTPUT_OPERATIONS = frozenset(
-    {
-        "render.viewport_capture",
-        "render.image",
-        "render.video",
-        "io.export_image",
-        "io.export_video",
-        "io.export_fbx",
-        "io.export_dae",
-        "scene.save_as",
-    }
-)
-
-# Postconditions verified by the host itself (file system, native windows,
-# UI Automation or the persisted registry) after the bridge response.
-HOST_POSTCONDITIONS = {
-    **{operation: ("output_file", "nonzero_bytes") for operation in OUTPUT_OPERATIONS},
-    "scene.open": ("stable_scene_path",),
-    "scene.open_autosave": ("stable_scene_path",),
-    "scene.activate": ("stable_scene_path",),
-    "scene.new": ("stable_scene_path",),
-    "safety.rollback": ("stable_scene_path",),
-    "system.ui_file_flow": (
-        "exact_file_dialog",
-        "exact_options_window",
-        "registered_uia_flow_token",
-        "scene_revision_changed",
-        "output_file",
-        "nonzero_bytes",
-    ),
-    "system.action_invoke": ("registered_action_binding",),
-    "physics.auto_snap": ("scene_revision_changed",),
-    "system.introspect": ("feature_registry",),
-    "io.export_fbx": ("output_file", "nonzero_bytes", "target_import_verified"),
-    "timeline.playback": ("playback_frames_advance", "playback_frame_stable"),
-    **{operation: ("viewport_render_changed",) for operation in VIEW_OPERATIONS},
-}
-
-# Operations that only move the playhead (part of the revision) and edit no data.
-PLAYHEAD_ONLY_OPERATIONS = frozenset({"timeline.playback"})
-
-# Operations whose "path" argument names an existing file to read, not an output.
-INPUT_PATH_OPERATIONS = frozenset(
-    {
-        "scene.open",
-        "scene.open_autosave",
-        "io.selection_groups_import",
-        "rig.json_import",
-        "rig.quick_rig",
-    }
-)
 
 MUTATION_VERBS = (
     "add",
@@ -211,178 +74,7 @@ MUTATION_VERBS = (
 )
 
 
-def ui_file_flow_arguments(
-    direction: str, format: str, path: str, preset: str = "scene", allow_overwrite: bool = False
-) -> tuple[str, dict[str, Any]]:
-    """Return the feature id and exact action/dialog contract for a UI file flow on the pinned build."""
-    if direction not in ("import", "export"):
-        raise ValueError("direction must be import or export")
-    if format not in ("usd", "glb", "gltf", "vrm"):
-        raise ValueError("format must be usd, glb, gltf, or vrm")
-    suffix = "." + format
-    if not path.casefold().endswith(suffix):
-        raise ValueError(f"{format} path must end with {suffix}")
-    if format == "vrm" and direction == "export":
-        raise ValueError("Cascadeur 2026.1 exposes VRM import but no VRM export action")
-    if format == "usd":
-        allowed = {"import": {"animation", "model", "scene"}, "export": {"model", "scene"}}[direction]
-        if preset not in allowed:
-            raise ValueError(f"USD {direction} supports presets: {', '.join(sorted(allowed))}")
-        action_id = f"File.{direction.title()}.{preset.title()}.Usd..."
-        dialog_title = f"{direction.title()}. preset: {preset}"
-        options_title = None
-        options_accept_title = None
-        file_type_extension = None
-    else:
-        action_id = "File.Import.Glb" if direction == "import" else "File.Export.Glb"
-        dialog_title = f"{direction.title()}. preset: default"
-        options_title = "Glb/Gltf/Vrm(a) Import" if direction == "import" else "Glb/Gltf Export"
-        options_accept_title = direction.title()
-        file_type_extension = None if format == "glb" else suffix
-    return f"{direction}_{format}", {
-        "action_id": action_id,
-        "path": path,
-        "dialog_title": dialog_title,
-        "options_title": options_title,
-        "options_accept_title": options_accept_title,
-        "options_accept_index": 0,
-        "after_accept_title": None,
-        "form": None,
-        "file_type_extension": file_type_extension,
-        "input": direction == "import",
-        "output": direction == "export",
-        "allow_overwrite": allow_overwrite,
-    }
-
-
-# Dialog-driven Cascadeur 2026.1 file flows beyond USD/GLB/GLTF/VRM. Each
-# feature is bound to one exact action id and owned dialog title; the host only
-# fills that dialog and verifies a file or scene postcondition afterwards.
-UI_FILE_FLOWS: dict[str, dict[str, Any]] = {
-    "save_as_without_assets": {
-        "action_id": "File.Save as (no assets)",
-        "dialog_title": "Save Scene *",
-        "extension": ".casc",
-        "direction": "export",
-    },
-    "import_scene_to_current": {
-        "action_id": "File.Import.Scene to current...",
-        "dialog_title": "Import scene",
-        "extension": ".casc",
-        "direction": "import",
-    },
-    "selection_groups_export": {
-        "action_id": "File.Export.Selection groups...",
-        "dialog_title": "Export selection groups",
-        "extension": ".json",
-        "direction": "export",
-    },
-    "scene_parts_export": {
-        "action_id": "File.Export.PartsCasc",
-        "dialog_title": "Export to parts file: *",
-        "extension": ".partscasc",
-        "direction": "export",
-    },
-    "scene_parts_import": {
-        "action_id": "File.Import.PartsCasc",
-        "dialog_title": "Import parts file",
-        "extension": ".partscasc",
-        "direction": "import",
-    },
-    # File > Export > Video opens Cascadeur's own "Export video" form; "path"
-    # is the output folder plus file name without extension (the host waits for
-    # the rendered file of that name). render_video is the same product route.
-    "export_video": {
-        "action_id": "File.Export.Video...",
-        "dialog_title": "Export video",
-        "form": "export_video",
-        "extension": None,
-        "direction": "export",
-    },
-    "render_video": {
-        "action_id": "File.Export.Video...",
-        "dialog_title": "Export video",
-        "form": "export_video",
-        "extension": None,
-        "direction": "export",
-    },
-    "import_image": {
-        "action_id": "View.Reference image",
-        "dialog_title": "Load image",
-        "extension": None,
-        "direction": "import",
-    },
-    "import_video": {
-        # Cascadeur's "Load video" window: first "Choose..." opens a native
-        # file dialog with the same title, then "Import" applies the video.
-        "action_id": "View.Bind video",
-        "dialog_title": "Load video",
-        "options_title": "Load video",
-        "options_accept_title": "Choose...",
-        "options_accept_index": 0,
-        "after_accept_title": "Import",
-        "extension": ".mp4",
-        "direction": "import",
-    },
-}
-
-
-def dialog_flow_arguments(feature_id: str, path: str, allow_overwrite: bool = False) -> dict[str, Any]:
-    """Return the exact action/dialog contract for a registered dialog file flow."""
-    try:
-        flow = UI_FILE_FLOWS[feature_id]
-    except KeyError as exc:
-        raise ValueError(f"{feature_id} has no registered dialog file flow") from exc
-    extension = flow["extension"]
-    if extension and not path.casefold().endswith(extension):
-        raise ValueError(f"{feature_id} path must end with {extension}")
-    return {
-        "action_id": flow["action_id"],
-        "path": path,
-        "dialog_title": flow["dialog_title"],
-        "options_title": flow.get("options_title"),
-        "options_accept_title": flow.get("options_accept_title"),
-        "options_accept_index": int(flow.get("options_accept_index", 0)),
-        "after_accept_title": flow.get("after_accept_title"),
-        "form": flow.get("form"),
-        "file_type_extension": None,
-        "input": flow["direction"] == "import",
-        "output": flow["direction"] == "export",
-        "allow_overwrite": allow_overwrite,
-    }
-
-
-def _expected_ui_flow(feature_id: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
-    """Recompute the only allowed UI flow contract for a feature and path."""
-    path = str(arguments.get("path", ""))
-    if feature_id in UI_FILE_FLOWS:
-        return dialog_flow_arguments(feature_id, path, bool(arguments.get("allow_overwrite")))
-    direction, _, format_name = feature_id.partition("_")
-    if format_name not in ("usd", "glb", "gltf", "vrm"):
-        return None
-    presets = ("scene", "model", "animation") if format_name == "usd" else ("scene",)
-    for preset in presets:
-        try:
-            _feature, expected = ui_file_flow_arguments(
-                direction, format_name, path, preset, bool(arguments.get("allow_overwrite"))
-            )
-        except ValueError:
-            continue
-        if expected["action_id"] == arguments.get("action_id"):
-            return expected
-    return None
-
-
-def add_postconditions(result: ResultEnvelope, detail: str, *identifiers: str) -> None:
-    """Record host-verified postconditions next to the bridge-asserted ones."""
-    present = {str(item.get("id")) for item in result.postconditions if isinstance(item, dict)}
-    for identifier in identifiers:
-        if identifier not in present:
-            result.postconditions.append({"id": identifier, "ok": True, "detail": detail})
-            present.add(identifier)
-
-
-class CascadeurService:
+class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin):
     def __init__(self, paths: RuntimePaths | None = None, client: BridgeClient | None = None):
         self.paths = paths or RuntimePaths.discover()
         self.paths.ensure()
@@ -392,10 +84,10 @@ class CascadeurService:
         self.jobs = JobStore(self.paths)
         self.jobs.recover_incomplete()
         self.installation = discover_installation()
-        self.schema = load_csc_schema()
+        self.schema = load_csc_schema(state=self.paths.state)
         self.commands = discover_commands()
         self._live_tools = list(BASELINE_TOOLS)
-        self._license_name = "Basic"
+        self._license_name, self._license_source, self._license_observed_at = self._cached_license()
         self._scene_available = False
         self._live_scene_id: str | None = None
         self._live_scene_revision: str | None = None
@@ -407,6 +99,43 @@ class CascadeurService:
     @property
     def _version_name(self) -> str:
         return self.installation.get("version") or "unknown"
+
+    def _checked_status(self, status: ResultEnvelope) -> ResultEnvelope:
+        """A successful status must carry the scene state dict that tokens are bound to."""
+        if status.ok and not isinstance(status.result, dict):
+            return self._host_error(
+                "status", ErrorCode.POSTCONDITION_FAILED, "Cascadeur status returned no scene state"
+            )
+        return status
+
+    @property
+    def _license_path(self) -> Path:
+        return self.paths.state / "license.json"
+
+    def _cached_license(self) -> tuple[str, str, float | None]:
+        """The license last reported by this Cascadeur build, so a closed app keeps its feature states."""
+        try:
+            cached = read_json(self._license_path)
+        except (OSError, ValueError):
+            return "Basic", "default", None
+        if cached.get("cascadeur_version") != self._version_name or not isinstance(cached.get("license"), str):
+            return "Basic", "default", None
+        observed_at = cached.get("observed_at")
+        return cached["license"], "cached", float(observed_at) if isinstance(observed_at, (int, float)) else None
+
+    def _observe_license(self, license_name: Any) -> None:
+        name = str(license_name or "Basic")
+        changed = name != self._license_name or self._license_source != "live"
+        self._license_name, self._license_source, self._license_observed_at = name, "live", time.time()
+        if changed:
+            atomic_write_json(
+                self._license_path,
+                {
+                    "license": name,
+                    "cascadeur_version": self._version_name,
+                    "observed_at": self._license_observed_at,
+                },
+            )
 
     def _rebuild_features(self) -> None:
         self._features = build_registry(
@@ -467,7 +196,7 @@ class CascadeurService:
         )
         if result.ok and isinstance(result.result, dict):
             self._live_tools = result.result.get("tools") or list(BASELINE_TOOLS)
-            self._license_name = result.result.get("license", "Basic")
+            self._observe_license(result.result.get("license", "Basic"))
             self._remember_scene_result(result, clear_missing=True)
             self._record_live_evidence("status", "system.status", result)
             self._rebuild_features()
@@ -484,7 +213,6 @@ class CascadeurService:
         status = self.refresh_live(timeout=30)
         live = status.result if status.ok and isinstance(status.result, dict) else {}
         self._live_tools = live.get("tools", BASELINE_TOOLS)
-        self._license_name = live.get("license", "Basic")
         self._scene_available = bool(live.get("scene_id"))
         self._rebuild_features()
         self._write_registry()
@@ -528,6 +256,11 @@ class CascadeurService:
             "installation": self.installation,
             "bridge_protocol": PROTOCOL_VERSION,
             "transport": "stdio",
+            "license": {
+                "name": self._license_name,
+                "source": self._license_source,
+                "observed_at": self._license_observed_at,
+            },
             "feature_count": len(self._features),
             "product_coverage": {
                 "catalog_count": len(product_features),
@@ -565,10 +298,7 @@ class CascadeurService:
         return self._host_error(
             feature_id,
             ErrorCode.UNSUPPORTED_VERSION,
-            (
-                f"Cascadeur {PRODUCT_CATALOG.supported_build} is required; "
-                f"installed build is {self._version_name}"
-            ),
+            (f"Cascadeur {PRODUCT_CATALOG.supported_build} is required; installed build is {self._version_name}"),
             mode=ExecutionMode.GATED,
         )
 
@@ -622,10 +352,66 @@ class CascadeurService:
         return {
             "allow_unc_paths": bool(policy.get("allow_unc_paths", False)),
             "allow_device_paths": bool(policy.get("allow_device_paths", False)),
-            "require_confirmation_for_overwrite": bool(
-                policy.get("require_confirmation_for_overwrite", True)
-            ),
+            "require_confirmation_for_overwrite": bool(policy.get("require_confirmation_for_overwrite", True)),
         }
+
+    def _feature_gate_error(
+        self, feature: FeatureRecord, operation_name: str, arguments: dict[str, Any] | None
+    ) -> ResultEnvelope | None:
+        """Refuse a feature whose state cannot run, or an operation not bound to it (execute and prepare)."""
+        if operation_name in {
+            "system.csc_query",
+            "system.csc_mutate",
+            "system.tool_call",
+            "system.developer_execute_python",
+        }:
+            binding_error = self._operation_binding_error(feature, operation_name, arguments)
+            if binding_error:
+                return self._host_error(feature.id, ErrorCode.INVALID_REQUEST, binding_error)
+        if feature.state == CapabilityState.LICENSE_GATED:
+            return self._host_error(
+                feature.id, ErrorCode.LICENSE_GATED, f"{feature.name} requires {feature.license} license"
+            )
+        if feature.state == CapabilityState.MISSING_DEPENDENCY:
+            return self._host_error(
+                feature.id,
+                ErrorCode.DEPENDENCY_MISSING,
+                feature.dependency or "Required integration is unavailable",
+                mode=ExecutionMode.EXTERNAL,
+            )
+        if feature.state == CapabilityState.UNSUPPORTED_VERSION:
+            return self._host_error(
+                feature.id,
+                ErrorCode.UNSUPPORTED_VERSION,
+                f"No verified adapter for installed Cascadeur {self.installation.get('version') or 'unknown'}",
+                mode=ExecutionMode.GATED,
+            )
+        if feature.state == CapabilityState.UNSUPPORTED:
+            return self._host_error(
+                feature.id,
+                ErrorCode.UNSUPPORTED_VERSION,
+                f"Cascadeur {self._version_name} has no {feature.name} capability",
+                mode=ExecutionMode.GATED,
+            )
+        if feature.state == CapabilityState.UI_ONLY and not feature.adapter_id:
+            return self._host_error(
+                feature.id,
+                ErrorCode.UI_LOCKED,
+                f"{feature.name} is identified as UI-only in Cascadeur {self._version_name}; "
+                f"no postcondition-safe adapter is available (route: {feature.route})",
+                mode=ExecutionMode.UIA,
+            )
+        if feature.state == CapabilityState.UNHEALTHY and not feature.adapter_id:
+            return self._host_error(
+                feature.id,
+                ErrorCode.POSTCONDITION_FAILED,
+                "Capability was inventoried but its dedicated execution adapter is not implemented",
+                mode=feature.execution_mode,
+            )
+        binding_error = self._operation_binding_error(feature, operation_name, arguments)
+        if binding_error:
+            return self._host_error(feature.id, ErrorCode.INVALID_REQUEST, binding_error)
+        return None
 
     def _operation_binding_error(
         self, feature: FeatureRecord, operation_name: str, arguments: dict[str, Any] | None = None
@@ -652,7 +438,7 @@ class CascadeurService:
             action_id = str(arguments.get("action_id", ""))
             return None if self.action_allowed(feature.id, action_id) else "Action id is not bound to this feature"
         if operation_name == "system.ui_file_flow":
-            expected = _expected_ui_flow(feature.id, arguments)
+            expected = expected_ui_flow(feature.id, arguments)
             if expected is None:
                 return "UI file flow is not bound to this feature"
             keys = (
@@ -831,8 +617,8 @@ class CascadeurService:
         scene_id: str | None = None,
         expected_revision: str | None = None,
         timeout: float = 30.0,
-        confirmation_token: str | None = None,
     ) -> ResultEnvelope:
+        """Run a read-only operation; every mutation is refused (prepare_change/commit_change own those)."""
         build_error = self._supported_build_error(feature_id)
         if build_error and not (feature_id == "status" and operation_name == "system.status"):
             return build_error
@@ -840,51 +626,9 @@ class CascadeurService:
             feature = self.feature(feature_id)
         except KeyError:
             return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, "Unknown feature id")
-        if operation_name in {
-            "system.csc_query",
-            "system.csc_mutate",
-            "system.tool_call",
-            "system.developer_execute_python",
-        }:
-            binding_error = self._operation_binding_error(feature, operation_name, arguments)
-            if binding_error:
-                return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error)
-        if feature.state == CapabilityState.LICENSE_GATED:
-            return self._host_error(
-                feature_id, ErrorCode.LICENSE_GATED, f"{feature.name} requires {feature.license} license"
-            )
-        if feature.state == CapabilityState.MISSING_DEPENDENCY:
-            return self._host_error(
-                feature_id,
-                ErrorCode.DEPENDENCY_MISSING,
-                feature.dependency or "Required integration is unavailable",
-                mode=ExecutionMode.EXTERNAL,
-            )
-        if feature.state == CapabilityState.UNSUPPORTED_VERSION:
-            return self._host_error(
-                feature_id,
-                ErrorCode.UNSUPPORTED_VERSION,
-                f"No verified adapter for installed Cascadeur {self.installation.get('version') or 'unknown'}",
-                mode=ExecutionMode.GATED,
-            )
-        if feature.state == CapabilityState.UI_ONLY and not feature.adapter_id:
-            return self._host_error(
-                feature_id,
-                ErrorCode.UI_LOCKED,
-                f"{feature.name} is identified as UI-only in Cascadeur {self._version_name}; "
-                f"no postcondition-safe adapter is available (route: {feature.route})",
-                mode=ExecutionMode.UIA,
-            )
-        if feature.state == CapabilityState.UNHEALTHY and not feature.adapter_id:
-            return self._host_error(
-                feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                "Capability was inventoried but its dedicated execution adapter is not implemented",
-                mode=feature.execution_mode,
-            )
-        binding_error = self._operation_binding_error(feature, operation_name, arguments)
-        if binding_error:
-            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error)
+        gate_error = self._feature_gate_error(feature, operation_name, arguments)
+        if gate_error:
+            return gate_error
         arguments = self._bound_arguments(feature_id, arguments)
         if feature.requires_scene and scene_id is None and self._live_scene_id:
             scene_id = self._live_scene_id
@@ -896,47 +640,18 @@ class CascadeurService:
                 ErrorCode.CONFIRMATION_REQUIRED,
                 "All scene and file mutations require change_prepare and change_commit",
             )
-        if operation_name == "system.action_invoke" and not feature.route.startswith(
-            ("action_invoke:", "command.")
-        ):
-            return self._host_error(
-                feature_id, ErrorCode.INVALID_REQUEST, "Feature is not registered as an action or GUI tool"
-            )
-        if (
-            operation_name == "system.action_invoke"
-            and not bool((arguments or {}).get("expect_change", True))
-            and not (arguments or {}).get("postcondition")
-        ):
-            return self._host_error(
-                feature_id,
-                ErrorCode.INVALID_REQUEST,
-                "Actions must require an observable scene change or provide an explicit postcondition",
-            )
-        safety = SafetyContext(
-            destructive=False,
-            confirmation_token=confirmation_token,
-            snapshot_required=False,
-        )
-        output_path = (arguments or {}).get("path") if operation_name == "render.viewport_capture" else None
-        before_output = self._file_signature(output_path) if output_path else None
         result = self.client.execute(
             feature_id,
             [Operation(name=operation_name, arguments=arguments or {})],
             scene_id=scene_id,
             expected_revision=expected_revision,
             timeout=timeout,
-            safety_context=safety,
+            safety_context=SafetyContext(destructive=False, snapshot_required=False),
         )
         result.operation_id = operation_name
         result.status = "succeeded" if result.ok else "failed"
         result.scene_revision_before = expected_revision
         result.scene_revision_after = result.scene_revision
-        if result.ok and output_path:
-            result = self._wait_for_output_file(result, str(output_path), timeout, before_output)
-        if result.ok and operation_name == "system.action_invoke":
-            add_postconditions(
-                result, "Host bound the action id to an installed command record", "registered_action_binding"
-            )
         self._remember_scene_result(result)
         if result.ok and feature.adapter_id:
             self._record_live_evidence(feature_id, operation_name, result)
@@ -983,25 +698,26 @@ class CascadeurService:
         scene_id: str | None,
         expected_revision: str | None,
         timeout: float = 60.0,
-        confirmation_token: str | None = None,
     ) -> ResultEnvelope:
+        """Run read-only operations in one bridge entry; mutating batches are refused."""
         build_error = self._supported_build_error(feature_id)
         if build_error:
             return build_error
-        parsed = [Operation.model_validate(item) for item in operations]
+        try:
+            parsed = [Operation.model_validate(item) for item in operations]
+        except ValidationError as exc:
+            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, f"Invalid batch operation: {exc}")
         for item in parsed:
             item.arguments = self._bound_arguments(feature_id, item.arguments)
         try:
             feature = self.feature(feature_id)
         except KeyError:
             return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, "Unknown feature id")
-        binding_errors = [self._operation_binding_error(feature, item.name, item.arguments) for item in parsed]
-        if any(binding_errors):
-            return self._host_error(
-                feature_id,
-                ErrorCode.INVALID_REQUEST,
-                next(item for item in binding_errors if item),
-            )
+        # The same state gate as execute: a batch is not a way around a license or dependency gate.
+        for item in parsed:
+            gate_error = self._feature_gate_error(feature, item.name, item.arguments)
+            if gate_error:
+                return gate_error
         mutating = any(self._operation_is_mutating(item.name) for item in parsed)
         if mutating:
             return self._host_error(
@@ -1009,17 +725,13 @@ class CascadeurService:
                 ErrorCode.CONFIRMATION_REQUIRED,
                 "Mutating batches must be split into individually prepared changes",
             )
-        if any(self._operation_is_mutating(item.name) for item in parsed) and expected_revision is None:
-            return self._host_error(
-                feature_id, ErrorCode.INVALID_REQUEST, "expected_revision is required for mutating batches"
-            )
         result = self.client.execute(
             feature_id,
             parsed,
             scene_id=scene_id,
             expected_revision=expected_revision,
             timeout=timeout,
-            safety_context=SafetyContext(destructive=False, confirmation_token=confirmation_token),
+            safety_context=SafetyContext(destructive=False),
         )
         result.operation_id = "batch"
         result.status = "succeeded" if result.ok else "failed"
@@ -1027,775 +739,6 @@ class CascadeurService:
         result.scene_revision_after = result.scene_revision
         self._remember_scene_result(result)
         return result
-
-    def prepare_change(
-        self, feature_id: str, operation_name: str, arguments: dict[str, Any], ttl: float = 300.0
-    ) -> dict[str, Any]:
-        build_error = self._supported_build_error(feature_id)
-        if build_error:
-            return build_error.model_dump(mode="json")
-        feature = self.feature(feature_id)
-        if operation_name in {
-            "system.csc_query",
-            "system.csc_mutate",
-            "system.tool_call",
-            "system.developer_execute_python",
-        }:
-            binding_error = self._operation_binding_error(feature, operation_name, arguments)
-            if binding_error:
-                return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
-        if feature.state == CapabilityState.LICENSE_GATED:
-            return self._host_error(
-                feature_id, ErrorCode.LICENSE_GATED, f"{feature.name} requires {feature.license} license"
-            ).model_dump(mode="json")
-        if feature.state == CapabilityState.MISSING_DEPENDENCY:
-            return self._host_error(
-                feature_id,
-                ErrorCode.DEPENDENCY_MISSING,
-                feature.dependency or "Required integration is unavailable",
-                mode=ExecutionMode.EXTERNAL,
-            ).model_dump(mode="json")
-        if feature.state == CapabilityState.UNSUPPORTED_VERSION:
-            return self._host_error(
-                feature_id,
-                ErrorCode.UNSUPPORTED_VERSION,
-                f"No verified adapter for installed Cascadeur {self.installation.get('version') or 'unknown'}",
-                mode=ExecutionMode.GATED,
-            ).model_dump(mode="json")
-        if feature.state == CapabilityState.UI_ONLY and not feature.adapter_id:
-            return self._host_error(
-                feature_id,
-                ErrorCode.UI_LOCKED,
-                f"{feature.name} is identified as UI-only in Cascadeur {self._version_name}; "
-                f"no postcondition-safe adapter is available (route: {feature.route})",
-                mode=ExecutionMode.UIA,
-            ).model_dump(mode="json")
-        if feature.state == CapabilityState.UNHEALTHY and not feature.adapter_id:
-            return self._host_error(
-                feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                "Capability was inventoried but its dedicated execution adapter is not implemented",
-                mode=feature.execution_mode,
-            ).model_dump(mode="json")
-        binding_error = self._operation_binding_error(feature, operation_name, arguments)
-        if binding_error:
-            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
-        arguments = self._bound_arguments(feature_id, arguments)
-        if operation_name == "timeline.playback":
-            moving = self._playback_moving()
-            wants_play = arguments.get("state") == "play"
-            if moving is None or moving == wants_play:
-                return self._host_error(
-                    feature_id,
-                    ErrorCode.INVALID_REQUEST,
-                    "Playback is already " + ("running" if moving else "stopped")
-                    if moving is not None
-                    else "The playhead could not be sampled",
-                ).model_dump(mode="json")
-        if not self._operation_is_mutating(operation_name):
-            return self._host_error(
-                feature_id,
-                ErrorCode.INVALID_REQUEST,
-                "Read-only operations must be executed directly and cannot mint change tokens",
-            ).model_dump(mode="json")
-        status = self.refresh_live()
-        if not status.ok:
-            return status.model_dump(mode="json")
-        state = status.result
-        if feature.requires_scene and not state.get("scene_id"):
-            return self._host_error(
-                feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                f"{feature.name} requires an active Cascadeur scene",
-                mode=feature.execution_mode,
-            ).model_dump(mode="json")
-        destination = arguments.get("path") or arguments.get("destination")
-        if destination:
-            path_policy = self._path_policy()
-            if (
-                operation_name in INPUT_PATH_OPERATIONS
-                or operation_name.startswith("io.import_")
-                or bool(arguments.get("input"))
-            ):
-                validated = validate_local_input_path(
-                    str(destination),
-                    allow_unc_paths=path_policy["allow_unc_paths"],
-                    allow_device_paths=path_policy["allow_device_paths"],
-                )
-            else:
-                validated = validate_local_path(
-                    str(destination),
-                    allow_overwrite=(
-                        bool(arguments.get("allow_overwrite"))
-                        or not path_policy["require_confirmation_for_overwrite"]
-                    ),
-                    allow_unc_paths=path_policy["allow_unc_paths"],
-                    allow_device_paths=path_policy["allow_device_paths"],
-                )
-            arguments = {**arguments, "path": str(validated)}
-        snapshot_id = str(uuid.uuid4())
-        working_id = str(uuid.uuid4())
-        backup_path = None
-        working_path = None
-        # Playback only moves the playhead and edits no scene data, while the
-        # playhead is part of the revision; bind it to the scene identity only.
-        playhead_only = operation_name in PLAYHEAD_ONLY_OPERATIONS
-        if state.get("scene_id") and not playhead_only:
-            snapshot = self.client.execute(
-                "snapshot",
-                [
-                    Operation(
-                        name="safety.snapshot",
-                        arguments={"snapshot_id": snapshot_id, "working_id": working_id},
-                    )
-                ],
-                scene_id=state["scene_id"],
-                expected_revision=state["revision"],
-                timeout=120,
-            )
-            if not snapshot.ok:
-                return snapshot.model_dump(mode="json")
-            # safety.snapshot saves and activates a distinct writable working
-            # document. Bind the post-snapshot status check to that returned
-            # identity, not to the immutable source document cached above.
-            self._remember_scene_result(snapshot)
-            backup_path = snapshot.result["path"]
-            working_path = snapshot.result.get("working_path", backup_path)
-            if Path(backup_path).resolve() == Path(working_path).resolve():
-                return self._host_error(
-                    feature_id,
-                    ErrorCode.POSTCONDITION_FAILED,
-                    "Snapshot safety invariant failed: recovery and working paths are identical",
-                ).model_dump(mode="json")
-            # Bind the token to the writable working document created by the
-            # snapshot operation, never to the original or immutable backup.
-            post_snapshot = self.refresh_live(bind_to_cached=True)
-            if not post_snapshot.ok:
-                return post_snapshot.model_dump(mode="json")
-            state = post_snapshot.result
-        impact = {
-            "feature": feature.name,
-            "destructive": True,
-            "selected_entities": len(state.get("selection", [])),
-            "object_count": len(state.get("objects", [])),
-            "destination": arguments.get("path"),
-            "working_scene": working_path,
-            "expected_result": "Operation-specific postconditions must pass",
-        }
-        record = self.changes.prepare(
-            feature_id=feature_id,
-            scene_id=state.get("scene_id"),
-            scene_revision=None if playhead_only else state.get("revision"),
-            selection_fingerprint=state.get("selection_fingerprint"),
-            operation=Operation(name=operation_name, arguments=arguments),
-            impact=impact,
-            backup_path=backup_path,
-            ttl=ttl,
-        )
-        return {
-            "ok": True,
-            "confirmation_token": record.token,
-            "feature_id": feature_id,
-            "scene_id": record.scene_id,
-            "scene_revision": record.scene_revision,
-            "selection_fingerprint": record.selection_fingerprint,
-            "operation": record.operation.model_dump(mode="json"),
-            "impact": impact,
-            "backup_path": backup_path,
-            "working_path": working_path,
-            "snapshot_id": snapshot_id if backup_path else None,
-            "expires_at": record.expires_at,
-        }
-
-    def commit_change(self, token: str, timeout: float = 120.0) -> ResultEnvelope:
-        build_error = self._supported_build_error("change_commit")
-        if build_error:
-            return build_error
-        try:
-            record = self.changes.load(token)
-        except SafetyError as exc:
-            return self._host_error("change_commit", ErrorCode.INVALID_REQUEST, str(exc))
-        status = self.refresh_live()
-        if not status.ok:
-            return status
-        state = status.result
-        try:
-            self.changes.consume(
-                token,
-                scene_id=state.get("scene_id"),
-                scene_revision=state.get("revision"),
-                selection_fingerprint=state.get("selection_fingerprint"),
-            )
-        except SafetyError as exc:
-            return self._host_error(record.feature_id, ErrorCode.SCENE_CHANGED, str(exc))
-        output_path = record.operation.arguments.get("path")
-        before_output = self._file_signature(output_path) if output_path else None
-        before_view = None
-        if record.operation.name in VIEW_OPERATIONS:
-            self._wait_for_bridge_idle()
-            before_view = capture_window_sample()
-        if record.operation.name == "system.ui_file_flow":
-            result = self._execute_ui_file_flow(record, timeout, before_output)
-        else:
-            result = self.client.execute(
-                record.feature_id,
-                [record.operation],
-                scene_id=record.scene_id,
-                expected_revision=record.scene_revision,
-                timeout=timeout,
-                safety_context=SafetyContext(
-                    destructive=True,
-                    confirmation_token=token,
-                    snapshot_required=False,
-                    selection_fingerprint=record.selection_fingerprint,
-                    allow_overwrite=bool(record.operation.arguments.get("allow_overwrite")),
-                ),
-            )
-        result.snapshot_id = Path(record.backup_path).stem if record.backup_path else None
-        result.operation_id = record.operation.name
-        result.status = "succeeded" if result.ok else "failed"
-        result.scene_revision_before = record.scene_revision
-        result.scene_revision_after = result.scene_revision
-        try:
-            if result.ok and record.operation.name == "scene.open":
-                result = self._wait_for_open_scene(result, str(record.operation.arguments["path"]), timeout)
-            if result.ok and record.operation.name == "scene.open_autosave":
-                result = self._wait_for_open_scene(result, str(result.result["path"]), timeout)
-            if result.ok and record.operation.name in {"scene.activate", "scene.new"}:
-                payload = result.result if isinstance(result.result, dict) else {}
-                if not payload.get("tab_id"):
-                    raise RuntimeError("Scene change result does not identify the target tab")
-                result = self._wait_for_open_scene(
-                    result, str(payload.get("path") or ""), timeout, expected_tab_id=str(payload["tab_id"])
-                )
-            if result.ok and record.operation.name == "safety.rollback":
-                working_path = self.paths.snapshots / (
-                    str(record.operation.arguments["working_id"]) + ".working.casc"
-                )
-                result = self._wait_for_open_scene(result, str(working_path), timeout)
-            if result.ok and record.operation.name == "physics.auto_snap":
-                result = self._complete_auto_physics_snap(result, timeout)
-            if result.ok and record.operation.name in SETTLED_ROTATION_OPERATIONS:
-                checked = self._verify_settled_rotations(record, result)
-                if checked:
-                    add_postconditions(
-                        result,
-                        f"{checked} written value(s) re-read unchanged in a separate request",
-                        "rotations_persist_after_update",
-                    )
-            if result.ok and record.feature_id == "blender_export":
-                report = verify_blender_fbx(str(record.operation.arguments["path"]))
-                if report["armatures"] < 1 or not report["actions"]:
-                    raise RuntimeError(f"Blender imported no armature/animation: {report}")
-                result.result = {**(result.result if isinstance(result.result, dict) else {}), "blender": report}
-                add_postconditions(
-                    result,
-                    f"Blender {report['blender']} imported {report['armatures']} armature(s), "
-                    f"{report['bones']} bones and {len(report['actions'])} action(s)",
-                    "target_import_verified",
-                )
-            if result.ok and record.operation.name in VIEW_OPERATIONS:
-                self._wait_for_bridge_idle()
-                time.sleep(1.0)
-                changed = sample_difference(before_view, capture_window_sample())
-                if changed < VIEW_CHANGE_FRACTION:
-                    raise RuntimeError(f"the rendered window did not change after the view action ({changed:.4%})")
-                add_postconditions(
-                    result, f"{changed:.2%} of sampled window pixels changed", "viewport_render_changed"
-                )
-            if result.ok and record.operation.name == "timeline.playback":
-                wants_play = record.operation.arguments.get("state") == "play"
-                moving = self._playback_moving()
-                if moving is None or moving != wants_play:
-                    raise RuntimeError("playhead motion after the toggle does not match the requested state")
-                add_postconditions(
-                    result,
-                    "Playhead sampled twice after the UI thread was released",
-                    "playback_frames_advance" if wants_play else "playback_frame_stable",
-                )
-            if result.ok and record.operation.name in OUTPUT_OPERATIONS:
-                result = self._wait_for_output_file(
-                    result,
-                    str(record.operation.arguments["path"]),
-                    timeout,
-                    before_output,
-                    stable_seconds=3.0 if record.operation.name == "render.video" else 0.0,
-                )
-        except Exception as exc:
-            bridge_evidence = list(result.evidence)
-            result = self._host_error(
-                record.feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                f"Host postcondition failed: {exc}",
-                mode=result.execution_mode,
-            )
-            result.snapshot_id = Path(record.backup_path).stem if record.backup_path else None
-            result.evidence = bridge_evidence
-        if result.ok and record.operation.name == "system.action_invoke":
-            add_postconditions(
-                result, "Host bound the action id to an installed command record", "registered_action_binding"
-            )
-        if result.ok:
-            self._record_live_evidence(record.feature_id, record.operation.name, result)
-            # The generic dispatchers are proven by any concrete bound dispatch.
-            if record.operation.name == "system.ui_file_flow":
-                self._record_live_evidence("ui_flow_run", record.operation.name, result)
-            if record.operation.name == "system.action_invoke" and record.feature_id.startswith("command."):
-                self._record_live_evidence("action_invoke", record.operation.name, result)
-            self._rebuild_features()
-            self._write_registry()
-        elif record.backup_path:
-            result = self._restore_failed_change(record, result)
-        result.operation_id = record.operation.name
-        result.status = "succeeded" if result.ok else "failed"
-        result.scene_revision_before = record.scene_revision
-        result.scene_revision_after = result.scene_revision
-        self._remember_scene_result(result)
-        return result
-
-    def _execute_ui_file_flow(self, record, timeout: float, before_output: tuple[int, int] | None) -> ResultEnvelope:
-        """Coordinate a blocking Cascadeur action with its owned file dialog."""
-        arguments = record.operation.arguments
-        action_id = str(arguments["action_id"])
-        responses: list[ResultEnvelope] = []
-        failures: list[BaseException] = []
-
-        def dispatch() -> None:
-            try:
-                responses.append(
-                    self.client.execute(
-                        record.feature_id,
-                        [Operation(name="system.action_dispatch", arguments={"action_id": action_id})],
-                        scene_id=record.scene_id,
-                        expected_revision=record.scene_revision,
-                        timeout=timeout,
-                        safety_context=SafetyContext(
-                            destructive=True,
-                            confirmation_token=record.token,
-                            selection_fingerprint=record.selection_fingerprint,
-                            allow_overwrite=bool(arguments.get("allow_overwrite")),
-                        ),
-                    )
-                )
-            except BaseException as exc:  # pragma: no cover - thread boundary
-                failures.append(exc)
-
-        worker = Thread(target=dispatch, name="cascadeur-ui-file-flow", daemon=True)
-        worker.start()
-        started = time.time()
-        try:
-            if arguments.get("form") == "export_video":
-                target = Path(str(arguments["path"]))
-                dialog = complete_export_video_form(
-                    action_id=action_id,
-                    folder=str(target.parent).replace("\\", "/"),
-                    name=target.name,
-                    width=int(arguments.get("width", 320)),
-                    height=int(arguments.get("height", 180)),
-                    quality=str(arguments.get("quality", "LOW")),
-                    timeout=min(timeout, 30.0),
-                )
-            else:
-                dialog = complete_file_dialog(
-                    action_id=action_id,
-                    path=str(arguments["path"]),
-                    expected_dialog_title=str(arguments["dialog_title"]),
-                    options_title=arguments.get("options_title"),
-                    options_accept_title=arguments.get("options_accept_title"),
-                    file_type_extension=arguments.get("file_type_extension"),
-                    timeout=min(timeout, 30.0),
-                    options_accept_index=int(arguments.get("options_accept_index") or 0),
-                    after_accept_title=arguments.get("after_accept_title"),
-                )
-        except Exception as exc:
-            if not cancel_file_flow(
-                expected_dialog_title=str(arguments["dialog_title"]),
-                options_title=arguments.get("options_title"),
-            ):
-                # Never leave an unexpected modal file dialog blocking Cascadeur.
-                cancel_owned_file_dialogs()
-            worker.join(min(10.0, max(0.1, timeout)))
-            is_uia = isinstance(exc, UIAutomationError)
-            gated = responses and responses[0].error_code == ErrorCode.LICENSE_GATED
-            if is_uia and exc.license_gated or gated:
-                return self._host_error(
-                    record.feature_id,
-                    ErrorCode.LICENSE_GATED,
-                    str(exc) if is_uia and exc.license_gated else str(responses[0].error_message),
-                    mode=ExecutionMode.GATED,
-                )
-            return self._host_error(
-                record.feature_id,
-                (ErrorCode.CASCADEUR_NOT_RUNNING if is_uia and exc.not_running else ErrorCode.UI_LOCKED),
-                f"UI file flow failed: {exc}",
-                mode=ExecutionMode.UIA,
-            )
-        worker.join(max(0.1, timeout))
-        if worker.is_alive():
-            return self._host_error(
-                record.feature_id,
-                ErrorCode.TIMEOUT,
-                f"Cascadeur action did not finish after file dialog acceptance: {action_id}",
-                mode=ExecutionMode.UIA,
-            )
-        if failures:
-            return self._host_error(
-                record.feature_id,
-                ErrorCode.UI_LOCKED,
-                f"UI file flow dispatch failed: {failures[0]}",
-                mode=ExecutionMode.UIA,
-            )
-        if not responses:
-            return self._host_error(
-                record.feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                "UI file flow produced no bridge response",
-                mode=ExecutionMode.UIA,
-            )
-        result = responses[0]
-        result.execution_mode = ExecutionMode.UIA
-        result.evidence.append(
-            Evidence(
-                kind="host_ui_file_dialog",
-                detail=(
-                    f"Invoked {dialog.action_id}; matched {dialog.dialog_title}; "
-                    f"set Edit {dialog.file_name_automation_id}; accepted Button {dialog.accept_automation_id}; "
-                    f"file type {dialog.file_type or 'dialog default'}"
-                ),
-                observed_at=dialog.completed_at,
-            )
-        )
-        if not result.ok:
-            return result
-        add_postconditions(
-            result,
-            f"Host completed the exact owned dialog {dialog.dialog_title}",
-            "exact_file_dialog",
-            "registered_uia_flow_token",
-        )
-        if arguments.get("options_title"):
-            add_postconditions(
-                result, f"Host accepted the exact options window {arguments['options_title']}", "exact_options_window"
-            )
-        if arguments.get("form") == "export_video":
-            result = self._wait_for_rendered_video(result, Path(str(arguments["path"])), timeout, started)
-            try:
-                closed = finish_export_video_form(timeout=min(120.0, timeout))
-            except UIAutomationError as exc:
-                return self._host_error(
-                    record.feature_id, ErrorCode.UI_LOCKED, f"Rendered, but {exc}", mode=ExecutionMode.UIA
-                )
-            if result.ok and closed:
-                result.evidence.append(
-                    Evidence(
-                        kind="host_ui_file_dialog",
-                        detail="Export video reached its completion screen; host pressed Ok",
-                        observed_at=time.time(),
-                    )
-                )
-            return result
-        if bool(arguments.get("output")):
-            return self._wait_for_output_file(result, str(arguments["path"]), timeout, before_output)
-        before_revision = record.scene_revision
-        try:
-            helper = resolve_optional_rig_mode_helper(enter_rig_mode=False, timeout=min(12.0, timeout))
-        except UIAutomationError as exc:
-            failed = self._host_error(
-                record.feature_id,
-                ErrorCode.UI_LOCKED,
-                f"Imported scene is waiting for an unresolved Rig Mode Helper: {exc}",
-                mode=ExecutionMode.UIA,
-            )
-            failed.evidence = list(result.evidence)
-            return failed
-        if helper is not None:
-            result.evidence.append(
-                Evidence(
-                    kind="host_ui_postcondition",
-                    detail=f"Dismissed optional {helper.window_title} with {helper.button}",
-                    observed_at=helper.dismissed_at,
-                )
-            )
-        deadline = time.monotonic() + max(1.0, timeout)
-        after = None
-        while time.monotonic() < deadline:
-            # Let Cascadeur's event loop finish the asynchronous import between
-            # polls; a lingering drain would otherwise keep the UI thread busy.
-            self._wait_for_bridge_idle()
-            after = self.refresh_live(timeout=min(20.0, max(1.0, deadline - time.monotonic())))
-            if after.ok and after.scene_revision and after.scene_revision != before_revision:
-                break
-            time.sleep(0.2)
-        if after is None or not after.ok or not after.scene_revision or after.scene_revision == before_revision:
-            failed = self._host_error(
-                record.feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                "Import file dialog completed but the scene revision did not change",
-                mode=ExecutionMode.UIA,
-            )
-            failed.evidence = list(result.evidence) + (list(after.evidence) if after is not None else [])
-            return failed
-        result.scene_id = after.scene_id
-        result.scene_revision = after.scene_revision
-        result.changed_entities = sorted(set(result.changed_entities + ["scene"]))
-        result.evidence.extend(after.evidence)
-        result.evidence.append(
-            Evidence(
-                kind="host_scene_postcondition",
-                detail="Scene revision changed after UI file import",
-                observed_at=time.time(),
-            )
-        )
-        add_postconditions(result, "Scene revision changed after UI file import", "scene_revision_changed")
-        return result
-
-    def _restore_failed_change(self, record, failed: ResultEnvelope) -> ResultEnvelope:
-        """Restore the prepared snapshot after any failed destructive commit.
-
-        A Cascadeur command may modify static update-graph data before its own
-        postcondition fails.  Those partial writes are not always represented
-        by the normal scene fingerprint, so every failed prepared change is
-        restored from its already-created snapshot instead of guessing whether
-        the scene is still clean.
-        """
-        snapshot_id = Path(record.backup_path).stem
-        restored = self._rollback_internal(snapshot_id)
-        if restored.ok:
-            failed.scene_id = restored.scene_id
-            failed.scene_revision = restored.scene_revision
-            failed.warnings.append(f"Failed change was automatically restored from snapshot {snapshot_id}")
-            failed.evidence.extend(restored.evidence)
-            failed.evidence.append(
-                Evidence(
-                    kind="automatic_rollback",
-                    detail=f"Restored prepared snapshot {snapshot_id} after failed commit",
-                    observed_at=time.time(),
-                )
-            )
-        else:
-            failed.warnings.append(
-                "Automatic rollback failed; use change_rollback with snapshot "
-                f"{snapshot_id}. Rollback error: {restored.error_message or restored.error_code}"
-            )
-            failed.evidence.extend(restored.evidence)
-        return failed
-
-    def _verify_settled_rotations(self, record, result: ResultEnvelope) -> int:
-        payload = result.result if isinstance(result.result, dict) else {}
-        frame = payload.get("frame") if isinstance(payload, dict) else None
-        samples = settled_rotation_samples(record.operation.name, dict(record.operation.arguments), frame)
-        if not samples:
-            return 0
-        is_position = record.operation.name == "animation.position_keys_set"
-        default_space = "global" if is_position else "local"
-        space = str(record.operation.arguments.get("space", default_space))
-        time.sleep(0.3)
-        by_frame: dict[int, list[tuple[str, list[float]]]] = {}
-        for object_id, sample_frame, expected in samples:
-            by_frame.setdefault(sample_frame, []).append((object_id, expected))
-        operations = [
-            Operation(
-                name="animation.transform_get",
-                arguments={"ids": [item[0] for item in items], "frame": sample_frame, "space": space},
-            )
-            for sample_frame, items in sorted(by_frame.items())
-        ]
-        reread = self.client.execute("transform_get", operations, timeout=120)
-        if not reread.ok:
-            raise RuntimeError(f"settled read-back failed: {reread.error_code}: {reread.error_message}")
-        rows = reread.result if len(operations) > 1 else [{"result": reread.result}]
-        worst = (0.0, None, None)
-        for (sample_frame, items), row in zip(sorted(by_frame.items()), rows, strict=True):
-            skipped = {str(item) for item in record.operation.arguments.get("rig_solved_ids") or []}
-            for item in row["result"]:
-                object_id = str(item["id"])
-                expected = dict(items).get(object_id)
-                if expected is None or object_id in skipped:
-                    continue
-                if is_position:
-                    error = max(abs(a - b) for a, b in zip(item["position"], expected, strict=True))
-                else:
-                    error = quaternion_angle_degrees(expected, item["rotation"]["quaternion_wxyz"])
-                if error > worst[0]:
-                    worst = (error, object_id, sample_frame)
-        if is_position:
-            requested = float(record.operation.arguments.get("tolerance_cm", 0.0) or 0.0)
-            tolerance, unit = max(SETTLED_POSITION_TOLERANCE, min(requested, 10.0)), "cm"
-        else:
-            tolerance, unit = SETTLED_TOLERANCE_DEGREES, "deg"
-        if worst[0] > tolerance:
-            raise RuntimeError(
-                f"written value did not persist: {worst[1]} at frame {worst[2]} differs by {worst[0]:.2f} {unit} "
-                "after the update (AutoPosing or the rig re-solved it)"
-            )
-        return len(samples)
-
-    def _complete_auto_physics_snap(self, initial: ResultEnvelope, timeout: float) -> ResultEnvelope:
-        payload = dict(initial.result) if isinstance(initial.result, dict) else {}
-        before_revision = payload.get("before_revision") or initial.scene_revision
-        if payload.get("completed_synchronously"):
-            initial.changed_entities = sorted(set(initial.changed_entities + ["scene.animation"]))
-            return initial
-        try:
-            modal = resolve_autophysics_snap_warning(turn_off_single_use_features=True)
-        except UIAutomationError as exc:
-            failed = self._host_error(
-                initial.feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                "AutoPhysics produced no synchronous change and its confirmation could not be completed: " + str(exc),
-            )
-            failed.snapshot_id = initial.snapshot_id
-            failed.scene_id = initial.scene_id
-            failed.scene_revision = initial.scene_revision
-            failed.evidence = list(initial.evidence)
-            return failed
-
-        deadline = time.monotonic() + max(1.0, timeout)
-        latest = None
-        while time.monotonic() < deadline:
-            self._wait_for_bridge_idle()
-            latest = self.client.execute("auto_physics", [Operation(name="system.status")], timeout=15)
-            if latest.ok and latest.scene_revision and latest.scene_revision != before_revision:
-                payload.update(
-                    {
-                        "after_revision": latest.scene_revision,
-                        "completed_synchronously": False,
-                        "confirmation_may_be_pending": False,
-                        "confirmation_button": modal.button,
-                    }
-                )
-                initial.result = payload
-                initial.scene_id = latest.scene_id
-                initial.scene_revision = latest.scene_revision
-                initial.warnings = [
-                    warning
-                    for warning in initial.warnings
-                    if warning != "Cascadeur may be waiting for the known AutoPhysics single-use-feature confirmation"
-                ]
-                initial.changed_entities = sorted(set(initial.changed_entities + ["scene.animation"]))
-                add_postconditions(
-                    initial, "Scene revision changed after the AutoPhysics confirmation", "scene_revision_changed"
-                )
-                initial.evidence.extend(latest.evidence)
-                initial.evidence.append(
-                    Evidence(
-                        kind="host_ui_postcondition",
-                        detail="; ".join(
-                            (
-                                f"Dismissed AutoPhysics {modal.window_title} with {modal.button}",
-                                "scene revision changed",
-                            )
-                        ),
-                        observed_at=modal.dismissed_at,
-                    )
-                )
-                return initial
-            time.sleep(0.1)
-        failed = self._host_error(
-            initial.feature_id,
-            ErrorCode.POSTCONDITION_FAILED,
-            "AutoPhysics confirmation closed but the animation revision did not change before timeout",
-        )
-        failed.snapshot_id = initial.snapshot_id
-        failed.scene_id = latest.scene_id if latest else initial.scene_id
-        failed.scene_revision = latest.scene_revision if latest else initial.scene_revision
-        failed.evidence = list(initial.evidence)
-        return failed
-
-    @staticmethod
-    def _file_signature(path: str | None) -> tuple[int, int] | None:
-        if not path:
-            return None
-        candidate = Path(path)
-        if not candidate.is_file():
-            return None
-        stat = candidate.stat()
-        return stat.st_size, stat.st_mtime_ns
-
-    def _wait_for_rendered_video(
-        self, initial: ResultEnvelope, stem_path: Path, timeout: float, started: float
-    ) -> ResultEnvelope:
-        """Wait for the file Cascadeur renders under the requested name (extension set by its format)."""
-        deadline = time.monotonic() + max(1.0, timeout)
-        while time.monotonic() < deadline:
-            candidates = sorted(
-                (
-                    item
-                    for item in stem_path.parent.glob(glob_escape(stem_path.name) + ".*")
-                    if item.is_file() and item.stat().st_mtime >= started - 1.0
-                ),
-                key=lambda item: item.stat().st_mtime,
-            )
-            if candidates:
-                remaining = max(1.0, deadline - time.monotonic())
-                return self._wait_for_output_file(
-                    initial, str(candidates[-1]), remaining, None, stable_seconds=3.0
-                )
-            time.sleep(0.5)
-        return self._host_error(
-            initial.feature_id,
-            ErrorCode.POSTCONDITION_FAILED,
-            f"No rendered video named {stem_path.name}.* appeared in {stem_path.parent}",
-            mode=ExecutionMode.UIA,
-        )
-
-    def _wait_for_output_file(
-        self,
-        initial: ResultEnvelope,
-        output_path: str,
-        timeout: float,
-        before_signature: tuple[int, int] | None,
-        *,
-        stable_seconds: float = 0.0,
-    ) -> ResultEnvelope:
-        path = Path(output_path)
-        deadline = time.monotonic() + max(1.0, timeout)
-        previous = None
-        stable_observations = 0
-        stable_since = time.monotonic()
-        while time.monotonic() < deadline:
-            signature = self._file_signature(output_path)
-            if signature is not None and signature[0] > 0 and signature != before_signature:
-                if signature != previous:
-                    stable_since = time.monotonic()
-                stable_observations = stable_observations + 1 if signature == previous else 1
-                previous = signature
-                if stable_observations >= 2 and time.monotonic() - stable_since >= stable_seconds:
-                    payload = dict(initial.result) if isinstance(initial.result, dict) else {}
-                    payload.update(
-                        {
-                            "path": str(path),
-                            "bytes": signature[0],
-                            "stable_observations": stable_observations,
-                            "scheduled": False,
-                        }
-                    )
-                    initial.result = payload
-                    initial.evidence.append(
-                        Evidence(
-                            kind="host_file_postcondition",
-                            detail=f"Output file became stable with {signature[0]} bytes",
-                            observed_at=time.time(),
-                        )
-                    )
-                    add_postconditions(
-                        initial,
-                        f"Output file became stable with {signature[0]} bytes",
-                        "output_file",
-                        "nonzero_bytes",
-                    )
-                    return initial
-            time.sleep(0.2)
-        failed = self._host_error(
-            initial.feature_id,
-            ErrorCode.POSTCONDITION_FAILED,
-            f"Render output did not become stable before timeout: {output_path}",
-        )
-        failed.snapshot_id = initial.snapshot_id
-        failed.scene_id = initial.scene_id
-        failed.scene_revision = initial.scene_revision
-        failed.evidence = list(initial.evidence)
-        return failed
 
     @staticmethod
     def _same_path(left: str | None, right: str | None) -> bool:
@@ -1926,100 +869,6 @@ class CascadeurService:
         )
         add_postconditions(initial, f"Active scene settled at {target}", "stable_scene_path")
         return initial
-
-    def _snapshot_path(self, snapshot_id: str) -> Path | None:
-        try:
-            canonical = str(uuid.UUID(str(snapshot_id)))
-        except (ValueError, TypeError, AttributeError):
-            return None
-        if canonical != str(snapshot_id).casefold():
-            return None
-        path = (self.paths.snapshots / f"{canonical}.casc").resolve()
-        if path.parent != self.paths.snapshots.resolve() or not path.is_file():
-            return None
-        return path
-
-    def prepare_rollback(self, snapshot_id: str, ttl: float = 300.0) -> dict[str, Any]:
-        build_error = self._supported_build_error("change_rollback")
-        if build_error:
-            return build_error.model_dump(mode="json")
-        path = self._snapshot_path(snapshot_id)
-        if path is None:
-            return self._host_error(
-                "change_rollback", ErrorCode.INVALID_REQUEST, "Unknown snapshot"
-            ).model_dump(mode="json")
-        status = self.refresh_live()
-        if not status.ok or not isinstance(status.result, dict):
-            return status.model_dump(mode="json")
-        state = status.result
-        working_id = str(uuid.uuid4())
-        operation = Operation(
-            name="safety.rollback",
-            arguments={"path": str(path), "working_id": working_id, "snapshot_id": snapshot_id},
-        )
-        impact = {
-            "feature": "Rollback",
-            "destructive": True,
-            "snapshot_id": snapshot_id,
-            "expected_result": "Replace the active document with a writable clone of the snapshot",
-        }
-        record = self.changes.prepare(
-            feature_id="change_rollback",
-            scene_id=state.get("scene_id"),
-            scene_revision=state.get("revision"),
-            selection_fingerprint=state.get("selection_fingerprint"),
-            operation=operation,
-            impact=impact,
-            backup_path=str(path),
-            ttl=ttl,
-        )
-        return {
-            "ok": True,
-            "confirmation_token": record.token,
-            "feature_id": record.feature_id,
-            "scene_id": record.scene_id,
-            "scene_revision": record.scene_revision,
-            "selection_fingerprint": record.selection_fingerprint,
-            "operation": record.operation.model_dump(mode="json"),
-            "impact": impact,
-            "snapshot_id": snapshot_id,
-            "working_id": working_id,
-            "expires_at": record.expires_at,
-        }
-
-    def rollback(self, confirmation_token: str, timeout: float = 120.0) -> ResultEnvelope:
-        try:
-            record = self.changes.load(confirmation_token)
-        except SafetyError as exc:
-            return self._host_error("change_rollback", ErrorCode.INVALID_REQUEST, str(exc))
-        if record.feature_id != "change_rollback" or record.operation.name != "safety.rollback":
-            return self._host_error(
-                "change_rollback", ErrorCode.INVALID_REQUEST, "Token is not bound to a rollback operation"
-            )
-        return self.commit_change(confirmation_token, timeout)
-
-    def _rollback_internal(self, snapshot_id: str) -> ResultEnvelope:
-        path = self._snapshot_path(snapshot_id)
-        if path is None:
-            return self._host_error("change_rollback", ErrorCode.INVALID_REQUEST, "Unknown snapshot")
-        working_id = str(uuid.uuid4())
-        working_path = (self.paths.snapshots / f"{working_id}.working.casc").resolve()
-        result = self.client.execute(
-            "change_rollback",
-            [
-                Operation(
-                    name="safety.rollback_internal",
-                    arguments={"path": str(path), "working_id": working_id},
-                )
-            ],
-            timeout=120,
-            safety_context=SafetyContext(destructive=True),
-        )
-        result.snapshot_id = snapshot_id
-        if result.ok:
-            result = self._wait_for_open_scene(result, str(working_path), 120)
-        self._remember_scene_result(result)
-        return result
 
     def csc_mutate_allowed(self, chain: list[dict[str, Any]]) -> bool:
         if not chain:

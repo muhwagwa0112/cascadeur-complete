@@ -58,7 +58,7 @@ Use `change_rollback(snapshot_id, expected_revision?)` when:
 
 Rollback opens a new `.working.casc` clone of the immutable snapshot. Verify loaded path, scene ID/revision, representative objects/layers, and snapshot hash/metadata when important. Do not delete the immutable snapshot as part of rollback.
 
-Use `undo`/`redo` only for a known single-step history operation and pass the latest revision. Use rollback for scene/file operations, multi-step protected stages, or uncertain history.
+Use `undo_prepare`/`redo_prepare` only for a known single-step history operation. Use rollback for scene/file operations, multi-step protected stages, or uncertain history.
 
 ## Jobs
 
@@ -104,13 +104,13 @@ Use this order:
 
 1. task-focused MCP tool;
 2. registered dedicated `*_prepare` + commit;
-3. exact registered `action_invoke` with an observable change/postcondition;
+3. exact registered `action_invoke_prepare` with an observable change/postcondition;
 4. `tool_call` on a runtime-registered tool and explicit public chain;
 5. `csc_query` for allowlisted reads;
 6. protected `csc_mutate` only when the final installed method is registered and scene revision matches;
 7. `developer_execute_python` only for explicit development/debugging with policy enabled.
 
-Before `action_invoke`, use `feature_describe` and the official action ID; the action API is being deprecated and an invented label is not a valid ID. Require `expect_change=true` or an explicit postcondition.
+Before `action_invoke_prepare`, use `feature_describe` and the official action ID; the action API is being deprecated and an invented label is not a valid ID. Require `expect_change=true` or an explicit postcondition.
 
 Before `tool_call`, inspect the tool and use only public attributes. Set `mutate=true` only through a protected change contract.
 

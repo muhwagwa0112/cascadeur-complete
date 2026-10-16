@@ -60,9 +60,8 @@ def mesh_sample(scene, arguments, _request, context):
     triangles = numpy.concatenate(
         [polygons[:, [0, corner, corner + 1]] for corner in range(1, per_polygon - 1)], axis=0
     )
-    joints = [
-        str(viewer.get_object_name(item)) for item in behaviours.get_behaviour_objects_range(behaviour, "linked_objects")
-    ]
+    linked = behaviours.get_behaviour_objects_range(behaviour, "linked_objects")
+    joints = [str(viewer.get_object_name(item)) for item in linked]
     weights = _value(dependency, "vertices_weights")
     dominant = numpy.full(len(weights), -1, dtype=numpy.int16)
     for index, items in enumerate(weights):

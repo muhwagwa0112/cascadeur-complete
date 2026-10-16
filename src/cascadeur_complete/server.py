@@ -8,14 +8,16 @@ from typing import Any, Literal
 from mcp.server import MCPServer
 
 from .models import ErrorCode, ExecutionMode, ResultEnvelope
-from .product_catalog import SUPPORTED_BUILD
-from .service import CascadeurService, dialog_flow_arguments, ui_file_flow_arguments
+from .product_catalog import PRODUCT_CATALOG, SUPPORTED_BUILD
+from .service import CascadeurService
+from .ui_file_flow import dialog_flow_arguments, ui_file_flow_arguments
 
 mcp = MCPServer(
     "cascadeur-complete",
     instructions=(
-        f"Cascadeur {SUPPORTED_BUILD} automation only. Read capabilities first. Destructive operations require "
-        "change_prepare followed by change_commit. Never assume a gated feature ran."
+        f"Cascadeur {SUPPORTED_BUILD} automation only. Read capabilities first. Every scene or file change is "
+        "prepared by a *_prepare tool (or change_prepare) and runs only through change_commit. "
+        "Never assume a gated feature ran."
     ),
 )
 
@@ -23,6 +25,18 @@ mcp = MCPServer(
 @lru_cache(maxsize=1)
 def service() -> CascadeurService:
     return CascadeurService()
+
+
+def _invalid(message: str) -> dict[str, Any]:
+    return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": message}
+
+
+def _prepare(feature_id: str, operation: str, arguments: dict[str, Any], ttl_seconds: float) -> dict[str, Any]:
+    """Snapshot the scene and mint a one-use token for exactly this operation; run it with change_commit."""
+    try:
+        return service().prepare_change(feature_id, operation, arguments, ttl_seconds)
+    except (KeyError, ValueError) as exc:
+        return _invalid(str(exc))
 
 
 def _dump(value: Any) -> str:
@@ -121,29 +135,23 @@ def cascadeur_logs(lines: int = 200, pattern: str | None = None) -> dict[str, An
     return service().execute("logs", "system.logs", {"lines": lines, "pattern": pattern or ""}).model_dump(mode="json")
 
 
+ViewMode = Literal["View", "AutoPosing", "PointController", "Controller", "Joint", "Mesh", "Rigging"]
+
+
 @mcp.tool()
-def viewport_mode(
-    mode: Literal["View", "AutoPosing", "PointController", "Controller", "Joint", "Mesh", "Rigging"] | None = None,
-    apply_to_all: bool = False,
-) -> dict[str, Any]:
-    """Read or set the active (or every) viewport visualizer mode and verify the observed mode."""
-    svc = service()
-    operation = "system.view_mode_get" if mode is None else "system.view_mode_set"
-    scene_id = None
-    expected_revision = None
-    if mode is not None:
-        status = svc.refresh_live()
-        if not status.ok or not isinstance(status.result, dict):
-            return status.model_dump(mode="json")
-        scene_id = status.result.get("scene_id")
-        expected_revision = status.result.get("revision")
-    return svc.execute(
-        "view_mode",
-        operation,
-        {"mode": mode, "apply_to_all": apply_to_all},
-        scene_id=scene_id,
-        expected_revision=expected_revision,
-    ).model_dump(mode="json")
+def viewport_mode(apply_to_all: bool = False) -> dict[str, Any]:
+    """Read the active (or every) viewport visualizer mode; change it with viewport_mode_prepare."""
+    return (
+        service()
+        .execute("view_mode", "system.view_mode_get", {"mode": None, "apply_to_all": apply_to_all})
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+def viewport_mode_prepare(mode: ViewMode, apply_to_all: bool = False, ttl_seconds: float = 300) -> dict[str, Any]:
+    """Prepare setting the active (or every) viewport visualizer mode; commit with change_commit."""
+    return _prepare("view_mode", "system.view_mode_set", {"mode": mode, "apply_to_all": apply_to_all}, ttl_seconds)
 
 
 @mcp.tool()
@@ -238,42 +246,32 @@ def scene_objects(offset: int = 0, limit: int = 200) -> dict[str, Any]:
 
 @mcp.tool()
 def selection_edit(
-    action: Literal["get", "set", "add", "remove", "filter"],
-    ids: list[str] | None = None,
-    pivot_id: str | None = None,
+    action: Literal["get", "filter"],
     object_type: str | None = None,
     name_contains: str | None = None,
     selected_only: bool = True,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
 ) -> dict[str, Any]:
-    """Read, replace, add, remove, or filter the current object selection."""
-    feature_id = {
-        "get": "selection_get",
-        "set": "selection_set",
-        "add": "selection_add",
-        "remove": "selection_remove",
-        "filter": "selection_filter",
-    }[action]
-    arguments: dict[str, Any] = {"ids": ids or []}
-    if pivot_id is not None:
-        arguments["pivot_id"] = pivot_id
+    """Read or filter the current object selection; change it with selection_edit_prepare."""
+    arguments: dict[str, Any] = {"ids": [], "selected_only": selected_only}
     if object_type is not None:
         arguments["type"] = object_type
     if name_contains is not None:
         arguments["name_contains"] = name_contains
-    arguments["selected_only"] = selected_only
-    return (
-        service()
-        .execute(
-            feature_id,
-            f"selection.{action}",
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+    return service().execute(f"selection_{action}", f"selection.{action}", arguments).model_dump(mode="json")
+
+
+@mcp.tool()
+def selection_edit_prepare(
+    action: Literal["set", "add", "remove"],
+    ids: list[str],
+    pivot_id: str | None = None,
+    ttl_seconds: float = 300,
+) -> dict[str, Any]:
+    """Prepare replacing, extending, or reducing the object selection; commit with change_commit."""
+    arguments: dict[str, Any] = {"ids": ids}
+    if pivot_id is not None:
+        arguments["pivot_id"] = pivot_id
+    return _prepare(f"selection_{action}", f"selection.{action}", arguments, ttl_seconds)
 
 
 @mcp.tool()
@@ -308,7 +306,7 @@ def object_read(
 
 
 @mcp.tool()
-def object_write(
+def object_write_prepare(
     action: Literal["rename", "create", "duplicate", "parent", "unparent", "delete"],
     ids: list[str] | None = None,
     object_id: str | None = None,
@@ -316,21 +314,15 @@ def object_write(
     parent_id: str | None = None,
     position: list[float] | None = None,
     size: float = 3.0,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-    confirmation_token: str | None = None,
+    ttl_seconds: float = 300,
 ) -> dict[str, Any]:
-    """Rename, create, duplicate, reparent, unparent, or delete scene objects with safety checks."""
+    """Prepare an object rename, create, duplicate, reparent, unparent, or delete; commit with change_commit."""
     if action == "rename" and (not object_id or not name):
-        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "id and name are required"}
+        return _invalid("id and name are required")
     if action in ("duplicate", "parent", "unparent", "delete") and not ids:
-        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "ids are required"}
+        return _invalid("ids are required")
     if action == "create" and position is not None and len(position) != 3:
-        return {
-            "ok": False,
-            "error_code": ErrorCode.INVALID_REQUEST,
-            "error_message": "position must contain exactly three values",
-        }
+        return _invalid("position must contain exactly three values")
     feature_id = {
         "rename": "object_rename",
         "create": "object_create",
@@ -350,18 +342,7 @@ def object_write(
         arguments["position"] = position
     arguments["size"] = size
     operation = {"delete": "objects.delete", "duplicate": "objects.duplicate"}.get(action, f"object.{action}")
-    return (
-        service()
-        .execute(
-            feature_id,
-            operation,
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-            confirmation_token=confirmation_token,
-        )
-        .model_dump(mode="json")
-    )
+    return _prepare(feature_id, operation, arguments, ttl_seconds)
 
 
 @mcp.tool()
@@ -371,9 +352,8 @@ def operation_batch(
     scene_id: str | None = None,
     expected_revision: str | None = None,
     timeout: float = 60,
-    confirmation_token: str | None = None,
 ) -> dict[str, Any]:
-    """Execute multiple registered bridge operations in one Cascadeur UI-thread entry."""
+    """Execute multiple read-only bridge operations in one Cascadeur UI-thread entry."""
     return (
         service()
         .batch(
@@ -382,7 +362,6 @@ def operation_batch(
             scene_id=scene_id,
             expected_revision=expected_revision,
             timeout=timeout,
-            confirmation_token=confirmation_token,
         )
         .model_dump(mode="json")
     )
@@ -537,86 +516,56 @@ def file_dialog_prepare(
 
 
 @mcp.tool()
-def scene_file(
-    action: Literal["list", "activate", "new", "open", "save", "save_as", "close", "validate"],
+def scene_file(action: Literal["list", "validate"]) -> dict[str, Any]:
+    """List open scene tabs or validate the current scene; change scenes with scene_file_prepare."""
+    return service().execute(f"scene_{action}", f"scene.{action}", {}).model_dump(mode="json")
+
+
+@mcp.tool()
+def scene_file_prepare(
+    action: Literal["activate", "new", "open", "save", "save_as", "close"],
     path: str | None = None,
     tab_id: str | None = None,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-    confirmation_token: str | None = None,
+    ttl_seconds: float = 300,
 ) -> dict[str, Any]:
-    """Create, open, or save CASC scenes. New/open use the protected change contract."""
-    feature_id = {
-        "list": "scene_list",
-        "activate": "scene_activate",
-        "new": "scene_new",
-        "open": "scene_open",
-        "save": "scene_save",
-        "save_as": "scene_save_as",
-        "close": "scene_close",
-        "validate": "scene_validate",
-    }[action]
+    """Prepare activating, creating, opening, saving, or closing a CASC scene; commit with change_commit."""
     arguments: dict[str, Any] = {}
     if path:
         arguments["path"] = path
     if tab_id:
         arguments["tab_id"] = tab_id
-    return (
-        service()
-        .execute(
-            feature_id,
-            f"scene.{action}",
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-            confirmation_token=confirmation_token,
-        )
-        .model_dump(mode="json")
-    )
+    return _prepare(f"scene_{action}", f"scene.{action}", arguments, ttl_seconds)
 
 
 @mcp.tool()
-def io_transfer(
-    feature_id: str,
+def io_transfer_prepare(
+    feature_id: Literal[
+        "import_fbx",
+        "export_fbx",
+        "blender_export",
+        "import_dae",
+        "export_dae",
+        "import_audio",
+        "export_image",
+        "selection_groups_import",
+    ],
     path: str,
     options: dict[str, Any] | None = None,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-    confirmation_token: str | None = None,
-    timeout: float = 180,
+    ttl_seconds: float = 300,
 ) -> dict[str, Any]:
-    """Run a registered import/export feature with path validation and postcondition checks."""
-    operation = feature_id.replace("import_", "io.import_").replace("export_", "io.export_")
-    arguments = {"path": path, **(options or {})}
-    return (
-        service()
-        .execute(
-            feature_id,
-            operation,
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-            timeout=timeout,
-            confirmation_token=confirmation_token,
-        )
-        .model_dump(mode="json")
-    )
+    """Prepare a native import/export with path validation; commit with change_commit.
+
+    USD/GLB/GLTF/VRM use scene_exchange_prepare; image/video import, video export and
+    the other dialog-driven transfers use file_dialog_prepare.
+    """
+    operation = PRODUCT_CATALOG.by_id[feature_id].operation or ""
+    return _prepare(feature_id, operation, {"path": path, **(options or {})}, ttl_seconds)
 
 
 @mcp.tool()
-def timeline_set_frame(frame: int, scene_id: str | None = None, expected_revision: str | None = None) -> dict[str, Any]:
-    """Set and verify the playhead using the domain scene getter, not cached UI telemetry."""
-    return (
-        service()
-        .execute(
-            "timeline_set_frame",
-            "timeline.set_frame",
-            {"frame": frame},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+def timeline_set_frame_prepare(frame: int, ttl_seconds: float = 300) -> dict[str, Any]:
+    """Prepare moving the playhead (verified with the domain scene getter); commit with change_commit."""
+    return _prepare("timeline_set_frame", "timeline.set_frame", {"frame": frame}, ttl_seconds)
 
 
 @mcp.tool()
@@ -627,31 +576,40 @@ def timeline_get() -> dict[str, Any]:
 
 @mcp.tool()
 def transform_edit(
-    action: Literal["get", "set"],
+    action: Literal["get"] = "get",
+    ids: list[str] | None = None,
+    frame: int | None = None,
+    space: Literal["local", "global"] = "local",
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Read position, Euler rotation (radians), and local scale for explicit or selected objects.
+
+    Cascadeur re-interpolates only up to the playhead after an edit; reads past it
+    carry a warning. Pass refresh=true to recompute the whole timeline first.
+    Write transforms with transform_edit_prepare.
+    """
+    arguments: dict[str, Any] = {"ids": ids or [], "space": space}
+    if refresh:
+        arguments["refresh"] = True
+    if frame is not None:
+        arguments["frame"] = frame
+    return service().execute("transform_get", "animation.transform_get", arguments).model_dump(mode="json")
+
+
+@mcp.tool()
+def transform_edit_prepare(
     ids: list[str] | None = None,
     frame: int | None = None,
     space: Literal["local", "global"] = "local",
     position: list[float] | None = None,
     rotation_euler_xyz_radians: list[float] | None = None,
     scale: list[float] | None = None,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-    refresh: bool = False,
+    ttl_seconds: float = 300,
 ) -> dict[str, Any]:
-    """Read or write position, Euler rotation (radians), and local scale for explicit or selected objects.
-
-    Cascadeur re-interpolates only up to the playhead after an edit; reads past it
-    carry a warning. Pass refresh=true to recompute the whole timeline first.
-    """
-    if action == "set" and all(value is None for value in (position, rotation_euler_xyz_radians, scale)):
-        return {
-            "ok": False,
-            "error_code": ErrorCode.INVALID_REQUEST,
-            "error_message": "set requires at least one transform component",
-        }
+    """Prepare writing position, Euler rotation (radians), and local scale; commit with change_commit."""
+    if all(value is None for value in (position, rotation_euler_xyz_radians, scale)):
+        return _invalid("set requires at least one transform component")
     arguments: dict[str, Any] = {"ids": ids or [], "space": space}
-    if refresh and action == "get":
-        arguments["refresh"] = True
     if frame is not None:
         arguments["frame"] = frame
     if position is not None:
@@ -660,17 +618,7 @@ def transform_edit(
         arguments["rotation_euler_xyz_radians"] = rotation_euler_xyz_radians
     if scale is not None:
         arguments["scale"] = scale
-    return (
-        service()
-        .execute(
-            "transform_get" if action == "get" else "transform_set",
-            "animation.transform_get" if action == "get" else "animation.transform_set",
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+    return _prepare("transform_set", "animation.transform_set", arguments, ttl_seconds)
 
 
 @mcp.tool()
@@ -680,7 +628,7 @@ def layer_list() -> dict[str, Any]:
 
 
 @mcp.tool()
-def layer_write(
+def layer_write_prepare(
     action: Literal[
         "create", "delete", "visibility", "lock", "activate", "folder_create", "folder_move", "folder_rename"
     ],
@@ -691,21 +639,19 @@ def layer_write(
     item_id: str | None = None,
     position: int | None = None,
     with_default_layer: bool = True,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-    confirmation_token: str | None = None,
+    ttl_seconds: float = 300,
 ) -> dict[str, Any]:
-    """Create/delete a layer or set visibility/lock with revision and deletion protection."""
+    """Prepare a layer create/delete, visibility/lock/activate change, or folder edit; commit with change_commit."""
     if action == "create" and not name:
-        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "name is required"}
+        return _invalid("name is required")
     if action in ("delete", "visibility", "lock", "activate") and not layer_id:
-        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "layer_id is required"}
+        return _invalid("layer_id is required")
     if action in ("visibility", "lock") and value is None:
-        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "value is required"}
+        return _invalid("value is required")
     if action in ("folder_move", "folder_rename") and not item_id:
-        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "item_id is required"}
+        return _invalid("item_id is required")
     if action in ("folder_create", "folder_rename") and not name:
-        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "name is required"}
+        return _invalid("name is required")
     feature_id = {
         "create": "layer_create",
         "delete": "layer_delete",
@@ -732,130 +678,84 @@ def layer_write(
         arguments["visible"] = value
     if action == "lock":
         arguments["locked"] = value
-    operation_action = action.removeprefix("folder_")
     if action.startswith("folder_"):
-        arguments["action"] = operation_action
-    return (
-        service()
-        .execute(
-            feature_id,
-            "layer.folder" if action.startswith("folder_") else f"layer.{action}",
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-            confirmation_token=confirmation_token,
-        )
-        .model_dump(mode="json")
-    )
+        arguments["action"] = action.removeprefix("folder_")
+    operation = "layer.folder" if action.startswith("folder_") else f"layer.{action}"
+    return _prepare(feature_id, operation, arguments, ttl_seconds)
 
 
 @mcp.tool()
-def key_edit(
-    action: Literal["list", "add", "delete"],
-    layer_id: str | None = None,
-    frame: int | None = None,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-    confirmation_token: str | None = None,
-) -> dict[str, Any]:
-    """List, add or delete layer keys; deletion uses the protected change contract."""
-    if action in ("add", "delete") and (not layer_id or frame is None):
-        return {
-            "ok": False,
-            "error_code": ErrorCode.INVALID_REQUEST,
-            "error_message": "layer_id and frame are required",
-        }
-    feature_id = {"list": "key_list", "add": "key_add", "delete": "key_delete"}[action]
+def key_edit(action: Literal["list"] = "list", layer_id: str | None = None) -> dict[str, Any]:
+    """List layer keys; add or delete keys with key_edit_prepare."""
     arguments: dict[str, Any] = {}
     if layer_id is not None:
         arguments["layer_id"] = layer_id
-    if frame is not None:
-        arguments["frame"] = frame
-    return (
-        service()
-        .execute(
-            feature_id,
-            f"animation.key_{action}",
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-            confirmation_token=confirmation_token,
-        )
-        .model_dump(mode="json")
-    )
+    return service().execute("key_list", "animation.key_list", arguments).model_dump(mode="json")
+
+
+@mcp.tool()
+def key_edit_prepare(
+    action: Literal["add", "delete"], layer_id: str, frame: int, ttl_seconds: float = 300
+) -> dict[str, Any]:
+    """Prepare adding or deleting a key on one layer and frame; commit with change_commit."""
+    return _prepare(f"key_{action}", f"animation.key_{action}", {"layer_id": layer_id, "frame": frame}, ttl_seconds)
 
 
 @mcp.tool()
 def animation_curve(
-    action: Literal["query", "set_interpolation", "set_tangent"],
+    action: Literal["query"] = "query",
     layer_id: str | None = None,
     layer_ids: list[str] | None = None,
-    frame: int | None = None,
-    value: str | None = None,
     first_frame: int | None = None,
     last_frame: int | None = None,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
 ) -> dict[str, Any]:
-    """Query layer sections or set interpolation and tangent modes with postcondition verification."""
-    if action != "query" and (not layer_id or frame is None or not value):
-        return {
-            "ok": False,
-            "error_code": ErrorCode.INVALID_REQUEST,
-            "error_message": "layer_id, frame, and value are required for edits",
-        }
-    if action == "query":
-        arguments: dict[str, Any] = {"layer_ids": layer_ids or ([layer_id] if layer_id else [])}
-        if first_frame is not None:
-            arguments["first_frame"] = first_frame
-        if last_frame is not None:
-            arguments["last_frame"] = last_frame
-        feature_id = "graph_query"
-        operation = "animation.graph_query"
-    else:
-        operation_kind = "interpolation" if action == "set_interpolation" else "tangent"
-        arguments = {"layer_id": layer_id, "frame": frame, "value": value, "operation": operation_kind}
-        feature_id = "interpolation_set" if action == "set_interpolation" else "tangent_set"
-        operation = f"animation.{feature_id}"
-    return (
-        service()
-        .execute(
-            feature_id,
-            operation,
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+    """Query layer sections; set interpolation or tangent modes with animation_curve_prepare."""
+    arguments: dict[str, Any] = {"layer_ids": layer_ids or ([layer_id] if layer_id else [])}
+    if first_frame is not None:
+        arguments["first_frame"] = first_frame
+    if last_frame is not None:
+        arguments["last_frame"] = last_frame
+    return service().execute("graph_query", "animation.graph_query", arguments).model_dump(mode="json")
 
 
 @mcp.tool()
-def viewport_camera(
-    action: Literal["viewport_state", "camera_catalog", "camera_view", "camera_activate"],
+def animation_curve_prepare(
+    action: Literal["set_interpolation", "set_tangent"],
+    layer_id: str,
+    frame: int,
+    value: str,
+    ttl_seconds: float = 300,
+) -> dict[str, Any]:
+    """Prepare setting the interpolation or tangent mode of one key; commit with change_commit."""
+    kind = "interpolation" if action == "set_interpolation" else "tangent"
+    feature_id = f"{kind}_set"
+    arguments = {"layer_id": layer_id, "frame": frame, "value": value, "operation": kind}
+    return _prepare(feature_id, f"animation.{feature_id}", arguments, ttl_seconds)
+
+
+@mcp.tool()
+def viewport_camera(action: Literal["viewport_state", "camera_catalog"]) -> dict[str, Any]:
+    """Read viewports or cameras; move or switch the viewport camera with viewport_camera_prepare."""
+    return service().execute(action, f"render.{action}", {}).model_dump(mode="json")
+
+
+@mcp.tool()
+def viewport_camera_prepare(
+    action: Literal["camera_view", "camera_activate"],
     position: list[float] | None = None,
     target: list[float] | None = None,
     camera_type: Literal["PERSPECTIVE", "ISOMETRIC"] | None = None,
     camera_id: str | None = None,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
+    ttl_seconds: float = 300,
 ) -> dict[str, Any]:
-    """Read viewports/cameras or update and verify the active viewport camera."""
+    """Prepare updating the active viewport camera or activating a camera; commit with change_commit."""
     if action == "camera_view" and all(value is None for value in (position, target, camera_type)):
-        return {
-            "ok": False,
-            "error_code": ErrorCode.INVALID_REQUEST,
-            "error_message": "camera_view requires position, target, or camera_type",
-        }
+        return _invalid("camera_view requires position, target, or camera_type")
     if action == "camera_activate" and not camera_id:
-        return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": "camera_id is required"}
+        return _invalid("camera_id is required")
     for label, value in (("position", position), ("target", target)):
         if value is not None and len(value) != 3:
-            return {
-                "ok": False,
-                "error_code": ErrorCode.INVALID_REQUEST,
-                "error_message": label + " must contain exactly three values",
-            }
+            return _invalid(label + " must contain exactly three values")
     arguments = {
         key: value
         for key, value in {
@@ -866,18 +766,7 @@ def viewport_camera(
         }.items()
         if value is not None
     }
-    feature_id = action
-    return (
-        service()
-        .execute(
-            feature_id,
-            f"render.{action}",
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+    return _prepare(action, f"render.{action}", arguments, ttl_seconds)
 
 
 @mcp.tool()
@@ -896,54 +785,32 @@ def render_object_create_prepare(
 
 
 @mcp.tool()
-def render_output(
-    action: Literal["viewport_capture", "image", "video"],
+def render_output_prepare(
+    action: Literal["viewport_capture", "image"],
     path: str,
     width: int = 1920,
     height: int = 1080,
     samples: int = 64,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
+    allow_overwrite: bool = False,
+    ttl_seconds: float = 300,
 ) -> dict[str, Any]:
-    """Render a still or video after change_prepare/change_commit validates the destination and snapshot."""
+    """Prepare a viewport capture or still render to a validated path; commit with change_commit.
+
+    Video renders fill Cascadeur's Export video window: use file_dialog_prepare(feature_id="render_video").
+    """
     if width < 16 or height < 16 or samples < 1:
-        return {
-            "ok": False,
-            "error_code": ErrorCode.INVALID_REQUEST,
-            "error_message": "width/height must be at least 16 and samples must be positive",
-        }
-    feature_id = "viewport_capture" if action == "viewport_capture" else f"render_{action}"
-    return (
-        service()
-        .execute(
-            feature_id,
-            f"render.{action}",
-            {"path": path, "width": width, "height": height, "samples": samples},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+        return _invalid("width/height must be at least 16 and samples must be positive")
+    feature_id = "viewport_capture" if action == "viewport_capture" else "render_image"
+    arguments = {"path": path, "width": width, "height": height, "samples": samples}
+    if allow_overwrite:
+        arguments["allow_overwrite"] = True
+    return _prepare(feature_id, f"render.{action}", arguments, ttl_seconds)
 
 
 @mcp.tool()
-def auto_posing(
-    action: Literal["add", "update"],
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-) -> dict[str, Any]:
-    """Add or update AutoPosing through Cascadeur's session API; use change_prepare/change_commit."""
-    return (
-        service()
-        .execute(
-            "auto_posing",
-            "generation.auto_posing",
-            {"action": action},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+def auto_posing_prepare(action: Literal["add", "update"], ttl_seconds: float = 300) -> dict[str, Any]:
+    """Prepare adding or updating AutoPosing through Cascadeur's session API; commit with change_commit."""
+    return _prepare("auto_posing", "generation.auto_posing", {"action": action}, ttl_seconds)
 
 
 @mcp.tool()
@@ -1351,49 +1218,26 @@ def ballistic_create_prepare(
 
 
 @mcp.tool()
-def auto_physics_enable(scene_id: str, expected_revision: str) -> dict[str, Any]:
-    """Select the main Center of Mass and enable Physics Assistant before snapping."""
-    return (
-        service()
-        .execute(
-            "auto_physics_enable",
-            "physics.auto_enable",
-            {},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+def auto_physics_enable_prepare(ttl_seconds: float = 300) -> dict[str, Any]:
+    """Prepare selecting the main Center of Mass and enabling Physics Assistant; commit with change_commit."""
+    return _prepare("auto_physics_enable", "physics.auto_enable", {}, ttl_seconds)
 
 
 @mcp.tool()
-def auto_physics_snap(scene_id: str | None = None, expected_revision: str | None = None) -> dict[str, Any]:
-    """Snap a working AutoPhysics simulation; run auto_physics_state and auto_physics_enable first."""
-    return (
-        service()
-        .execute(
-            "auto_physics",
-            "physics.auto_snap",
-            {},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+def auto_physics_snap_prepare(ttl_seconds: float = 300) -> dict[str, Any]:
+    """Prepare snapping a working AutoPhysics simulation (enable it first); commit with change_commit."""
+    return _prepare("auto_physics", "physics.auto_snap", {}, ttl_seconds)
 
 
 @mcp.tool()
-def action_invoke(
+def action_invoke_prepare(
     feature_id: str,
     action_id: str,
     expect_change: bool = True,
     postcondition: dict[str, Any] | None = None,
-    scene_id: str | None = None,
-    expected_revision: str | None = None,
-    confirmation_token: str | None = None,
-    timeout: float = 60,
+    ttl_seconds: float = 300,
 ) -> dict[str, Any]:
-    """Invoke a known action and require an observable change or explicit postcondition."""
+    """Prepare a known action that must change the scene or meet a postcondition; commit with change_commit."""
     try:
         allowed = service().action_allowed(feature_id, action_id)
     except KeyError:
@@ -1417,22 +1261,10 @@ def action_invoke(
             error_code=ErrorCode.INVALID_REQUEST,
             error_message="expect_change=false requires an explicit postcondition",
         ).model_dump(mode="json")
-    arguments = {"action_id": action_id, "expect_change": expect_change}
+    arguments: dict[str, Any] = {"action_id": action_id, "expect_change": expect_change}
     if postcondition is not None:
         arguments["postcondition"] = postcondition
-    return (
-        service()
-        .execute(
-            feature_id,
-            "system.action_invoke",
-            arguments,
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-            timeout=timeout,
-            confirmation_token=confirmation_token,
-        )
-        .model_dump(mode="json")
-    )
+    return _prepare(feature_id, "system.action_invoke", arguments, ttl_seconds)
 
 
 @mcp.tool()
@@ -1463,35 +1295,15 @@ def external_workflow(feature_id: str, configuration: dict[str, Any]) -> dict[st
 
 
 @mcp.tool()
-def undo(expected_revision: str, scene_id: str | None = None, expect_change: bool = True) -> dict[str, Any]:
-    """Undo and verify an observable scene revision change."""
-    return (
-        service()
-        .execute(
-            "undo",
-            "system.undo",
-            {"expect_change": expect_change},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+def undo_prepare(expect_change: bool = True, ttl_seconds: float = 300) -> dict[str, Any]:
+    """Prepare an undo that must change the scene revision; commit with change_commit."""
+    return _prepare("undo", "system.undo", {"expect_change": expect_change}, ttl_seconds)
 
 
 @mcp.tool()
-def redo(expected_revision: str, scene_id: str | None = None, expect_change: bool = True) -> dict[str, Any]:
-    """Redo and verify an observable scene revision change."""
-    return (
-        service()
-        .execute(
-            "redo",
-            "system.redo",
-            {"expect_change": expect_change},
-            scene_id=scene_id,
-            expected_revision=expected_revision,
-        )
-        .model_dump(mode="json")
-    )
+def redo_prepare(expect_change: bool = True, ttl_seconds: float = 300) -> dict[str, Any]:
+    """Prepare a redo that must change the scene revision; commit with change_commit."""
+    return _prepare("redo", "system.redo", {"expect_change": expect_change}, ttl_seconds)
 
 
 def _cleanup_error(exc: Exception) -> dict[str, Any]:

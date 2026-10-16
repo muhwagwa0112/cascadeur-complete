@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .live_validation import LiveSession, LiveValidationError, scenario
-from .service import ui_file_flow_arguments
+from .ui_file_flow import ui_file_flow_arguments
 
 NONE = "fixture.none"
 EMPTY = "fixture.empty_scene"

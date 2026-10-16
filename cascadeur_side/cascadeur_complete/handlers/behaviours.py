@@ -161,7 +161,7 @@ def _allowed(viewer, behaviour_id, behaviour, declared, context):
 
 @handler(*BEHAVIOUR_FEATURES, postconditions=("behaviour_values_equal_request",))
 def configure_behaviour(scene, arguments, request, context):
-    operation = str((request.get("operations") or [{}])[0].get("name", ""))
+    operation = str(context.get("operation_name") or (request.get("operations") or [{}])[0].get("name", ""))
     behaviour, declared, may_add = BEHAVIOUR_FEATURES[operation]
     values = dict(arguments.get("values") or {})
     if not values:
@@ -231,7 +231,7 @@ def configure_behaviour(scene, arguments, request, context):
 
 @handler(*MARKER_FEATURES, postconditions=("behaviour_presence_equals_request",))
 def marker_behaviour(scene, arguments, request, context):
-    operation = str((request.get("operations") or [{}])[0].get("name", ""))
+    operation = str(context.get("operation_name") or (request.get("operations") or [{}])[0].get("name", ""))
     behaviour = MARKER_FEATURES[operation]
     enabled = bool(arguments.get("enabled", True))
     ids = [str(item) for item in arguments.get("ids", [])]

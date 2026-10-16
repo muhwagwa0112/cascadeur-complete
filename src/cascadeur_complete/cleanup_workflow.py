@@ -40,7 +40,6 @@ class CleanupError(RuntimeError):
 class CleanupWorkflow:
     def __init__(self, service: CascadeurService, rig: mc.FootRig | None = None):
         self.service = service
-        self.client = service.client
         self.rig = rig or mc.FootRig()
         self.scene_id: str | None = None
 
@@ -49,8 +48,15 @@ class CleanupWorkflow:
     def _read(self, feature_id: str, operations: list[Operation], timeout: float = 120.0) -> Any:
         # Not pinned through the request's scene_id: a pinned request for an
         # inactive tab makes the host activate tabs. Every read is compared
-        # against the first one instead.
-        result = self.client.execute(feature_id, operations, timeout=timeout)
+        # against the first one instead. service.batch applies the build pin,
+        # the feature gate and the read-only check that a bare bridge call skipped.
+        result = self.service.batch(
+            feature_id,
+            [operation.model_dump(mode="json") for operation in operations],
+            scene_id=None,
+            expected_revision=None,
+            timeout=timeout,
+        )
         if not result.ok:
             raise CleanupError(f"{operations[0].name} failed: {result.error_code}: {result.error_message}")
         if self.scene_id is None:

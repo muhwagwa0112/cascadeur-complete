@@ -1,25 +1,25 @@
 # Public MCP Tool Routing
 
-This catalog mirrors the 75 production tools in the `cascadeur-complete` MCP contract. Prefer the most specific tool in the relevant row. Capability and scene state still determine whether a listed tool can execute. Generic csc/tool/Python execution, runtime tool introspection, and arbitrary settings reads are compiled out of release builds.
+This catalog mirrors the 82 production tools in the `cascadeur-complete` MCP contract. Prefer the most specific tool in the relevant row. Capability and scene state still determine whether a listed tool can execute. Generic csc/tool/Python execution, runtime tool introspection, and arbitrary settings reads are compiled out of release builds.
 
 <!-- MCP-TOOLS-START -->
 
 | Group | Purpose | Tools |
 |---|---|---|
-| Health and discovery | Connection/version/license, level-only logs, view modes, feature registry, inventory | `cascadeur_status`, `cascadeur_logs`, `viewport_mode`, `feature_search`, `feature_describe`, `inventory_refresh` |
+| Health and discovery | Connection/version/license, level-only logs, view modes, feature registry, inventory | `cascadeur_status`, `cascadeur_logs`, `viewport_mode`, `viewport_mode_prepare`, `feature_search`, `feature_describe`, `inventory_refresh` |
 | Persistent jobs | Submit, inspect, cancel, or retry retained non-destructive work | `job_submit`, `job_status`, `job_cancel`, `job_retry` |
-| Scene and object context | Scene summary, paginated objects, selection, object reads/writes, one-entry batching | `scene_summary`, `scene_objects`, `selection_edit`, `object_delete_prepare`, `object_read`, `object_write`, `operation_batch` |
+| Scene and object context | Scene summary, paginated objects, selection, object reads/writes, one-entry batching | `scene_summary`, `scene_objects`, `selection_edit`, `selection_edit_prepare`, `object_delete_prepare`, `object_read`, `object_write_prepare`, `operation_batch` |
 | Protection and recovery | Snapshot/dry-run, commit/cancel/two-step rollback, exact UI file-flow preparation | `change_prepare`, `change_commit`, `change_cancel`, `change_rollback_prepare`, `change_rollback`, `scene_exchange_prepare`, `ui_flow_prepare` |
 | Adapter-bound features | Prepare or read any feature that has a dedicated adapter, using the argument contract from `feature_describe`; registered Cascadeur file dialogs | `feature_prepare`, `feature_read`, `file_dialog_prepare` |
-| Scene files and interchange | CASC lifecycle and registered import/export routes | `scene_file`, `io_transfer` |
-| Timeline and animation | Playhead, transforms, layers, keys, curves, and interval selection | `timeline_set_frame`, `timeline_get`, `transform_edit`, `layer_list`, `layer_write`, `key_edit`, `animation_curve`, `timeline_select_interval` |
-| Camera and render | Camera/view state, protected camera/light creation, file output | `viewport_camera`, `render_object_create_prepare`, `render_output` |
-| Generation and editing | AutoPosing, prerequisites, Root Motion, Inbetweening, Unbaking, key reduction, mirror, cycles | `auto_posing`, `generation_state`, `root_motion_prepare`, `inbetweening_prepare`, `animation_unbaking_prepare`, `key_reduction_prepare`, `mirror_prepare`, `cycle_list` |
+| Scene files and interchange | CASC lifecycle and native import/export routes | `scene_file`, `scene_file_prepare`, `io_transfer_prepare` |
+| Timeline and animation | Playhead, transforms, layers, keys, curves, and interval selection | `timeline_set_frame_prepare`, `timeline_get`, `transform_edit`, `transform_edit_prepare`, `layer_list`, `layer_write_prepare`, `key_edit`, `key_edit_prepare`, `animation_curve`, `animation_curve_prepare`, `timeline_select_interval` |
+| Camera and render | Camera/view state, protected camera/light creation, file output | `viewport_camera`, `viewport_camera_prepare`, `render_object_create_prepare`, `render_output_prepare` |
+| Generation and editing | AutoPosing, prerequisites, Root Motion, Inbetweening, Unbaking, key reduction, mirror, cycles | `auto_posing_prepare`, `generation_state`, `root_motion_prepare`, `inbetweening_prepare`, `animation_unbaking_prepare`, `key_reduction_prepare`, `mirror_prepare`, `cycle_list` |
 | Mocap cleanup | Whole-clip foot-skate/finger measurement and one-shot contact or finger correction (protected key write) | `motion_cleanup_analyze`, `motion_cleanup_prepare` |
 | Physics and rig inspection | AutoPhysics readiness, physics/rig inventory, valid constraint drivers | `auto_physics_state`, `physics_state`, `rig_state`, `constraint_driver_catalog` |
 | Rig construction | Mass, Joint/RigInfo, IK, manual rig elements, extra controllers, Spline IK, twist | `rigid_body_mass_prepare`, `joint_create_prepare`, `rig_info_create_prepare`, `ik_chain_create_prepare`, `rig_elements_create_prepare`, `additional_point_controller_prepare`, `additional_box_controller_prepare`, `spline_ik_create_prepare`, `twist_prepare` |
-| Physics construction | CoM, collisions, constraints, ballistics, AutoPhysics enable/snap | `center_of_mass_prepare`, `collision_create_prepare`, `collision_delete_prepare`, `transform_constraint_prepare`, `point_constraint_prepare`, `ballistic_create_prepare`, `auto_physics_enable`, `auto_physics_snap` |
-| Low-level and external | Exact registered actions, gated DCC workflow, and history | `action_invoke`, `external_workflow`, `undo`, `redo` |
+| Physics construction | CoM, collisions, constraints, ballistics, AutoPhysics enable/snap | `center_of_mass_prepare`, `collision_create_prepare`, `collision_delete_prepare`, `transform_constraint_prepare`, `point_constraint_prepare`, `ballistic_create_prepare`, `auto_physics_enable_prepare`, `auto_physics_snap_prepare` |
+| Low-level and external | Exact registered actions, gated DCC workflow, and history | `action_invoke_prepare`, `external_workflow`, `undo_prepare`, `redo_prepare` |
 
 <!-- MCP-TOOLS-END -->
 
@@ -33,9 +33,9 @@ Start with `cascadeur_status`, then `feature_search` and `feature_describe`. Rel
 
 Use `scene_summary`, `scene_objects`, `object_read`, `timeline_get`, `layer_list`, `generation_state`, `rig_state`, `physics_state`, and camera-state actions. Read only the domains relevant to the request.
 
-### Make an ordinary revision-checked edit
+### Make an edit
 
-Use `selection_edit`, `timeline_set_frame`, `transform_edit`, non-destructive `layer_write`/`key_edit`/`animation_curve` actions, camera updates, or `auto_physics_enable`. Pass the latest scene identity/revision and re-read after success.
+Every scene or file change is two calls: a `*_prepare` tool returns a confirmation token bound to the current scene, revision and selection, and `change_commit(token)` runs exactly that operation. Read tools (`selection_edit`, `transform_edit`, `key_edit`, `animation_curve`, `viewport_camera`, `viewport_mode`, `scene_file`) only read; their writes live in the tool of the same name with a `_prepare` suffix. Re-read after a successful commit.
 
 ### Use an adapter-bound feature
 
@@ -43,7 +43,7 @@ Use `selection_edit`, `timeline_set_frame`, `transform_edit`, non-destructive `l
 
 ### Make a protected change
 
-Use a dedicated `*_prepare` tool when available. Otherwise prepare the exact operation with `change_prepare` and execute only via `change_commit`. `render_output`, `auto_posing`, `scene_file`, `io_transfer`, or another direct wrapper may correctly return `CONFIRMATION_REQUIRED`; that response means switch to the generic protected contract, not that the operation failed permanently.
+Use a dedicated `*_prepare` tool when available. Otherwise prepare the exact operation with `change_prepare` or `feature_prepare` and execute only via `change_commit`. A `CONFIRMATION_REQUIRED` from a read tool or `feature_read` means the operation mutates: prepare it instead.
 
 ### Use an exact UI file flow
 
@@ -55,17 +55,17 @@ Use `job_submit` only for non-destructive operations. Poll `job_status`; cancel 
 
 ### Escalate below the task API
 
-Use `action_invoke` only when an exact registered feature requires it. Generic tool/csc/Python execution is absent from production builds and belongs in a separately compiled developer build.
+Use `action_invoke_prepare` only when an exact registered feature requires it. Generic tool/csc/Python execution is absent from production builds and belongs in a separately compiled developer build.
 
 ## Common feature/operation pairs
 
-These pairs are useful with `change_prepare` when a direct tool returns `CONFIRMATION_REQUIRED`:
+These pairs are useful with `change_prepare` when no dedicated `*_prepare` tool covers the change:
 
 | Intent | Feature ID | Operation name |
 |---|---|---|
 | New/open/close/save-as scene | `scene_new`, `scene_open`, `scene_close`, `scene_save_as` | `scene.new`, `scene.open`, `scene.close`, `scene.save_as` |
 | FBX/DAE import or export | `import_fbx`, `import_dae`, `export_fbx`, `export_dae` | `io.import_fbx`, `io.import_dae`, `io.export_fbx`, `io.export_dae` |
-| Create/parent/unparent/delete object | `object_create`, `object_parent`, `object_unparent`, `object_delete` | `object.create`, `object.parent`, `object.unparent`, `object.delete` |
+| Create/parent/unparent/delete object | `object_create`, `object_parent`, `object_unparent`, `object_delete` | `object.create`, `object.parent`, `object.unparent`, `objects.delete` |
 | Delete key/layer | `key_delete`, `layer_delete` | `animation.key_delete`, `layer.delete` |
 | AutoPosing | `auto_posing` | `generation.auto_posing` |
 | Viewport capture/still render | `viewport_capture`, `render_image` | `render.viewport_capture`, `render.image` |

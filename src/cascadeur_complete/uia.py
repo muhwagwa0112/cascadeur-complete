@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+
+from .paths import RuntimePaths
 
 
 class UIAutomationError(RuntimeError):
@@ -398,33 +399,21 @@ def _scene_tab_nudge_points(wrapper) -> tuple[tuple[int, int], tuple[int, int]] 
     return alternate_point, active_point
 
 
-def _all_queued_requests_are_scene_bound() -> bool:
-    local = os.environ.get("LOCALAPPDATA")
-    if not local:
-        return False
-    paths = sorted((Path(local) / "CascadeurMCP" / "cascadeur-complete" / "state" / "requests").glob("*.json"))
-    if not paths:
-        return False
+def _queued_requests() -> list[Path]:
     try:
-        return all(bool(json.loads(path.read_text(encoding="utf-8")).get("scene_id")) for path in paths)
-    except (OSError, ValueError, TypeError):
-        return False
+        requests = RuntimePaths.discover().requests
+    except RuntimeError:  # neither USERPROFILE nor LOCALAPPDATA is set
+        return []
+    return sorted(requests.glob("*.json"))
 
 
 def _has_unclaimed_requests() -> bool:
-    local = os.environ.get("LOCALAPPDATA")
-    if not local:
-        return False
-    return any((Path(local) / "CascadeurMCP" / "cascadeur-complete" / "state" / "requests").glob("*.json"))
+    return bool(_queued_requests())
 
 
 def _queued_request_scene_ids() -> set[str]:
-    local = os.environ.get("LOCALAPPDATA")
-    if not local:
-        return set()
     result: set[str] = set()
-    root = Path(local) / "CascadeurMCP" / "cascadeur-complete" / "state" / "requests"
-    for path in root.glob("*.json"):
+    for path in _queued_requests():
         with suppress(OSError, ValueError, TypeError):
             scene_id = json.loads(path.read_text(encoding="utf-8")).get("scene_id")
             if scene_id:
@@ -615,9 +604,7 @@ def invoke_process_pending() -> TriggerEvidence:
         time.sleep(2.0)
         native_click(pending_point)
         time.sleep(0.15)
-        automation_id = (
-            "Events.scene_activated+" + process_pending_id if event_nudged else process_pending_id
-        )
+        automation_id = "Events.scene_activated+" + process_pending_id if event_nudged else process_pending_id
     except Exception as exc:
         raise UIAutomationError(f"Cascadeur command menu is unavailable: {exc}") from exc
     return TriggerEvidence(
@@ -733,8 +720,7 @@ def complete_file_dialog(
     if not dialog.exists(timeout=remaining(), retry_interval=0.05):
         _raise_if_feature_gate(action_id)
         raise UIAutomationError(
-            f"Expected file dialog did not appear: {expected_dialog_title}; "
-            f"owned windows: {owned_window_titles()}"
+            f"Expected file dialog did not appear: {expected_dialog_title}; owned windows: {owned_window_titles()}"
         )
     observed_title = dialog.window_text()
     if (prefix is None and observed_title != expected_dialog_title) or (
@@ -920,8 +906,12 @@ def complete_export_video_form(
 
     def inside(item):
         r = item.rectangle()
-        return item.is_visible() and frame.left <= r.left and r.right <= frame.right and frame.top <= r.top and (
-            r.bottom <= frame.bottom
+        return (
+            item.is_visible()
+            and frame.left <= r.left
+            and r.right <= frame.right
+            and frame.top <= r.top
+            and (r.bottom <= frame.bottom)
         )
 
     def button(title):

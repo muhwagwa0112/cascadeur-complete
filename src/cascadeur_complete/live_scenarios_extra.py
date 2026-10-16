@@ -8,7 +8,7 @@ from typing import Any
 from .live_scenarios import BACKFLIP, CASCY, CUBE
 from .live_scenarios_scene import center_of_mass
 from .live_validation import FIXTURES, LiveSession, LiveValidationError, scenario
-from .service import dialog_flow_arguments
+from .ui_file_flow import dialog_flow_arguments
 
 # -- files (Cube) ---------------------------------------------------------------------
 
@@ -245,6 +245,7 @@ def _retargeting(s: LiveSession) -> Any:
     before = {item["id"]: item for item in s.objects()}
     _dialog(s, "import_scene_to_current", str(FIXTURES["fixture.sample.cascy"]))
     created = [item for item in s.objects() if item["id"] not in before]
+
     # "Import scene to current" adds a namespace to the imported names.
     def base(name: str) -> str:
         return name.replace("|", ":").rsplit(":", 1)[-1]
