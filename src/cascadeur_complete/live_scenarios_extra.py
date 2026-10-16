@@ -8,7 +8,7 @@ from typing import Any
 from .live_scenarios import BACKFLIP, CASCY, CUBE
 from .live_scenarios_scene import center_of_mass
 from .live_validation import FIXTURES, LiveSession, LiveValidationError, scenario
-from .service import dialog_flow_arguments
+from .ui_file_flow import dialog_flow_arguments
 
 # -- files (Cube) ---------------------------------------------------------------------
 

@@ -158,7 +158,7 @@ def test_bridge_read_only_operations_are_read_only_on_the_host(bridge, bridge_op
 
 
 def test_every_bridge_view_operation_yields_to_the_event_loop(bridge):
-    from cascadeur_complete.service import VIEW_OPERATIONS
+    from cascadeur_complete.host_postconditions import VIEW_OPERATIONS
 
     runtime, _registry = bridge
     assert set(VIEW_OPERATIONS) <= set(runtime.YIELDING_OPERATIONS)

@@ -9,7 +9,8 @@ from mcp.server import MCPServer
 
 from .models import ErrorCode, ExecutionMode, ResultEnvelope
 from .product_catalog import PRODUCT_CATALOG, SUPPORTED_BUILD
-from .service import CascadeurService, dialog_flow_arguments, ui_file_flow_arguments
+from .service import CascadeurService
+from .ui_file_flow import dialog_flow_arguments, ui_file_flow_arguments
 
 mcp = MCPServer(
     "cascadeur-complete",

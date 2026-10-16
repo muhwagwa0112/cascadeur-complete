@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import cascadeur_complete.host_postconditions as host_postconditions_module
 import cascadeur_complete.service as service_module
+import cascadeur_complete.ui_file_flow as ui_file_flow_module
 from cascadeur_complete.models import ErrorCode, ExecutionMode, ResultEnvelope
 from cascadeur_complete.paths import RuntimePaths
 from cascadeur_complete.service import CascadeurService
@@ -418,11 +420,11 @@ def test_ui_export_flow_verifies_exact_dialog_and_stable_file(tmp_path, monkeypa
             completed_at=time.time(),
         )
 
-    monkeypatch.setattr(service_module, "complete_file_dialog", complete)
+    monkeypatch.setattr(ui_file_flow_module, "complete_file_dialog", complete)
     prepared = svc.prepare_change(
         "export_usd",
         "system.ui_file_flow",
-        service_module.ui_file_flow_arguments("export", "usd", str(destination))[1],
+        ui_file_flow_module.ui_file_flow_arguments("export", "usd", str(destination))[1],
     )
 
     result = svc.commit_change(prepared["confirmation_token"], timeout=2)
@@ -451,7 +453,7 @@ def test_ui_import_flow_requires_changed_scene_revision(tmp_path, monkeypatch):
 
     bridge.execute = execute
     monkeypatch.setattr(
-        service_module,
+        ui_file_flow_module,
         "complete_file_dialog",
         lambda **arguments: SimpleNamespace(
             action_id=arguments["action_id"],
@@ -462,11 +464,11 @@ def test_ui_import_flow_requires_changed_scene_revision(tmp_path, monkeypatch):
             completed_at=time.time(),
         ),
     )
-    monkeypatch.setattr(service_module, "resolve_optional_rig_mode_helper", lambda **_arguments: None)
+    monkeypatch.setattr(ui_file_flow_module, "resolve_optional_rig_mode_helper", lambda **_arguments: None)
     prepared = svc.prepare_change(
         "import_usd",
         "system.ui_file_flow",
-        service_module.ui_file_flow_arguments("import", "usd", str(source))[1],
+        ui_file_flow_module.ui_file_flow_arguments("import", "usd", str(source))[1],
     )
 
     result = svc.commit_change(prepared["confirmation_token"], timeout=2)
@@ -557,7 +559,7 @@ def test_auto_physics_snap_completes_known_modal_and_verifies_revision(tmp_path,
         },
     )
     monkeypatch.setattr(
-        service_module,
+        host_postconditions_module,
         "resolve_autophysics_snap_warning",
         lambda **_kwargs: SimpleNamespace(window_title="Warning", button="Yes", dismissed_at=time.time()),
     )
@@ -785,7 +787,7 @@ def test_failed_job_can_retry_from_persisted_contract(tmp_path):
 def test_ui_flow_cannot_dispatch_an_unregistered_action(tmp_path):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
-    arguments = service_module.ui_file_flow_arguments("export", "usd", str(tmp_path / "out.usd"))[1]
+    arguments = ui_file_flow_module.ui_file_flow_arguments("export", "usd", str(tmp_path / "out.usd"))[1]
     arguments["action_id"] = "Scene.Delete objects"
 
     refused = svc.prepare_change("export_usd", "system.ui_file_flow", arguments)
@@ -797,7 +799,7 @@ def test_ui_flow_cannot_dispatch_an_unregistered_action(tmp_path):
 def test_settled_rotation_samples_cover_bulk_and_single_writes():
     import math
 
-    from cascadeur_complete.service import (
+    from cascadeur_complete.host_postconditions import (
         SETTLED_SAMPLE_LIMIT,
         euler_xyz_to_quaternion,
         quaternion_angle_degrees,
@@ -821,7 +823,7 @@ def test_settled_rotation_samples_cover_bulk_and_single_writes():
 
 
 def test_settled_samples_cover_position_writes():
-    from cascadeur_complete.service import SETTLED_ROTATION_OPERATIONS, settled_rotation_samples
+    from cascadeur_complete.host_postconditions import SETTLED_ROTATION_OPERATIONS, settled_rotation_samples
 
     assert "animation.position_keys_set" in SETTLED_ROTATION_OPERATIONS
     writes = [{"id": "p", "frame": 3, "position": [1, 2, 3]}]

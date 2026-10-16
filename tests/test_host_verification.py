@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import cascadeur_complete.host_postconditions as host_postconditions_module
 import cascadeur_complete.service as service_module
 from cascadeur_complete.discovery import BASELINE_TOOLS, load_csc_schema
 from cascadeur_complete.feature_registry import build_registry
@@ -29,7 +30,7 @@ def _view_service(tmp_path, monkeypatch, samples):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
     feed = iter(samples)
-    monkeypatch.setattr(service_module, "capture_window_sample", lambda: next(feed))
+    monkeypatch.setattr(host_postconditions_module, "capture_window_sample", lambda: next(feed))
     monkeypatch.setattr(service_module.time, "sleep", lambda _seconds: None)
     return svc
 
@@ -87,7 +88,7 @@ def test_blender_export_requires_target_side_import(tmp_path, monkeypatch):
     monkeypatch.setattr(service_module, "available_dependencies", lambda: {"Blender integration"})
     svc = CascadeurService(paths, client=bridge)
     monkeypatch.setattr(
-        service_module,
+        host_postconditions_module,
         "verify_blender_fbx",
         lambda path: {"armatures": 1, "bones": 2, "actions": [{"name": "a"}], "blender": "5.1", "path": path},
     )
@@ -114,7 +115,7 @@ def test_blender_export_fails_when_blender_sees_no_rig(tmp_path, monkeypatch, re
     bridge.execute = execute
     monkeypatch.setattr(service_module, "available_dependencies", lambda: {"Blender integration"})
     svc = CascadeurService(paths, client=bridge)
-    monkeypatch.setattr(service_module, "verify_blender_fbx", lambda _path: report)
+    monkeypatch.setattr(host_postconditions_module, "verify_blender_fbx", lambda _path: report)
     prepared = svc.prepare_change("blender_export", "io.export_fbx", {"path": str(destination)})
     result = svc.commit_change(prepared["confirmation_token"], timeout=2)
     assert not result.ok

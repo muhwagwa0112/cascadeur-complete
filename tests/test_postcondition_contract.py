@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from cascadeur_complete.host_postconditions import HOST_POSTCONDITIONS
 from cascadeur_complete.product_catalog import PRODUCT_CATALOG
-from cascadeur_complete.service import HOST_POSTCONDITIONS
 
 BRIDGE_ROOT = Path(__file__).parents[1] / "cascadeur_side" / "cascadeur_complete"
 PACKAGE = "cascadeur_complete_bridge_contract"

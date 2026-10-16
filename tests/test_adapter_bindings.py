@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from cascadeur_complete.adapter_bindings import BINDINGS, BY_FEATURE
+from cascadeur_complete.host_postconditions import HOST_POSTCONDITIONS
 from cascadeur_complete.product_catalog import PRODUCT_CATALOG
-from cascadeur_complete.service import HOST_POSTCONDITIONS
 from tests.test_postcondition_contract import bridge  # noqa: F401  (fixture)
 
 

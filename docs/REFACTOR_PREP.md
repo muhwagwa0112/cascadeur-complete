@@ -145,7 +145,13 @@ route, action, operation, pre/postconditions, fixed_arguments, `contract_test_id
 - ~~상태 게이트 공용화~~ — 완료: `_feature_gate_error` 를 `execute`·`prepare_change` 가 공유.
 - 카탈로그 JSON 을 단일 진실원으로: ~~`CoreSpec.destructive`, `AdapterSpec` 의 pre/postconditions·test_ids 제거~~ — 완료
   (전후 레지스트리 출력 SHA-256 동일). 남은 것: `CORE_FEATURES` 의 route/license/scene 중복, fallback read-only 집합.
-- `CascadeurService` 분해: `ChangeFlow`(prepare/commit/rollback), `HostPostconditions`(연산별 테이블), `UiFileFlow`.
+- ~~`CascadeurService` 분해~~ — 1차 완료(순수 이동). `service.py` 2059 → 951줄:
+  - `change_flow.ChangeFlowMixin`: prepare/commit/rollback, 스냅샷 경로, 실패 복구.
+  - `host_postconditions.HostPostconditionsMixin`: commit 뒤 호스트 검증. 예전 9단 if-체인은 순서가 고정된
+    `HOST_POSTCONDITION_CHECKS` 표 + 검사 메서드 하나씩이 되었고, commit 직전 관측값은 `CommitObservation` 에 담긴다.
+  - `ui_file_flow.UiFileFlowMixin`: 등록된 파일 대화상자 흐름과 `UI_FILE_FLOWS`.
+  - 세 mixin 은 서비스 상태를 `self` 로 공유한다. 다음 단계는 명시적 협력 객체(composition)로 바꾸는 것.
+  - 테스트의 monkeypatch 대상도 새 모듈로 옮겼다(`ui_file_flow.complete_file_dialog` 등). 재수출 shim 은 두지 않았다.
 - `batch` 는 기능 상태 게이트를 거치지 않는다(바인딩만 검사) — 공용 게이트 적용 여부 결정 필요.
 - `server.py` 에 공용 에러/결과 헬퍼, 액션 맵을 데이터로.
 - `cleanup_workflow` 가 `service` 경유로 실행하도록.
