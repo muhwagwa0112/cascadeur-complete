@@ -136,13 +136,17 @@ class ChangeManager:
             raise SafetyError("Malformed confirmation token")
         return nonce, signature
 
-    def _verify_record(self, nonce: str, signature: str, path: Path) -> ChangeToken:
+    def _authentic_record(self, nonce: str, signature: str, path: Path) -> ChangeToken:
         record = ChangeToken.model_validate(read_json(path))
         if record.token != f"{nonce}.{signature}":
             raise SafetyError("Confirmation token record does not match token")
         expected = self._signature(nonce, record)
         if not hmac.compare_digest(signature, expected):
             raise SafetyError("Invalid confirmation token signature")
+        return record
+
+    def _verify_record(self, nonce: str, signature: str, path: Path) -> ChangeToken:
+        record = self._authentic_record(nonce, signature, path)
         if record.used:
             raise SafetyError("Confirmation token was already used")
         if record.expires_at < time.time():
@@ -236,9 +240,14 @@ class ChangeManager:
             claimed.unlink(missing_ok=True)
 
     def cancel(self, token: str) -> bool:
-        nonce, _signature = self._parts(token)
-        path = self.paths.tokens / f"{nonce}.json"
-        if not path.is_file():
+        """Delete an unused token, but only for its exact signed value (an expired one included)."""
+        try:
+            nonce, signature = self._parts(token)
+            path = self.paths.tokens / f"{nonce}.json"
+            if not path.is_file():
+                return False
+            self._authentic_record(nonce, signature, path)
+        except (SafetyError, OSError, ValueError):
             return False
-        path.unlink()
+        path.unlink(missing_ok=True)
         return True

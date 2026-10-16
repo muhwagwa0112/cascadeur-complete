@@ -55,7 +55,7 @@ Always call `feature_describe` for the exact format before choosing a route.
 | USD | `scene_exchange_prepare(direction, format="usd", preset, path)` | Exact UI file flow; `preset` is animation/model/scene |
 | GLB/GLTF | `scene_exchange_prepare` with the requested format | Exact UI file flow; choose model/animation/scene intent first |
 | VRM import | `scene_exchange_prepare(format="vrm")` when available | Import route exists in 2026.1; validate skeleton/material result |
-| VRM export | Capability gate | Baseline is `unsupported_version`; do not rename GLB output to VRM |
+| VRM export | Capability gate | Baseline is `unsupported`; do not rename GLB output to VRM |
 | Audio | `io_transfer_prepare(feature_id="import_audio", ...)` | Confirm timeline/media attachment afterward |
 | Reference image/video | `file_dialog_prepare("import_image"/"import_video", path)` | Registered action + owned dialog only |
 | Camera texture | `feature_prepare("camera_textures", {...})` | Native adapter; reads the texture paths back |

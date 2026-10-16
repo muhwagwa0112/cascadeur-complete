@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any
 
-from .atomic_queue import atomic_write_json
+from .atomic_queue import atomic_write_json, read_json
 from .bridge_client import BridgeClient
 from .build_profile import DEVELOPER_BUILD
 from .discovery import BASELINE_TOOLS, discover_commands, discover_installation, load_csc_schema
@@ -395,7 +395,7 @@ class CascadeurService:
         self.schema = load_csc_schema()
         self.commands = discover_commands()
         self._live_tools = list(BASELINE_TOOLS)
-        self._license_name = "Basic"
+        self._license_name, self._license_source, self._license_observed_at = self._cached_license()
         self._scene_available = False
         self._live_scene_id: str | None = None
         self._live_scene_revision: str | None = None
@@ -407,6 +407,43 @@ class CascadeurService:
     @property
     def _version_name(self) -> str:
         return self.installation.get("version") or "unknown"
+
+    def _checked_status(self, status: ResultEnvelope) -> ResultEnvelope:
+        """A successful status must carry the scene state dict that tokens are bound to."""
+        if status.ok and not isinstance(status.result, dict):
+            return self._host_error(
+                "status", ErrorCode.POSTCONDITION_FAILED, "Cascadeur status returned no scene state"
+            )
+        return status
+
+    @property
+    def _license_path(self) -> Path:
+        return self.paths.state / "license.json"
+
+    def _cached_license(self) -> tuple[str, str, float | None]:
+        """The license last reported by this Cascadeur build, so a closed app keeps its feature states."""
+        try:
+            cached = read_json(self._license_path)
+        except (OSError, ValueError):
+            return "Basic", "default", None
+        if cached.get("cascadeur_version") != self._version_name or not isinstance(cached.get("license"), str):
+            return "Basic", "default", None
+        observed_at = cached.get("observed_at")
+        return cached["license"], "cached", float(observed_at) if isinstance(observed_at, (int, float)) else None
+
+    def _observe_license(self, license_name: Any) -> None:
+        name = str(license_name or "Basic")
+        changed = name != self._license_name or self._license_source != "live"
+        self._license_name, self._license_source, self._license_observed_at = name, "live", time.time()
+        if changed:
+            atomic_write_json(
+                self._license_path,
+                {
+                    "license": name,
+                    "cascadeur_version": self._version_name,
+                    "observed_at": self._license_observed_at,
+                },
+            )
 
     def _rebuild_features(self) -> None:
         self._features = build_registry(
@@ -467,7 +504,7 @@ class CascadeurService:
         )
         if result.ok and isinstance(result.result, dict):
             self._live_tools = result.result.get("tools") or list(BASELINE_TOOLS)
-            self._license_name = result.result.get("license", "Basic")
+            self._observe_license(result.result.get("license", "Basic"))
             self._remember_scene_result(result, clear_missing=True)
             self._record_live_evidence("status", "system.status", result)
             self._rebuild_features()
@@ -484,7 +521,8 @@ class CascadeurService:
         status = self.refresh_live(timeout=30)
         live = status.result if status.ok and isinstance(status.result, dict) else {}
         self._live_tools = live.get("tools", BASELINE_TOOLS)
-        self._license_name = live.get("license", "Basic")
+        if "license" in live:
+            self._observe_license(live["license"])
         self._scene_available = bool(live.get("scene_id"))
         self._rebuild_features()
         self._write_registry()
@@ -528,6 +566,11 @@ class CascadeurService:
             "installation": self.installation,
             "bridge_protocol": PROTOCOL_VERSION,
             "transport": "stdio",
+            "license": {
+                "name": self._license_name,
+                "source": self._license_source,
+                "observed_at": self._license_observed_at,
+            },
             "feature_count": len(self._features),
             "product_coverage": {
                 "catalog_count": len(product_features),
@@ -1098,7 +1141,7 @@ class CascadeurService:
                 ErrorCode.INVALID_REQUEST,
                 "Read-only operations must be executed directly and cannot mint change tokens",
             ).model_dump(mode="json")
-        status = self.refresh_live()
+        status = self._checked_status(self.refresh_live())
         if not status.ok:
             return status.model_dump(mode="json")
         state = status.result
@@ -1169,7 +1212,7 @@ class CascadeurService:
                 ).model_dump(mode="json")
             # Bind the token to the writable working document created by the
             # snapshot operation, never to the original or immutable backup.
-            post_snapshot = self.refresh_live(bind_to_cached=True)
+            post_snapshot = self._checked_status(self.refresh_live(bind_to_cached=True))
             if not post_snapshot.ok:
                 return post_snapshot.model_dump(mode="json")
             state = post_snapshot.result
@@ -1215,7 +1258,7 @@ class CascadeurService:
             record = self.changes.load(token)
         except SafetyError as exc:
             return self._host_error("change_commit", ErrorCode.INVALID_REQUEST, str(exc))
-        status = self.refresh_live()
+        status = self._checked_status(self.refresh_live())
         if not status.ok:
             return status
         state = status.result
@@ -1948,8 +1991,8 @@ class CascadeurService:
             return self._host_error(
                 "change_rollback", ErrorCode.INVALID_REQUEST, "Unknown snapshot"
             ).model_dump(mode="json")
-        status = self.refresh_live()
-        if not status.ok or not isinstance(status.result, dict):
+        status = self._checked_status(self.refresh_live())
+        if not status.ok:
             return status.model_dump(mode="json")
         state = status.result
         working_id = str(uuid.uuid4())

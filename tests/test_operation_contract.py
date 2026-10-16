@@ -48,7 +48,7 @@ OPERATION = re.compile(r"^(?:" + "|".join(BRIDGE_FAMILIES) + r")\.[a-z_]*[a-z]$"
 HOST_ONLY_OPERATIONS = {
     # UIA file-dialog flow; its in-app half is system.action_dispatch.
     "system.ui_file_flow",
-    # Gated: export_vrm is reported unsupported_version.
+    # Gated: the pinned build has no VRM export (catalog status unsupported).
     "io.export_vrm",
     # Developer-only generic executors; tests/test_bridge_security.py forbids them in the bridge.
     "system.csc_query",
@@ -162,3 +162,30 @@ def test_every_bridge_view_operation_yields_to_the_event_loop(bridge):
 
     runtime, _registry = bridge
     assert set(VIEW_OPERATIONS) <= set(runtime.YIELDING_OPERATIONS)
+
+
+@pytest.mark.parametrize("layout", ["override", "profile", "local_app_data_only"])
+def test_host_uia_and_bridge_share_one_runtime_root(bridge, tmp_path, monkeypatch, layout):
+    from cascadeur_complete import uia
+    from cascadeur_complete.paths import RuntimePaths
+
+    runtime, _registry = bridge
+    profile = tmp_path / "profile"
+    local = tmp_path / "local"
+    (profile / "AppData" / "Local").mkdir(parents=True)
+    local.mkdir()
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.delenv("CASCADEUR_MCP_ROOT", raising=False)
+    if layout == "override":
+        monkeypatch.setenv("CASCADEUR_MCP_ROOT", str(tmp_path / "custom"))
+        monkeypatch.setenv("USERPROFILE", str(profile))
+    elif layout == "profile":
+        monkeypatch.setenv("USERPROFILE", str(profile))
+    else:
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "missing-profile"))
+
+    host = RuntimePaths.discover()
+    assert runtime.runtime_root() == host.root
+    host.requests.mkdir(parents=True)
+    (host.requests / "1-probe.json").write_text('{"scene_id": "scene-9"}', encoding="utf-8")
+    assert uia._queued_request_scene_ids() == {"scene-9"}

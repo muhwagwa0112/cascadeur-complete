@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 from threading import Thread
@@ -836,3 +837,47 @@ def test_position_tolerance_is_bounded_by_the_request():
 
     source = inspect.getsource(service.CascadeurService._verify_settled_rotations)
     assert "tolerance_cm" in source and "min(requested, 10.0)" in source
+
+
+def test_last_observed_license_survives_a_closed_cascadeur(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    bridge = FakeBridge(paths.snapshots)
+    bridge.state["license"] = "Pro"
+    first = CascadeurService(paths, client=bridge)
+    assert first.capabilities(live=False)["license"]["source"] == "default"
+    assert first.feature("inbetweening").state.value == "license_gated"
+    first.refresh_live()
+    assert first.capabilities(live=False)["license"] == {
+        "name": "Pro",
+        "source": "live",
+        "observed_at": pytest.approx(time.time(), abs=60),
+    }
+
+    reopened = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+    license_state = reopened.capabilities(live=False)["license"]
+    assert (license_state["name"], license_state["source"]) == ("Pro", "cached")
+    assert reopened.feature("inbetweening").state.value != "license_gated"
+
+
+def test_cached_license_from_another_build_is_ignored(tmp_path):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    paths.ensure()
+    (paths.state / "license.json").write_text(
+        json.dumps({"license": "Pro", "cascadeur_version": "2025.0.0.1", "observed_at": 1.0}), encoding="utf-8"
+    )
+    svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+    assert svc.capabilities(live=False)["license"]["source"] == "default"
+    assert svc.feature("inbetweening").state.value == "license_gated"
+
+
+def test_prepare_and_commit_refuse_a_status_without_scene_state(tmp_path, monkeypatch):
+    paths = RuntimePaths.discover(tmp_path / "runtime")
+    svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+    prepared = svc.prepare_change("scene_new", "scene.new", {})
+    assert prepared["ok"] is True
+    stateless = ResultEnvelope(ok=True, feature_id="status", execution_mode=ExecutionMode.NATIVE, result=["tab"])
+    monkeypatch.setattr(svc, "refresh_live", lambda **_kwargs: stateless)
+    refused = svc.prepare_change("scene_new", "scene.new", {})
+    assert (refused["ok"], refused["error_code"]) == (False, "POSTCONDITION_FAILED")
+    committed = svc.commit_change(prepared["confirmation_token"])
+    assert (committed.ok, committed.error_code) == (False, ErrorCode.POSTCONDITION_FAILED)

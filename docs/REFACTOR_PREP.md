@@ -107,11 +107,15 @@ route, action, operation, pre/postconditions, fixed_arguments, `contract_test_id
    `mode` 가 있는 `view_mode_get` 은 여전히 토큰을 요구한다(`runtime._operation_is_mutating`).
 3. ~~`_save_snapshot` 에 `working_id` 누락~~ — 완료(요청마다 새 UUID). 호스트는 여전히 이 경로를 쓰지 않는다.
 4. ~~`_drain_once` 가 깨진 요청에서 중단~~ — 완료. 읽을 수 없거나 객체가 아닌 요청은 claim 을 지우고 다음 요청으로 진행한다.
-5. `atomic_write_json` 임시 파일명이 pid 만 사용 → job 스레드와 동시 기록 경쟁(`atomic_queue.py:18`).
-6. 런타임 루트 규칙 3종 불일치: 호스트 `CASCADEUR_MCP_ROOT`(paths.py:40), uia `LOCALAPPDATA`(uia.py:402), 브리지는 env 무시(runtime.py:103).
-7. Cascadeur 미실행 시 라이선스 `"Basic"` 가정 → 지원 상태 붕괴.
-8. `export_vrm` 하드코딩된 `unsupported_version` → 정확한 상태/사유로.
-9. `prepare_change`/`commit_change` 의 `status.result.get` 에 타입 검사 없음(service.py:1104, 1221). `ChangeManager.cancel` 서명 미검증(safety.py:238).
+5. ~~`atomic_write_json` 임시 파일 경쟁~~ — 완료. 쓰기마다 고유한 임시 파일, 실패 시 정리(8 스레드 동시 쓰기 테스트로 재현·검증).
+6. ~~런타임 루트 규칙 3종 불일치~~ — 완료. uia 는 `RuntimePaths` 를 쓰고, 브리지 `runtime_root` 는 같은 규칙
+   (`CASCADEUR_MCP_ROOT` → 실제 USERPROFILE Local AppData → LOCALAPPDATA)을 따른다. 쓰이지 않던 uia 헬퍼 1개 삭제.
+   `CASCADEUR_MCP_ROOT` 를 쓰려면 Cascadeur 프로세스에도 같은 값이 보여야 한다.
+7. ~~미실행 시 라이선스 `"Basic"` 가정~~ — 완료. 마지막으로 관측한 라이선스를 `state/license.json` 에 빌드별로 저장하고,
+   `cascadeur_status` 의 `license.source` 가 `live`/`cached`/`default` 를 알려 준다. 상태 확인마다 실제 값으로 갱신된다.
+8. ~~`export_vrm` 하드코딩~~ — 완료. 카탈로그대로 `unsupported` 로 보고된다.
+9. ~~`status.result` 타입 검사 / `cancel` 서명 미검증~~ — 완료. prepare·commit·rollback 이 공용 `_checked_status` 로
+   상태 dict 를 확인하고, `cancel` 은 서명이 맞는 토큰(만료 포함)만 지우며 잘못된 토큰에 예외 대신 `false` 를 돌려준다.
 10. ~~ruff E501 1건~~ — Phase 0 에서 수정.
 
 ## 6. 단계별 계획

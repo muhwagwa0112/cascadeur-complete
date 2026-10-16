@@ -68,3 +68,26 @@ def test_stale_claim_recovery(tmp_path):
     os.utime(claimed, (old, old))
     assert queue.recover_stale_claims(stale_after=60) == 1
     assert (paths.requests / "stale.json").is_file()
+
+
+def test_atomic_write_json_survives_concurrent_writers_in_one_process(tmp_path):
+    import threading
+
+    target = tmp_path / "registry.json"
+    errors = []
+
+    def write(writer):
+        try:
+            for index in range(40):
+                atomic_write_json(target, {"writer": writer, "index": index, "padding": "x" * 4096})
+        except Exception as exc:  # pragma: no cover - reported by the assertion below
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=write, args=(writer,)) for writer in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert json.loads(target.read_text(encoding="utf-8"))["index"] == 39
+    assert [path.name for path in tmp_path.iterdir()] == ["registry.json"]

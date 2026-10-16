@@ -102,9 +102,15 @@ class BridgeAuthenticationError(PermissionError):
 
 
 def runtime_root():
+    """The host's RuntimePaths rule: CASCADEUR_MCP_ROOT, else the real user Local AppData."""
+    configured = os.environ.get("CASCADEUR_MCP_ROOT")
+    if configured:
+        return Path(configured).resolve()
     profile = os.environ.get("USERPROFILE")
-    local = Path(profile) / "AppData" / "Local" if profile else Path(os.environ["LOCALAPPDATA"])
-    return local / "CascadeurMCP" / "cascadeur-complete"
+    local = Path(profile) / "AppData" / "Local" if profile else None
+    if local is None or not local.is_dir():
+        local = Path(os.environ["LOCALAPPDATA"])
+    return (local / "CascadeurMCP" / "cascadeur-complete").resolve()
 
 
 def ensure_dirs():

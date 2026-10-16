@@ -15,21 +15,25 @@ from .queue_auth import QueueAuthenticationError, load_or_create_secret, session
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-        json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
-        stream.flush()
-        os.fsync(stream.fileno())
-    # Windows refuses to replace a file another process holds open without
-    # delete sharing (e.g. a concurrent reader). Such opens are brief; retry.
-    for attempt in range(50):
-        try:
-            os.replace(temporary, path)
-            return
-        except PermissionError:
-            if attempt == 49:
-                raise
-            time.sleep(0.05)
+    # Unique per write: job threads and the main thread may write the same file.
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Windows refuses to replace a file another process holds open without
+        # delete sharing (e.g. a concurrent reader or writer). Such opens are brief; retry.
+        for attempt in range(50):
+            try:
+                os.replace(temporary, path)
+                return
+            except PermissionError:
+                if attempt == 49:
+                    raise
+                time.sleep(0.05)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def read_json(path: Path) -> dict[str, Any]:

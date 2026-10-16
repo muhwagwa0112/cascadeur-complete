@@ -649,7 +649,7 @@ def _record(
     dependency = None if required_dependency in available_dependencies else required_dependency
     if spec.feature_id == "developer_execute_python" and developer_enabled and DEVELOPER_BUILD:
         dependency = None
-    if version_name != PRODUCT_CATALOG.supported_build or spec.feature_id == "export_vrm":
+    if version_name != PRODUCT_CATALOG.supported_build:
         state = CapabilityState.UNSUPPORTED_VERSION
         mode = ExecutionMode.GATED
     elif product and product.implementation_status == "unsupported":
