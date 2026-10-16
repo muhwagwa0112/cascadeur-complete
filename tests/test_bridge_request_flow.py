@@ -316,3 +316,25 @@ def test_drain_answers_a_signed_but_malformed_request_and_continues(bridge, over
     assert _response(bridge, broken)["error_code"] == "INVALID_REQUEST"
     assert _response(bridge, good)["ok"] is True
     assert bridge._test_calls == ["scene.list"]
+
+
+def test_each_batched_operation_reaches_its_handler_under_its_own_name(bridge, monkeypatch):
+    seen = []
+
+    def dispatch(name, _scene, _arguments, _request, context):
+        seen.append((name, context["operation_name"]))
+        return True, ({}, [])
+
+    monkeypatch.setattr(bridge, "dispatch_registered", dispatch)
+    operations = [READ, {"name": "layer.list", "arguments": {}}]
+    assert bridge.execute_request(object(), _request(bridge, operations))["ok"] is True
+    assert seen == [("scene.list", "scene.list"), ("layer.list", "layer.list")]
+
+
+def test_handlers_take_their_operation_name_from_the_dispatch_context():
+    from tests.bridge_support import BRIDGE_ROOT
+
+    inferred = 'str((request.get("operations") or [{}])[0].get("name", ""))'
+    for path in (BRIDGE_ROOT / "handlers").glob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        assert inferred not in source, f"{path.name} infers its operation from the request"

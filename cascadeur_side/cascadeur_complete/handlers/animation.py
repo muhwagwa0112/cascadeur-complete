@@ -127,7 +127,7 @@ def edit_section(scene, arguments, request, context):
     frame = int(arguments["frame"])
     operation = str(arguments["operation"])
     bound = {"animation.interpolation_set": "interpolation", "animation.tangent_set": "tangent"}.get(
-        str((request.get("operations") or [{}])[0].get("name", ""))
+        str(context.get("operation_name") or (request.get("operations") or [{}])[0].get("name", ""))
     )
     if bound is not None and operation != bound:
         raise ValueError("operation argument " + operation + " does not match the requested bridge operation")

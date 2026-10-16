@@ -989,6 +989,8 @@ def _run_operation(scene, operation, request):
             "object_id": _object_id,
             "save_current_scene": _save_current_scene,
             "casc_tool_state": _casc_tool_state,
+            # The name this handler was dispatched for; a batch may mix operations.
+            "operation_name": name,
         },
     )
     if handled:

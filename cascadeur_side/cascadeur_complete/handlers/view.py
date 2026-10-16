@@ -59,7 +59,7 @@ def _select(scene, arguments, context):
 
 @handler(*VIEW_ACTIONS)
 def view_toggle(scene, arguments, request, context):
-    operation = str((request.get("operations") or [{}])[0].get("name", ""))
+    operation = str(context.get("operation_name") or (request.get("operations") or [{}])[0].get("name", ""))
     selected = _select(scene, arguments, context)
     return {**_dispatch(context, VIEW_ACTIONS[operation]), "selected_ids": selected}, []
 
