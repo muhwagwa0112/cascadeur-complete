@@ -67,8 +67,7 @@ KNOWN_UNREFERENCED_BRIDGE_OPERATIONS = {
 }
 
 # Host sends these without a confirmation token, but the bridge requires one.
-# §5-2: system.view_mode_get is missing from the bridge READ_ONLY_OPERATIONS.
-KNOWN_READ_ONLY_MISMATCHES = {"system.view_mode_get"}
+KNOWN_READ_ONLY_MISMATCHES: set[str] = set()
 
 # Host treats these as mutations while the bridge accepts them without a token.
 # system.view_mode: the bridge exempts its get/list actions. safety.snapshot and

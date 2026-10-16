@@ -24,6 +24,7 @@ PROTOCOL_VERSION = "2.0"
 READ_ONLY_OPERATIONS = {
     "system.status",
     "system.logs",
+    "system.view_mode_get",
     "system.tools",
     "system.introspect",
     "scene.summary",
@@ -182,6 +183,9 @@ def _claim_request_nonce(root, request):
 def _operation_is_mutating(operation):
     name = str(operation.get("name", ""))
     args = operation.get("arguments") or {}
+    if name == "system.view_mode_get":
+        # The shared view-mode handler applies any supplied mode.
+        return args.get("mode") is not None
     if name in READ_ONLY_OPERATIONS:
         return False
     if name == "system.view_mode":
@@ -1381,7 +1385,7 @@ def execute_request(scene, request):
     if safety.get("snapshot_required"):
         snapshot_id = request["request_id"]
         try:
-            _save_snapshot(scene, snapshot_id)
+            _save_snapshot(scene, snapshot_id, str(uuid.uuid4()))
         except Exception as exc:
             return _error(feature_id, "POSTCONDITION_FAILED", str(exc), started, before)
     results = []
@@ -1611,7 +1615,14 @@ def _drain_once(scene, *, matching_scene_only=False):
         except OSError:
             continue
         try:
-            request = json.loads(claimed.read_text(encoding="utf-8"))
+            try:
+                request = json.loads(claimed.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                request = None
+            if not isinstance(request, dict):
+                # Unreadable or not a request object: there is no request id or
+                # nonce to answer, so drop the claim and keep draining.
+                continue
             request_id = str(request.get("request_id", ""))
             authenticated = True
             try:

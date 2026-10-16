@@ -6,9 +6,6 @@ scene and ``dispatch_registered`` a scripted handler. Everything else (HMAC,
 nonce claim, TTL, protocol, confirmation gate, response signing, yielding) is
 the real bridge code.
 
-Tests marked ``xfail(strict=True)`` describe the intended behaviour of a known
-bug (docs/REFACTOR_PREP.md §5); fixing the bug makes them pass, and the marker
-must then be removed.
 """
 
 from __future__ import annotations
@@ -175,14 +172,20 @@ def test_unknown_operation_fails_as_postcondition(bridge, monkeypatch):
     assert "Unknown operation: scene.no_such_operation" in result["error_message"]
 
 
-@pytest.mark.xfail(strict=True, reason="§5-2: system.view_mode_get is missing from READ_ONLY_OPERATIONS")
 def test_view_mode_get_needs_no_confirmation_token(bridge):
     bridge._test_handlers["system.view_mode_get"] = ({"mode": "View"}, [])
     result = bridge.execute_request(object(), _request(bridge, [{"name": "system.view_mode_get", "arguments": {}}]))
     assert result["ok"] is True
 
 
-@pytest.mark.xfail(strict=True, reason="§5-3: _save_snapshot is called without working_id")
+def test_view_mode_get_with_a_mode_still_needs_a_confirmation_token(bridge):
+    bridge._test_handlers["system.view_mode_get"] = ({"mode": "Joint"}, [])
+    operation = {"name": "system.view_mode_get", "arguments": {"mode": "Joint"}}
+    result = bridge.execute_request(object(), _request(bridge, [operation]))
+    assert result["error_code"] == "INVALID_REQUEST"
+    assert bridge._test_calls == []
+
+
 def test_snapshot_required_saves_a_snapshot(bridge, monkeypatch):
     saved = []
 
@@ -195,6 +198,8 @@ def test_snapshot_required_saves_a_snapshot(bridge, monkeypatch):
     result = bridge.execute_request(object(), request)
     assert result["ok"] is True
     assert saved and saved[0][0] == request["request_id"]
+    assert str(uuid.UUID(saved[0][1])) == saved[0][1]
+    assert result["snapshot_id"] == request["request_id"]
 
 
 # --- _drain_once -----------------------------------------------------------
@@ -278,11 +283,13 @@ def test_drain_matching_scene_only_leaves_other_scene_requests(bridge):
     assert _response(bridge, mine)["ok"] is True
 
 
-@pytest.mark.xfail(strict=True, reason="§5-4: a malformed request aborts the drain and skips the rest of the queue")
-def test_drain_skips_a_malformed_request_and_continues(bridge):
+@pytest.mark.parametrize("content", ["{not json", "[1, 2]", ""])
+def test_drain_skips_a_malformed_request_and_continues(bridge, content):
     bridge._test_handlers["scene.list"] = ({}, [])
-    (bridge.runtime_root() / "state" / "requests" / "1-broken.json").write_text("{not json", encoding="utf-8")
+    requests = bridge.runtime_root() / "state" / "requests"
+    (requests / "1-broken.json").write_text(content, encoding="utf-8")
     good = _request(bridge, [READ])
     _queue(bridge, good, "2-good.json")
-    bridge._drain_once(object())
+    assert bridge._drain_once(object()) == (1, False)
     assert _response(bridge, good)["ok"] is True
+    assert list(requests.iterdir()) == []

@@ -103,9 +103,10 @@ route, action, operation, pre/postconditions, fixed_arguments, `contract_test_id
    `render_output_prepare` 는 video 를 받지 않는다 — 둘 다 예전에는 받아도 commit 에서 실패하던 경로였다.
    `tests/test_direct_mutation_tools.py` 가 execute 로 가는 mutation 이 0개임과, 각 `_prepare` 도구의
    feature/operation 쌍이 서비스 바인딩 규칙과 브리지 처리기를 통과함을 검증한다.
-2. `system.view_mode_get` 을 브리지 `READ_ONLY_OPERATIONS` 에 추가 + 양쪽 read-only 집합 일치 계약 테스트.
-3. `runtime.py:1384` `_save_snapshot(scene, snapshot_id)` 에 `working_id` 누락 (현재 도달 불가).
-4. `_drain_once` 에서 JSON 파싱 실패 시 응답 없이 큐 처리 중단(`runtime.py:1614`).
+2. ~~`system.view_mode_get` 을 브리지 `READ_ONLY_OPERATIONS` 에 추가~~ — 완료. 공용 핸들러가 `mode` 를 받으면 실제로 바꾸므로,
+   `mode` 가 있는 `view_mode_get` 은 여전히 토큰을 요구한다(`runtime._operation_is_mutating`).
+3. ~~`_save_snapshot` 에 `working_id` 누락~~ — 완료(요청마다 새 UUID). 호스트는 여전히 이 경로를 쓰지 않는다.
+4. ~~`_drain_once` 가 깨진 요청에서 중단~~ — 완료. 읽을 수 없거나 객체가 아닌 요청은 claim 을 지우고 다음 요청으로 진행한다.
 5. `atomic_write_json` 임시 파일명이 pid 만 사용 → job 스레드와 동시 기록 경쟁(`atomic_queue.py:18`).
 6. 런타임 루트 규칙 3종 불일치: 호스트 `CASCADEUR_MCP_ROOT`(paths.py:40), uia `LOCALAPPDATA`(uia.py:402), 브리지는 env 무시(runtime.py:103).
 7. Cascadeur 미실행 시 라이선스 `"Basic"` 가정 → 지원 상태 붕괴.
