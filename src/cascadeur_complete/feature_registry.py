@@ -23,7 +23,6 @@ class CoreSpec:
     route: str
     mode: ExecutionMode = ExecutionMode.NATIVE
     requires_scene: bool = True
-    destructive: bool = False
     license: str = "any"
     dependency: str | None = None
 
@@ -33,12 +32,11 @@ def _specs(
     names: str,
     *,
     mode: ExecutionMode = ExecutionMode.NATIVE,
-    destructive: Iterable[str] = (),
     no_scene: Iterable[str] = (),
     pro: Iterable[str] = (),
     dependencies: dict[str, str] | None = None,
 ) -> list[CoreSpec]:
-    destructive_set, no_scene_set, pro_set = set(destructive), set(no_scene), set(pro)
+    no_scene_set, pro_set = set(no_scene), set(pro)
     deps = dependencies or {}
     result: list[CoreSpec] = []
     for item in names.split():
@@ -51,7 +49,6 @@ def _specs(
                 route=route,
                 mode=ExecutionMode.EXTERNAL if feature_id in deps else mode,
                 requires_scene=feature_id not in no_scene_set,
-                destructive=feature_id in destructive_set,
                 license="pro" if feature_id in pro_set else "any",
                 dependency=deps.get(feature_id),
             )
@@ -77,7 +74,6 @@ scene_new|New_scene|scene.new scene_open|Open_CASC|scene.open scene_save|Save|sc
 scene_save_as|Save_as|scene.save_as scene_close|Close|scene.close scene_list|List_tabs|scene.list
 scene_activate|Activate_tab|scene.activate scene_summary|Scene_summary|scene.summary
 """,
-        destructive={"scene_new", "scene_open", "scene_save_as", "scene_close"},
         no_scene={"scene_new", "scene_open", "scene_list"},
     )
     + _specs(
@@ -93,25 +89,6 @@ import_image|Import_image|action.File.Import.Image import_video|Import_video|act
 import_audio|Import_audio|io.import_audio export_image|Export_image|io.export_image
 export_video|Export_video|tool.RenderToFile
 """,
-        destructive={
-            "import_fbx",
-            "import_dae",
-            "import_usd",
-            "import_gltf",
-            "import_glb",
-            "import_vrm",
-            "import_image",
-            "import_video",
-            "import_audio",
-            "export_fbx",
-            "export_dae",
-            "export_usd",
-            "export_gltf",
-            "export_glb",
-            "export_vrm",
-            "export_image",
-            "export_video",
-        },
     )
     + _specs(
         "objects",
@@ -124,7 +101,6 @@ object_delete|Delete|action.Delete_objects object_rename|Rename|object.rename ob
 object_unparent|Remove_parent|object.unparent object_hierarchy|Hierarchy|object.hierarchy
 object_properties|Properties|object.properties object_behaviors|Behaviors|object.behaviors
 """,
-        destructive={"object_create", "object_duplicate", "object_delete", "object_parent", "object_unparent"},
     )
     + _specs(
         "animation",
@@ -141,7 +117,6 @@ layer_lock|Layer_lock|layer.lock layer_folder|Layer_folder|layer.folder
 cycle_query|Cycle_query|animation.cycle_query cycle|Cycle|tool.Timeline
 stretch|Stretch|tool.Timeline bake|Bake|tool.Timeline
 """,
-        destructive={"key_delete", "graph_edit", "layer_delete", "cycle", "bake"},
     )
     + _specs(
         "editing",
@@ -151,7 +126,6 @@ interval_edit|Interval_edit|tool.Timeline trajectory|Trajectory|tool.TrajectoryT
 ghost|Ghost|tool.GhostTool fixing|Fixing|tool.FixFootTool hiding|Hiding|action.hiding
 """,
         mode=ExecutionMode.ACTION,
-        destructive={"mirror"},
     )
     + _specs(
         "generation",
@@ -164,7 +138,6 @@ unbaking|Animation_Unbaking|generation.unbaking fulcrum_cleaning|Fulcrum_cleanin
 key_reduction|Key_reduction|animation.key_reduce
 """,
         mode=ExecutionMode.ACTION,
-        destructive={"inbetweening", "root_motion", "mocap", "retargeting", "unbaking", "key_reduction"},
         pro={"inbetweening", "mocap", "retargeting"},
     )
     + _specs(
@@ -181,15 +154,6 @@ collision_clean|Collision_clean|tool.FixCollisionsTool
 penetration_clean|Penetration_cleaning|action.penetration_clean
 """,
         mode=ExecutionMode.ACTION,
-        destructive={
-            "ballistic",
-            "ragdoll",
-            "constraint_point",
-            "constraint_transform",
-            "collision_create",
-            "collision_delete",
-            "penetration_clean",
-        },
     )
     + _specs(
         "rigging",
@@ -204,21 +168,6 @@ ik|IK|rig.ik_chain_create spline_ik|Spline_IK|rig.spline_ik_create twist|Twist|r
 mass|Mass|rig.mass_set rig_info|Rig_Info|rig.rig_info_create blend_shape|Blend_Shape|action.blend_shape
 """,
         mode=ExecutionMode.ACTION,
-        destructive={
-            "quick_rig",
-            "manual_rig",
-            "rig_create",
-            "rig_regenerate",
-            "controller_point",
-            "controller_box",
-            "joint",
-            "rigid_body",
-            "ik",
-            "spline_ik",
-            "twist",
-            "mass",
-            "rig_info",
-        },
     )
     + _specs(
         "render",
@@ -233,7 +182,6 @@ viewport_capture|Viewport_capture|render.viewport_capture render_image|Render_im
 render_video|Render_video|tool.RenderToFile
 """,
         mode=ExecutionMode.ACTION,
-        destructive={"camera_create", "camera_aim", "light_point", "light_spot", "render_image", "render_video"},
     )
     + _specs(
         "external",
@@ -261,7 +209,6 @@ action_invoke|Action_invoke|host.action_dispatcher ui_flow_run|UI_flow|host.ui_f
 csc_query|CSC_query|system.csc_query csc_mutate|CSC_mutate|system.csc_mutate
 developer_execute_python|Developer_Python|system.developer_execute_python
 """,
-        destructive={"action_invoke", "csc_mutate"},
         dependencies={
             "csc_query": DEVELOPER_POLICY,
             "csc_mutate": DEVELOPER_POLICY,
@@ -294,7 +241,6 @@ def _binding_specs(specs: list[CoreSpec]) -> tuple[CoreSpec, ...]:
             route=binding.operation,
             mode=binding.mode,
             requires_scene=binding.requires_scene,
-            destructive=binding.mutation,
             license=legacy.license if legacy else product.license,
             dependency=legacy.dependency if legacy else product.dependency,
         )
@@ -306,40 +252,18 @@ CORE_FEATURES = _binding_specs(list(CORE_FEATURES))
 
 @dataclass(frozen=True)
 class AdapterSpec:
+    """A route with a dedicated adapter. Its contract (pre/postconditions, tests,
+    mutation) lives in the product catalog JSON, which is the single source of truth."""
+
     adapter_id: str
-    preconditions: tuple[str, ...]
-    postconditions: tuple[str, ...]
-    test_ids: tuple[str, ...]
     requires_live: bool = True
     mode: ExecutionMode | None = None
 
 
 def _adapter(
-    route: str,
-    *,
-    preconditions: tuple[str, ...] = ("compatible_version",),
-    postconditions: tuple[str, ...] = ("bridge_response",),
-    requires_live: bool = True,
-    mode: ExecutionMode | None = None,
+    route: str, *, requires_live: bool = True, mode: ExecutionMode | None = None
 ) -> tuple[str, AdapterSpec]:
-    contract_test = (
-        "tests/test_mcp_contract.py::test_mcp_lists_expected_tools_and_resources"
-        if route.startswith("host.")
-        else "tests/test_handler_registry.py::test_bridge_handler_modules_register_structured_routes"
-    )
-    return (
-        route,
-        AdapterSpec(
-            adapter_id=f"cascadeur_2026_1.{route}",
-            preconditions=preconditions,
-            postconditions=postconditions,
-            # These are resolvable pytest node IDs. Live validation is deliberately
-            # absent until a version-pinned fixture is committed and executed.
-            test_ids=(contract_test,),
-            requires_live=requires_live,
-            mode=mode,
-        ),
-    )
+    return route, AdapterSpec(adapter_id=f"cascadeur_2026_1.{route}", requires_live=requires_live, mode=mode)
 
 
 ADAPTER_SPECS = dict(
@@ -348,275 +272,112 @@ ADAPTER_SPECS = dict(
         _adapter("host.feature_describe", requires_live=False),
         # Dispatchers reach Cascadeur: they need live evidence from a concrete
         # bound command or UI file flow, not just the host binding contract.
-        _adapter("host.action_dispatcher", postconditions=("registered_action_binding",)),
-        _adapter("host.ui_flow_prepare", postconditions=("registered_uia_flow_token",)),
-        _adapter("host.inventory_refresh", postconditions=("schema_counts", "feature_registry")),
-        _adapter("system.status", postconditions=("scene_identity", "runtime_tools")),
-        _adapter("system.logs", postconditions=("bounded_tail",), mode=ExecutionMode.NATIVE),
-        _adapter(
-            "system.view_mode",
-            preconditions=("active_viewport", "known_viewport_mode"),
-            postconditions=("viewport_mode_equals_request",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter("scene.summary", postconditions=("scene_revision",)),
-        _adapter("scene.objects", postconditions=("pagination_contract",)),
-        _adapter("scene.new", postconditions=("new_scene_identity",)),
-        _adapter("scene.open", postconditions=("stable_scene_path",)),
-        _adapter("scene.save", postconditions=("save_completed",)),
-        _adapter("scene.save_as", postconditions=("output_file", "nonzero_bytes")),
-        _adapter("scene.close", postconditions=("tab_absent",)),
-        _adapter("scene.list", postconditions=("tab_catalog",)),
-        _adapter("scene.activate", postconditions=("tab_active",)),
-        _adapter("scene.validate", postconditions=("validation_report",)),
-        _adapter("io.import_fbx", postconditions=("scene_changed",)),
-        _adapter("io.export_fbx", postconditions=("output_file", "nonzero_bytes")),
-        _adapter("io.import_dae", postconditions=("scene_changed", "new_objects"), mode=ExecutionMode.NATIVE),
-        _adapter("io.export_dae", postconditions=("output_file", "nonzero_bytes"), mode=ExecutionMode.NATIVE),
-        _adapter("io.import_audio", postconditions=("audio_behaviour_count_increased",), mode=ExecutionMode.NATIVE),
-        _adapter(
-            "io.import_usd", postconditions=("exact_file_dialog", "scene_revision_changed"), mode=ExecutionMode.UIA
-        ),
-        _adapter(
-            "io.export_usd",
-            postconditions=("exact_file_dialog", "output_file", "nonzero_bytes"),
-            mode=ExecutionMode.UIA,
-        ),
-        _adapter(
-            "io.import_glb",
-            postconditions=("exact_options_window", "exact_file_dialog", "scene_revision_changed"),
-            mode=ExecutionMode.UIA,
-        ),
-        _adapter(
-            "io.import_gltf",
-            postconditions=("exact_options_window", "exact_file_dialog", "scene_revision_changed"),
-            mode=ExecutionMode.UIA,
-        ),
-        _adapter(
-            "io.import_vrm",
-            postconditions=("exact_options_window", "exact_file_dialog", "scene_revision_changed"),
-            mode=ExecutionMode.UIA,
-        ),
-        _adapter(
-            "io.export_glb",
-            postconditions=("exact_options_window", "exact_file_dialog", "output_file", "nonzero_bytes"),
-            mode=ExecutionMode.UIA,
-        ),
-        _adapter(
-            "io.export_gltf",
-            postconditions=("exact_options_window", "exact_file_dialog", "output_file", "nonzero_bytes"),
-            mode=ExecutionMode.UIA,
-        ),
-        _adapter("timeline.set_frame", postconditions=("frame_equals_requested",)),
-        _adapter("timeline.get", postconditions=("unclamped_frame",)),
-        _adapter("animation.transform_get", postconditions=("transform_payload",)),
-        _adapter("animation.transform_set", postconditions=("transform_equals_requested",)),
-        _adapter("selection.get", postconditions=("selection_payload",)),
-        _adapter("selection.set", postconditions=("selection_equals_requested",)),
-        _adapter("selection.add", postconditions=("selection_contains_requested",)),
-        _adapter("selection.remove", postconditions=("selection_excludes_requested",)),
-        _adapter("selection.filter", postconditions=("filter_matches",)),
-        _adapter("object.create", postconditions=("object_present",)),
-        _adapter("object.parent", postconditions=("parent_equals_requested",)),
-        _adapter("object.unparent", postconditions=("parent_is_null",)),
-        _adapter("object.hierarchy", postconditions=("acyclic_parent_graph",)),
-        _adapter("object.properties", postconditions=("object_metadata",)),
-        _adapter("object.behaviors", postconditions=("behavior_schema",)),
-        _adapter("object.rename", postconditions=("name_equals_requested",)),
-        _adapter("layer.list", postconditions=("layer_payload",)),
-        _adapter("layer.create", postconditions=("layer_present",)),
-        _adapter("layer.delete", postconditions=("layer_absent",)),
-        _adapter("layer.visibility", postconditions=("visibility_equals_requested",)),
-        _adapter("layer.lock", postconditions=("lock_equals_requested",)),
-        _adapter("layer.folder", postconditions=("folder_structure_equals_requested",)),
-        _adapter(
-            "timeline.range",
-            preconditions=("valid_frame_interval", "existing_layers"),
-            postconditions=("selected_interval_equals_requested",),
-        ),
-        _adapter("animation.key_list", postconditions=("key_payload",)),
-        _adapter("animation.key_add", postconditions=("key_present",)),
-        _adapter("animation.key_delete", postconditions=("key_absent",)),
-        _adapter("animation.interpolation_set", postconditions=("interpolation_equals_requested",)),
-        _adapter("animation.tangent_set", postconditions=("tangent_mode_equals_requested",)),
-        _adapter("animation.graph_query", postconditions=("section_payload",)),
-        _adapter(
-            "animation.cycle_query",
-            preconditions=("existing_layers", "valid_frame_interval"),
-            postconditions=("normalized_cycle_catalog",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "editing.mirror",
-            preconditions=("box_controller_ids", "valid_mirror_plane", "valid_frame_or_interval"),
-            postconditions=("target_transform_fingerprint_changed",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter("render.viewport_state", postconditions=("viewport_payload",), mode=ExecutionMode.NATIVE),
-        _adapter("render.camera_catalog", postconditions=("camera_payload",), mode=ExecutionMode.NATIVE),
-        _adapter("render.camera_view", postconditions=("camera_equals_requested",), mode=ExecutionMode.NATIVE),
-        _adapter("render.camera_activate", postconditions=("camera_active",), mode=ExecutionMode.NATIVE),
-        _adapter("render.camera_create", postconditions=("new_camera_objects",), mode=ExecutionMode.NATIVE),
-        _adapter("render.camera_aim", postconditions=("new_camera_rig_objects",), mode=ExecutionMode.NATIVE),
-        _adapter("render.light_point", postconditions=("point_light_count_increased",), mode=ExecutionMode.NATIVE),
-        _adapter("render.light_spot", postconditions=("spot_light_count_increased",), mode=ExecutionMode.NATIVE),
-        _adapter("render.viewport_capture", postconditions=("output_file", "nonzero_bytes"), mode=ExecutionMode.NATIVE),
-        _adapter("render.image", postconditions=("output_file", "nonzero_bytes"), mode=ExecutionMode.NATIVE),
-        _adapter("io.export_image", postconditions=("output_file", "nonzero_bytes"), mode=ExecutionMode.NATIVE),
-        _adapter(
-            "tool.AutoPosingTool",
-            preconditions=("selected_character_controllers",),
-            postconditions=("scene_revision_changed",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter("generation.state", postconditions=("generation_precondition_report",), mode=ExecutionMode.NATIVE),
-        _adapter(
-            "generation.inbetweening",
-            preconditions=("pro_license", "selected_timeline_interval", "two_keyframes", "standard_humanoid_rig"),
-            postconditions=("scene_revision_changed",),
-            mode=ExecutionMode.ACTION,
-        ),
-        _adapter(
-            "generation.root_motion",
-            preconditions=("selected_timeline_interval", "two_keyframes", "standard_humanoid_rig"),
-            postconditions=("scene_revision_changed",),
-            mode=ExecutionMode.ACTION,
-        ),
-        _adapter(
-            "generation.unbaking",
-            preconditions=("selected_character_layers", "selected_timeline_interval"),
-            postconditions=("scene_revision_changed",),
-            mode=ExecutionMode.ACTION,
-        ),
-        _adapter(
-            "physics.auto_state",
-            preconditions=("scene",),
-            postconditions=("autophysics_prerequisite_report",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "physics.auto_enable",
-            preconditions=("center_of_mass", "animation_at_least_three_frames"),
-            postconditions=("physics_assistant_action_dispatched",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "tool.AutoPhysicsTool",
-            preconditions=("working_auto_physics", "selected_center_of_mass"),
-            postconditions=("scene_revision_changed",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter("physics.state", postconditions=("physics_inventory",), mode=ExecutionMode.NATIVE),
-        _adapter(
-            "physics.center_of_mass",
-            preconditions=("selected_rigid_bodies",),
-            postconditions=("center_of_mass_count_increased",),
-            mode=ExecutionMode.ACTION,
-        ),
-        _adapter(
-            "physics.ballistic",
-            preconditions=("center_of_mass", "selected_timeline_interval"),
-            postconditions=("persisted_ballistic_count_increased",),
-            mode=ExecutionMode.ACTION,
-        ),
-        _adapter(
-            "physics.constraint_transform",
-            preconditions=("driver_and_constrained_transform",),
-            postconditions=("constraint_count_increased",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "physics.constraint_point",
-            preconditions=("driver_transform", "point_controllers"),
-            postconditions=("constraint_count_increased",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "physics.collision_create",
-            preconditions=("target_objects",),
-            postconditions=("collision_count_increased",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "physics.collision_delete",
-            preconditions=("target_objects_with_collision_behaviours",),
-            postconditions=("target_collision_behaviours_absent",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter("rig.state", postconditions=("rig_inventory",), mode=ExecutionMode.NATIVE),
-        _adapter(
-            "rig.constraint_drivers",
-            postconditions=("constraint_driver_catalog", "scene_unchanged"),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.mass_set",
-            preconditions=("rigid_bodies", "positive_total_mass"),
-            postconditions=("total_mass_equals_requested",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.joint_create",
-            postconditions=("joint_count_increased_by_one", "created_joint_selected"),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.rig_info_create",
-            preconditions=("unlinked_joint_ids",),
-            postconditions=("rig_info_count_increased_by_one", "related_joints_equal_request"),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.ik_chain_create",
-            preconditions=("ordered_ends_with_attraction_points", "middle_connection_points"),
-            postconditions=("chain_ik_created_on_main_end",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.rig_elements_create",
-            preconditions=("explicit_joint_pairs", "joint_behaviours", "valid_rig_options"),
-            postconditions=("one_technical_links_owner_per_pair", "linked_joints_equal_request"),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.additional_point_create",
-            preconditions=("rig_element_with_technical_links",),
-            postconditions=("one_manual_point_link_added",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.additional_box_create",
-            preconditions=("rig_element_with_technical_links",),
-            postconditions=("one_additional_box_link_added",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.spline_ik_create",
-            preconditions=("two_joint_endpoints", "same_hierarchy_branch", "full_rig_elements"),
-            postconditions=("one_proto_spline_ik_created", "resolved_hierarchy_references_equal"),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "rig.twist",
-            preconditions=("proto_box", "related_twist_joint", "no_rigid_body_on_rig_element"),
-            postconditions=("proto_box_twist_reference_equals_request",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter(
-            "animation.key_reduce",
-            preconditions=("layer_ids", "valid_frame_interval", "positive_every_n"),
-            postconditions=("observed_keys_equal_reduction_plan",),
-            mode=ExecutionMode.NATIVE,
-        ),
-        _adapter("system.undo", postconditions=("scene_revision_changed",)),
-        _adapter("system.redo", postconditions=("scene_revision_changed",)),
-        _adapter("system.action_invoke", postconditions=("declared_postcondition",)),
-        _adapter("system.csc_query", postconditions=("json_safe_result",)),
-        _adapter("system.csc_mutate", postconditions=("registered_mutation", "scene_revision_changed")),
-        _adapter("system.developer_execute_python", postconditions=("policy_enabled",)),
+        _adapter("host.action_dispatcher"),
+        _adapter("host.ui_flow_prepare"),
+        _adapter("host.inventory_refresh"),
+        _adapter("system.status"),
+        _adapter("system.logs", mode=ExecutionMode.NATIVE),
+        _adapter("system.view_mode", mode=ExecutionMode.NATIVE),
+        _adapter("scene.summary"),
+        _adapter("scene.objects"),
+        _adapter("scene.new"),
+        _adapter("scene.open"),
+        _adapter("scene.save"),
+        _adapter("scene.save_as"),
+        _adapter("scene.close"),
+        _adapter("scene.list"),
+        _adapter("scene.activate"),
+        _adapter("scene.validate"),
+        _adapter("io.import_fbx"),
+        _adapter("io.export_fbx"),
+        _adapter("io.import_dae", mode=ExecutionMode.NATIVE),
+        _adapter("io.export_dae", mode=ExecutionMode.NATIVE),
+        _adapter("io.import_audio", mode=ExecutionMode.NATIVE),
+        _adapter("io.import_usd", mode=ExecutionMode.UIA),
+        _adapter("io.export_usd", mode=ExecutionMode.UIA),
+        _adapter("io.import_glb", mode=ExecutionMode.UIA),
+        _adapter("io.import_gltf", mode=ExecutionMode.UIA),
+        _adapter("io.import_vrm", mode=ExecutionMode.UIA),
+        _adapter("io.export_glb", mode=ExecutionMode.UIA),
+        _adapter("io.export_gltf", mode=ExecutionMode.UIA),
+        _adapter("timeline.set_frame"),
+        _adapter("timeline.get"),
+        _adapter("animation.transform_get"),
+        _adapter("animation.transform_set"),
+        _adapter("selection.get"),
+        _adapter("selection.set"),
+        _adapter("selection.add"),
+        _adapter("selection.remove"),
+        _adapter("selection.filter"),
+        _adapter("object.create"),
+        _adapter("object.parent"),
+        _adapter("object.unparent"),
+        _adapter("object.hierarchy"),
+        _adapter("object.properties"),
+        _adapter("object.behaviors"),
+        _adapter("object.rename"),
+        _adapter("layer.list"),
+        _adapter("layer.create"),
+        _adapter("layer.delete"),
+        _adapter("layer.visibility"),
+        _adapter("layer.lock"),
+        _adapter("layer.folder"),
+        _adapter("timeline.range"),
+        _adapter("animation.key_list"),
+        _adapter("animation.key_add"),
+        _adapter("animation.key_delete"),
+        _adapter("animation.interpolation_set"),
+        _adapter("animation.tangent_set"),
+        _adapter("animation.graph_query"),
+        _adapter("animation.cycle_query", mode=ExecutionMode.NATIVE),
+        _adapter("editing.mirror", mode=ExecutionMode.NATIVE),
+        _adapter("render.viewport_state", mode=ExecutionMode.NATIVE),
+        _adapter("render.camera_catalog", mode=ExecutionMode.NATIVE),
+        _adapter("render.camera_view", mode=ExecutionMode.NATIVE),
+        _adapter("render.camera_activate", mode=ExecutionMode.NATIVE),
+        _adapter("render.camera_create", mode=ExecutionMode.NATIVE),
+        _adapter("render.camera_aim", mode=ExecutionMode.NATIVE),
+        _adapter("render.light_point", mode=ExecutionMode.NATIVE),
+        _adapter("render.light_spot", mode=ExecutionMode.NATIVE),
+        _adapter("render.viewport_capture", mode=ExecutionMode.NATIVE),
+        _adapter("render.image", mode=ExecutionMode.NATIVE),
+        _adapter("io.export_image", mode=ExecutionMode.NATIVE),
+        _adapter("tool.AutoPosingTool", mode=ExecutionMode.NATIVE),
+        _adapter("generation.state", mode=ExecutionMode.NATIVE),
+        _adapter("generation.inbetweening", mode=ExecutionMode.ACTION),
+        _adapter("generation.root_motion", mode=ExecutionMode.ACTION),
+        _adapter("generation.unbaking", mode=ExecutionMode.ACTION),
+        _adapter("physics.auto_state", mode=ExecutionMode.NATIVE),
+        _adapter("physics.auto_enable", mode=ExecutionMode.NATIVE),
+        _adapter("tool.AutoPhysicsTool", mode=ExecutionMode.NATIVE),
+        _adapter("physics.state", mode=ExecutionMode.NATIVE),
+        _adapter("physics.center_of_mass", mode=ExecutionMode.ACTION),
+        _adapter("physics.ballistic", mode=ExecutionMode.ACTION),
+        _adapter("physics.constraint_transform", mode=ExecutionMode.NATIVE),
+        _adapter("physics.constraint_point", mode=ExecutionMode.NATIVE),
+        _adapter("physics.collision_create", mode=ExecutionMode.NATIVE),
+        _adapter("physics.collision_delete", mode=ExecutionMode.NATIVE),
+        _adapter("rig.state", mode=ExecutionMode.NATIVE),
+        _adapter("rig.constraint_drivers", mode=ExecutionMode.NATIVE),
+        _adapter("rig.mass_set", mode=ExecutionMode.NATIVE),
+        _adapter("rig.joint_create", mode=ExecutionMode.NATIVE),
+        _adapter("rig.rig_info_create", mode=ExecutionMode.NATIVE),
+        _adapter("rig.ik_chain_create", mode=ExecutionMode.NATIVE),
+        _adapter("rig.rig_elements_create", mode=ExecutionMode.NATIVE),
+        _adapter("rig.additional_point_create", mode=ExecutionMode.NATIVE),
+        _adapter("rig.additional_box_create", mode=ExecutionMode.NATIVE),
+        _adapter("rig.spline_ik_create", mode=ExecutionMode.NATIVE),
+        _adapter("rig.twist", mode=ExecutionMode.NATIVE),
+        _adapter("animation.key_reduce", mode=ExecutionMode.NATIVE),
+        _adapter("system.undo"),
+        _adapter("system.redo"),
+        _adapter("system.action_invoke"),
+        _adapter("system.csc_query"),
+        _adapter("system.csc_mutate"),
+        _adapter("system.developer_execute_python"),
     ]
     + [
-        _adapter(operation, postconditions=bindings[0].postconditions, mode=bindings[0].mode)
+        _adapter(operation, mode=bindings[0].mode)
         for operation, bindings in sorted(BY_OPERATION.items())
     ]
 )
@@ -638,7 +399,8 @@ def _record(
     available_dependencies: set[str] = frozenset(),
 ) -> FeatureRecord:
     adapter = ADAPTER_SPECS.get(spec.route)
-    product = PRODUCT_CATALOG.by_id.get(spec.feature_id)
+    # Every core spec has a catalog entry (tests/test_inventory.py pins this).
+    product = PRODUCT_CATALOG.by_id[spec.feature_id]
     tool_missing = spec.route.startswith("tool.") and spec.route.removeprefix("tool.") not in available_tools
     command_missing = (
         spec.route.startswith("command.") and spec.route.removeprefix("command.") not in available_commands
@@ -652,7 +414,7 @@ def _record(
     if version_name != PRODUCT_CATALOG.supported_build:
         state = CapabilityState.UNSUPPORTED_VERSION
         mode = ExecutionMode.GATED
-    elif product and product.implementation_status == "unsupported":
+    elif product.implementation_status == "unsupported":
         state = CapabilityState.UNSUPPORTED
         mode = ExecutionMode.GATED
     elif spec.license == "pro" and license_name.lower() != "pro":
@@ -681,7 +443,7 @@ def _record(
     verification = VerificationState.DISCOVERED
     evidence_kind = "none"
     last_verified_version = None
-    if (product and product.implementation_status == "unsupported") or dependency:
+    if product.implementation_status == "unsupported" or dependency:
         verification = VerificationState.GATED
         evidence_kind = "gate"
     elif adapter:
@@ -704,38 +466,38 @@ def _record(
         route=spec.route,
         test_id=(
             product.contract_test_ids[0]
-            if product and product.contract_test_ids
+            if product.contract_test_ids
             else "tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"
         ),
         test_ids=(
             list(product.contract_test_ids)
-            if product and product.contract_test_ids
+            if product.contract_test_ids
             else ["tests/test_inventory.py::test_product_catalog_core_matches_registry_contract"]
         ),
         adapter_id=adapter.adapter_id if adapter else None,
-        preconditions=list(product.preconditions) if product else (list(adapter.preconditions) if adapter else []),
-        postconditions=list(product.postconditions) if product else (list(adapter.postconditions) if adapter else []),
+        preconditions=list(product.preconditions),
+        postconditions=list(product.postconditions),
         verification=verification,
         evidence_kind=evidence_kind,
         last_verified_version=last_verified_version,
         requires_scene=spec.requires_scene,
-        destructive=product.mutation if product else spec.destructive,
+        destructive=product.mutation,
         license=spec.license,  # type: ignore[arg-type]
         dependency=required_dependency if dependency is None and required_dependency else dependency,
-        source=product.source_url if product else "https://cascadeur.com/help/tools",
-        source_url=product.source_url if product else None,
-        public_action=product.action if product else None,
-        operation_id=product.operation if product else None,
-        fixture_id=product.fixture_id if product else None,
-        arguments=dict(product.arguments) if product else {},
-        fixed_arguments=dict(product.fixed_arguments) if product else {},
-        mutation=product.mutation if product else spec.destructive,
+        source=product.source_url,
+        source_url=product.source_url,
+        public_action=product.action,
+        operation_id=product.operation,
+        fixture_id=product.fixture_id,
+        arguments=dict(product.arguments),
+        fixed_arguments=dict(product.fixed_arguments),
+        mutation=product.mutation,
         contract_status=(
             "bound"
             if adapter
             else (
                 "gate"
-                if dependency or (product and product.implementation_status == "unsupported")
+                if dependency or product.implementation_status == "unsupported"
                 else "not_implemented"
             )
         ),

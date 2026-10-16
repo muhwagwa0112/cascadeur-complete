@@ -139,9 +139,14 @@ route, action, operation, pre/postconditions, fixed_arguments, `contract_test_id
 
 **Phase 1 — 버그 수정** (§5, 항목별 커밋, 1번은 사용자 결정 후)
 
-**Phase 2 — 호스트 정리**
-- 카탈로그 JSON 을 단일 진실원으로: `CORE_FEATURES`/`ADAPTER_SPECS` 에서 JSON 과 겹치는 필드 제거, fallback read-only 집합 제거.
-- `CascadeurService` 분해: `FeatureGate`(상태 게이트 공용화), `ChangeFlow`(prepare/commit/rollback), `HostPostconditions`(연산별 테이블), `UiFileFlow`.
+**Phase 2 — 호스트 정리** — 진행 중
+- ~~죽은 코드~~ — 완료: `execute`/`batch` 의 mutation 거부 뒤 도달 불가 분기, 쓰이지 않던 `confirmation_token` 인자
+  (`operation_batch` 스키마에서도 제거), `refresh_inventory` 이중 rebuild, `recover_stale_claims`.
+- ~~상태 게이트 공용화~~ — 완료: `_feature_gate_error` 를 `execute`·`prepare_change` 가 공유.
+- 카탈로그 JSON 을 단일 진실원으로: ~~`CoreSpec.destructive`, `AdapterSpec` 의 pre/postconditions·test_ids 제거~~ — 완료
+  (전후 레지스트리 출력 SHA-256 동일). 남은 것: `CORE_FEATURES` 의 route/license/scene 중복, fallback read-only 집합.
+- `CascadeurService` 분해: `ChangeFlow`(prepare/commit/rollback), `HostPostconditions`(연산별 테이블), `UiFileFlow`.
+- `batch` 는 기능 상태 게이트를 거치지 않는다(바인딩만 검사) — 공용 게이트 적용 여부 결정 필요.
 - `server.py` 에 공용 에러/결과 헬퍼, 액션 맵을 데이터로.
 - `cleanup_workflow` 가 `service` 경유로 실행하도록.
 
