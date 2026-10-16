@@ -186,3 +186,20 @@ def test_windows_version_resource_matches_project_version():
     assert 'version = "0.1.0"' in pyproject
     assert "StringStruct('ProductVersion', '0.1.0')" in version_info
     assert "prodvers=(0, 1, 0, 0)" in version_info
+
+
+def test_service_loads_the_schema_refreshed_into_its_own_runtime_root(tmp_path, monkeypatch):
+    from cascadeur_complete.paths import RuntimePaths
+    from cascadeur_complete.service import CascadeurService
+
+    monkeypatch.setenv("CASCADEUR_MCP_ROOT", str(tmp_path / "custom-root"))
+    paths = RuntimePaths.discover()
+    paths.ensure()
+    (paths.state / "csc_schema.json").write_text('{"marker": "refreshed"}', encoding="utf-8")
+    assert load_csc_schema()["marker"] == "refreshed"
+
+    class _NoBridge:
+        def lingering_until(self):
+            return None
+
+    assert CascadeurService(paths, client=_NoBridge()).schema == {"marker": "refreshed"}

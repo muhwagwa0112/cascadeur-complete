@@ -84,7 +84,7 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         self.jobs = JobStore(self.paths)
         self.jobs.recover_incomplete()
         self.installation = discover_installation()
-        self.schema = load_csc_schema()
+        self.schema = load_csc_schema(state=self.paths.state)
         self.commands = discover_commands()
         self._live_tools = list(BASELINE_TOOLS)
         self._license_name, self._license_source, self._license_observed_at = self._cached_license()

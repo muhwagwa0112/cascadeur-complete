@@ -77,11 +77,24 @@ class RuntimePaths:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CSC_SCHEMA_CANDIDATES = (
-    canonical_local_app_data() / "CascadeurMCP" / "cascadeur-complete" / "state" / "csc_schema.json",
+BUNDLED_CSC_SCHEMAS = (
     PROJECT_ROOT / "inventory" / "csc_schema.json",
     Path(__file__).resolve().parent / "data" / "csc_schema.json",
 )
+
+
+def csc_schema_candidates(state: Path | None = None) -> tuple[Path, ...]:
+    """The schema refreshed into the runtime state first, then the bundled baselines.
+
+    Resolved at call time so CASCADEUR_MCP_ROOT (and an explicit runtime root)
+    is honoured; inventory_refresh writes to ``<root>/state/csc_schema.json``.
+    """
+    if state is None:
+        try:
+            state = RuntimePaths.discover().state
+        except RuntimeError:  # neither USERPROFILE nor LOCALAPPDATA is set
+            return BUNDLED_CSC_SCHEMAS
+    return (state / "csc_schema.json", *BUNDLED_CSC_SCHEMAS)
 CASCADEUR_EXE = Path(os.environ.get("CASCADEUR_EXE", r"C:\Program Files\Cascadeur\cascadeur.exe"))
 CASCADEUR_SCRIPTS = Path(r"C:\Program Files\Cascadeur\resources\scripts\python")
 CASCADEUR_SAMPLES = Path(r"C:\Program Files\Cascadeur\samples")

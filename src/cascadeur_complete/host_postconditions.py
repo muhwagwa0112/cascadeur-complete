@@ -101,14 +101,13 @@ VIEW_OPERATIONS = frozenset(
 VIEW_CHANGE_FRACTION = 0.002
 
 
-# Operations whose success is a new or replaced file at arguments["path"].
+# Operations whose success is a new or replaced file at arguments["path"]. Video
+# output only runs as a UI file flow, which waits for its file in _execute_ui_file_flow.
 OUTPUT_OPERATIONS = frozenset(
     {
         "render.viewport_capture",
         "render.image",
-        "render.video",
         "io.export_image",
-        "io.export_video",
         "io.export_fbx",
         "io.export_dae",
         "scene.save_as",
@@ -273,7 +272,6 @@ class HostPostconditionsMixin:
             str(record.operation.arguments["path"]),
             observed.timeout,
             observed.output,
-            stable_seconds=3.0 if record.operation.name == "render.video" else 0.0,
         )
 
     def _verify_settled_rotations(self, record, result: ResultEnvelope) -> int:

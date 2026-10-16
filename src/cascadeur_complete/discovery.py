@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .feature_registry import build_registry, registry_json
-from .paths import CASCADEUR_EXE, CASCADEUR_SCRIPTS, CSC_SCHEMA_CANDIDATES, RuntimePaths
+from .paths import CASCADEUR_EXE, CASCADEUR_SCRIPTS, RuntimePaths, csc_schema_candidates
 from .product_catalog import PRODUCT_CATALOG
 
 BASELINE_TOOLS = [
@@ -107,8 +107,8 @@ def discover_installation() -> dict[str, Any]:
     }
 
 
-def load_csc_schema(path: Path | None = None) -> dict[str, Any]:
-    candidates = (path,) if path else CSC_SCHEMA_CANDIDATES
+def load_csc_schema(path: Path | None = None, *, state: Path | None = None) -> dict[str, Any]:
+    candidates = (path,) if path else csc_schema_candidates(state)
     for candidate in candidates:
         if candidate and candidate.is_file():
             return json.loads(candidate.read_text(encoding="utf-8"))
@@ -180,7 +180,7 @@ def schema_counts(schema: dict[str, Any]) -> dict[str, int]:
 def write_inventory(paths: RuntimePaths | None = None) -> dict[str, Any]:
     runtime = paths or RuntimePaths.discover()
     runtime.ensure()
-    schema = load_csc_schema()
+    schema = load_csc_schema(state=runtime.state)
     commands = discover_commands()
     records = build_registry(schema, commands, BASELINE_TOOLS)
     tmp = runtime.registry.with_suffix(".tmp")
