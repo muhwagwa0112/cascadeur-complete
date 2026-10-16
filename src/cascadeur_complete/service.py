@@ -668,6 +668,57 @@ class CascadeurService:
             ),
         }
 
+    def _feature_gate_error(
+        self, feature: FeatureRecord, operation_name: str, arguments: dict[str, Any] | None
+    ) -> ResultEnvelope | None:
+        """Refuse a feature whose state cannot run, or an operation not bound to it (execute and prepare)."""
+        if operation_name in {
+            "system.csc_query",
+            "system.csc_mutate",
+            "system.tool_call",
+            "system.developer_execute_python",
+        }:
+            binding_error = self._operation_binding_error(feature, operation_name, arguments)
+            if binding_error:
+                return self._host_error(feature.id, ErrorCode.INVALID_REQUEST, binding_error)
+        if feature.state == CapabilityState.LICENSE_GATED:
+            return self._host_error(
+                feature.id, ErrorCode.LICENSE_GATED, f"{feature.name} requires {feature.license} license"
+            )
+        if feature.state == CapabilityState.MISSING_DEPENDENCY:
+            return self._host_error(
+                feature.id,
+                ErrorCode.DEPENDENCY_MISSING,
+                feature.dependency or "Required integration is unavailable",
+                mode=ExecutionMode.EXTERNAL,
+            )
+        if feature.state == CapabilityState.UNSUPPORTED_VERSION:
+            return self._host_error(
+                feature.id,
+                ErrorCode.UNSUPPORTED_VERSION,
+                f"No verified adapter for installed Cascadeur {self.installation.get('version') or 'unknown'}",
+                mode=ExecutionMode.GATED,
+            )
+        if feature.state == CapabilityState.UI_ONLY and not feature.adapter_id:
+            return self._host_error(
+                feature.id,
+                ErrorCode.UI_LOCKED,
+                f"{feature.name} is identified as UI-only in Cascadeur {self._version_name}; "
+                f"no postcondition-safe adapter is available (route: {feature.route})",
+                mode=ExecutionMode.UIA,
+            )
+        if feature.state == CapabilityState.UNHEALTHY and not feature.adapter_id:
+            return self._host_error(
+                feature.id,
+                ErrorCode.POSTCONDITION_FAILED,
+                "Capability was inventoried but its dedicated execution adapter is not implemented",
+                mode=feature.execution_mode,
+            )
+        binding_error = self._operation_binding_error(feature, operation_name, arguments)
+        if binding_error:
+            return self._host_error(feature.id, ErrorCode.INVALID_REQUEST, binding_error)
+        return None
+
     def _operation_binding_error(
         self, feature: FeatureRecord, operation_name: str, arguments: dict[str, Any] | None = None
     ) -> str | None:
@@ -881,51 +932,9 @@ class CascadeurService:
             feature = self.feature(feature_id)
         except KeyError:
             return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, "Unknown feature id")
-        if operation_name in {
-            "system.csc_query",
-            "system.csc_mutate",
-            "system.tool_call",
-            "system.developer_execute_python",
-        }:
-            binding_error = self._operation_binding_error(feature, operation_name, arguments)
-            if binding_error:
-                return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error)
-        if feature.state == CapabilityState.LICENSE_GATED:
-            return self._host_error(
-                feature_id, ErrorCode.LICENSE_GATED, f"{feature.name} requires {feature.license} license"
-            )
-        if feature.state == CapabilityState.MISSING_DEPENDENCY:
-            return self._host_error(
-                feature_id,
-                ErrorCode.DEPENDENCY_MISSING,
-                feature.dependency or "Required integration is unavailable",
-                mode=ExecutionMode.EXTERNAL,
-            )
-        if feature.state == CapabilityState.UNSUPPORTED_VERSION:
-            return self._host_error(
-                feature_id,
-                ErrorCode.UNSUPPORTED_VERSION,
-                f"No verified adapter for installed Cascadeur {self.installation.get('version') or 'unknown'}",
-                mode=ExecutionMode.GATED,
-            )
-        if feature.state == CapabilityState.UI_ONLY and not feature.adapter_id:
-            return self._host_error(
-                feature_id,
-                ErrorCode.UI_LOCKED,
-                f"{feature.name} is identified as UI-only in Cascadeur {self._version_name}; "
-                f"no postcondition-safe adapter is available (route: {feature.route})",
-                mode=ExecutionMode.UIA,
-            )
-        if feature.state == CapabilityState.UNHEALTHY and not feature.adapter_id:
-            return self._host_error(
-                feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                "Capability was inventoried but its dedicated execution adapter is not implemented",
-                mode=feature.execution_mode,
-            )
-        binding_error = self._operation_binding_error(feature, operation_name, arguments)
-        if binding_error:
-            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error)
+        gate_error = self._feature_gate_error(feature, operation_name, arguments)
+        if gate_error:
+            return gate_error
         arguments = self._bound_arguments(feature_id, arguments)
         if feature.requires_scene and scene_id is None and self._live_scene_id:
             scene_id = self._live_scene_id
@@ -1043,51 +1052,9 @@ class CascadeurService:
         if build_error:
             return build_error.model_dump(mode="json")
         feature = self.feature(feature_id)
-        if operation_name in {
-            "system.csc_query",
-            "system.csc_mutate",
-            "system.tool_call",
-            "system.developer_execute_python",
-        }:
-            binding_error = self._operation_binding_error(feature, operation_name, arguments)
-            if binding_error:
-                return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
-        if feature.state == CapabilityState.LICENSE_GATED:
-            return self._host_error(
-                feature_id, ErrorCode.LICENSE_GATED, f"{feature.name} requires {feature.license} license"
-            ).model_dump(mode="json")
-        if feature.state == CapabilityState.MISSING_DEPENDENCY:
-            return self._host_error(
-                feature_id,
-                ErrorCode.DEPENDENCY_MISSING,
-                feature.dependency or "Required integration is unavailable",
-                mode=ExecutionMode.EXTERNAL,
-            ).model_dump(mode="json")
-        if feature.state == CapabilityState.UNSUPPORTED_VERSION:
-            return self._host_error(
-                feature_id,
-                ErrorCode.UNSUPPORTED_VERSION,
-                f"No verified adapter for installed Cascadeur {self.installation.get('version') or 'unknown'}",
-                mode=ExecutionMode.GATED,
-            ).model_dump(mode="json")
-        if feature.state == CapabilityState.UI_ONLY and not feature.adapter_id:
-            return self._host_error(
-                feature_id,
-                ErrorCode.UI_LOCKED,
-                f"{feature.name} is identified as UI-only in Cascadeur {self._version_name}; "
-                f"no postcondition-safe adapter is available (route: {feature.route})",
-                mode=ExecutionMode.UIA,
-            ).model_dump(mode="json")
-        if feature.state == CapabilityState.UNHEALTHY and not feature.adapter_id:
-            return self._host_error(
-                feature_id,
-                ErrorCode.POSTCONDITION_FAILED,
-                "Capability was inventoried but its dedicated execution adapter is not implemented",
-                mode=feature.execution_mode,
-            ).model_dump(mode="json")
-        binding_error = self._operation_binding_error(feature, operation_name, arguments)
-        if binding_error:
-            return self._host_error(feature_id, ErrorCode.INVALID_REQUEST, binding_error).model_dump(mode="json")
+        gate_error = self._feature_gate_error(feature, operation_name, arguments)
+        if gate_error:
+            return gate_error.model_dump(mode="json")
         arguments = self._bound_arguments(feature_id, arguments)
         if operation_name == "timeline.playback":
             moving = self._playback_moving()
