@@ -70,9 +70,7 @@ def verify_blender_fbx(path: str, timeout: float = 240.0) -> dict:
     )
     line = next((item for item in completed.stdout.splitlines() if item.startswith(_MARKER)), None)
     if line is None:
-        raise RuntimeError(
-            "Blender did not report an import result: " + (completed.stderr or completed.stdout)[-1500:]
-        )
+        raise RuntimeError("Blender did not report an import result: " + (completed.stderr or completed.stdout)[-1500:])
     report = json.loads(line[len(_MARKER) :])
     report["executable"] = str(blender)
     return report

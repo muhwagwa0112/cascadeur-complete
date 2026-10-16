@@ -304,6 +304,7 @@ def test_host_postcondition_exception_also_restores_snapshot(tmp_path, monkeypat
     destination = tmp_path / "frame.png"
     prepared = svc.prepare_change("render_image", "render.image", {"path": str(destination)})
     snapshot_id = Path(prepared["backup_path"]).stem
+
     def fail_output(*_args, **_kwargs):
         raise RuntimeError("boom")
 

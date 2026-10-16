@@ -58,9 +58,7 @@ def _live_features():
     return [
         item
         for item in PRODUCT_CATALOG.core_features
-        if item.implementation_status == "implemented"
-        and item.operation
-        and not item.operation.startswith("host.")
+        if item.implementation_status == "implemented" and item.operation and not item.operation.startswith("host.")
     ]
 
 

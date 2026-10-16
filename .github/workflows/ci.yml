@@ -26,6 +26,7 @@ jobs:
         shell: pwsh
         run: |
           uv run ruff check src tests packaging scripts/mcp-smoke.py
+          uv run ruff format --check src tests packaging scripts/mcp-smoke.py
           uv run pytest
           uv run python skills/cascadeur-mcp-workflows/scripts/validate_tool_coverage.py
       - name: Parse release PowerShell

@@ -28,9 +28,8 @@ def test_product_catalog_core_matches_registry_contract():
     assert PRODUCT_CATALOG.supported_build == SUPPORTED_BUILD
     assert len(PRODUCT_CATALOG.core_features) == len(PRODUCT_CATALOG.features) - len(PRODUCT_CATALOG.official_gaps)
     assert {item.id for item in PRODUCT_CATALOG.core_features} == {
-        spec.feature_id for spec in __import__(
-            "cascadeur_complete.feature_registry", fromlist=["CORE_FEATURES"]
-        ).CORE_FEATURES
+        spec.feature_id
+        for spec in __import__("cascadeur_complete.feature_registry", fromlist=["CORE_FEATURES"]).CORE_FEATURES
     }
     assert all(item.source_url.startswith("https://cascadeur.com/") for item in PRODUCT_CATALOG.features)
     assert all(
@@ -163,17 +162,13 @@ def test_registry_json_uses_schema_v3_and_reports_truth_layer_gaps():
         "official_gap_count": len(PRODUCT_CATALOG.official_gaps),
     }
     unbound = [
-        item
-        for item in PRODUCT_CATALOG.features
-        if item.implementation_status in ("not_implemented", "ui_only")
+        item for item in PRODUCT_CATALOG.features if item.implementation_status in ("not_implemented", "ui_only")
     ]
     assert payload["unclassified_count"] == len(unbound)
 
 
 def test_wrong_build_marks_product_and_discovered_inventory_unsupported():
-    records = build_registry(
-        load_csc_schema(), discover_commands(), BASELINE_TOOLS, version_name="2026.1.3.0.99999"
-    )
+    records = build_registry(load_csc_schema(), discover_commands(), BASELINE_TOOLS, version_name="2026.1.3.0.99999")
     assert records
     assert all(record.state.value == "unsupported_version" for record in records)
     assert all(record.execution_mode.value == "Gated" for record in records)

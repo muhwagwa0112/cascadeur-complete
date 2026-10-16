@@ -22,9 +22,7 @@ class SafetyError(ValueError):
     pass
 
 
-def _absolute_local_path(
-    value: str, *, allow_unc_paths: bool = False, allow_device_paths: bool = False
-) -> Path:
+def _absolute_local_path(value: str, *, allow_unc_paths: bool = False, allow_device_paths: bool = False) -> Path:
     raw = value.strip()
     lowered = raw.lower()
     if not raw:
@@ -48,12 +46,8 @@ def _absolute_local_path(
     return resolved
 
 
-def validate_local_input_path(
-    value: str, *, allow_unc_paths: bool = False, allow_device_paths: bool = False
-) -> Path:
-    resolved = _absolute_local_path(
-        value, allow_unc_paths=allow_unc_paths, allow_device_paths=allow_device_paths
-    )
+def validate_local_input_path(value: str, *, allow_unc_paths: bool = False, allow_device_paths: bool = False) -> Path:
+    resolved = _absolute_local_path(value, allow_unc_paths=allow_unc_paths, allow_device_paths=allow_device_paths)
     if not resolved.is_file():
         raise SafetyError("Input file does not exist")
     return resolved
@@ -66,9 +60,7 @@ def validate_local_path(
     allow_unc_paths: bool = False,
     allow_device_paths: bool = False,
 ) -> Path:
-    resolved = _absolute_local_path(
-        value, allow_unc_paths=allow_unc_paths, allow_device_paths=allow_device_paths
-    )
+    resolved = _absolute_local_path(value, allow_unc_paths=allow_unc_paths, allow_device_paths=allow_device_paths)
     if resolved.exists() and not allow_overwrite:
         raise SafetyError("Existing destination requires explicit overwrite confirmation")
     return resolved

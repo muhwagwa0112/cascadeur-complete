@@ -95,6 +95,8 @@ def csc_schema_candidates(state: Path | None = None) -> tuple[Path, ...]:
         except RuntimeError:  # neither USERPROFILE nor LOCALAPPDATA is set
             return BUNDLED_CSC_SCHEMAS
     return (state / "csc_schema.json", *BUNDLED_CSC_SCHEMAS)
+
+
 CASCADEUR_EXE = Path(os.environ.get("CASCADEUR_EXE", r"C:\Program Files\Cascadeur\cascadeur.exe"))
 CASCADEUR_SCRIPTS = Path(r"C:\Program Files\Cascadeur\resources\scripts\python")
 CASCADEUR_SAMPLES = Path(r"C:\Program Files\Cascadeur\samples")

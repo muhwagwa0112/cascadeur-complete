@@ -29,8 +29,7 @@ def test_log_redaction_covers_json_quotes_multiword_and_auth_headers():
         r"scene=C:\Users\Alice\private.casc api_key: xyz trailing metadata",
     ]
     outputs = [
-        redact(line, profile=r"C:\Users\Alice", local_app_data=r"C:\Users\Alice\AppData\Local")
-        for line in inputs
+        redact(line, profile=r"C:\Users\Alice", local_app_data=r"C:\Users\Alice\AppData\Local") for line in inputs
     ]
     combined = "\n".join(outputs)
     assert "sekret-123" not in combined
@@ -75,9 +74,7 @@ def test_log_redaction_covers_json_quotes_multiword_and_auth_headers():
 
 
 def test_log_search_filters_only_after_redaction():
-    source = (
-        ROOT / "cascadeur_side" / "cascadeur_complete" / "handlers" / "system.py"
-    ).read_text(encoding="utf-8")
+    source = (ROOT / "cascadeur_side" / "cascadeur_complete" / "handlers" / "system.py").read_text(encoding="utf-8")
     assert "summarize_log_levels(raw_rows)" in source
     assert '"raw_content_exposed": False' in source
     assert "needle in line.casefold()" not in source
@@ -89,10 +86,10 @@ def test_public_log_summary_never_contains_raw_content():
         "ERROR client_secret: |2",
         "  first-secret",
         "  second-secret",
-        "INFO client_secret = \"\"\"",
+        'INFO client_secret = """',
         "toml-secret-one",
         "toml-secret-two",
-        "\"\"\"",
+        '"""',
     ]
     levels = safety.summarize_log_levels(hostile)
     assert levels == ["ERROR", "OTHER", "OTHER", "INFO", "OTHER", "OTHER", "OTHER"]
@@ -103,16 +100,13 @@ def test_log_tail_read_is_byte_bounded_and_safe_at_truncated_boundary(tmp_path: 
     safety = _load_log_safety()
     log = tmp_path / "cascadeur_log.log"
     log.write_bytes(
-        b"x" * (safety.MAX_LOG_SCAN_BYTES + safety.MAX_LOG_LINE_BYTES + 100)
-        + b"\naccess_token:\n  \"sekret-at-tail\"\n"
+        b"x" * (safety.MAX_LOG_SCAN_BYTES + safety.MAX_LOG_LINE_BYTES + 100) + b'\naccess_token:\n  "sekret-at-tail"\n'
     )
     lines, truncated = safety.read_bounded_log_lines(log)
     redacted = list(safety.redact_log_stream(lines))
     assert truncated is True
     assert "sekret-at-tail" not in "\n".join(redacted)
-    assert sum(len(line.encode("utf-8")) for line in lines) <= (
-        safety.MAX_LOG_SCAN_BYTES + safety.MAX_LOG_LINE_BYTES
-    )
+    assert sum(len(line.encode("utf-8")) for line in lines) <= (safety.MAX_LOG_SCAN_BYTES + safety.MAX_LOG_LINE_BYTES)
 
 
 def test_production_bridge_contains_no_generic_runtime_executor():

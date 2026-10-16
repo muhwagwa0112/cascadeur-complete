@@ -260,9 +260,7 @@ class AdapterSpec:
     mode: ExecutionMode | None = None
 
 
-def _adapter(
-    route: str, *, requires_live: bool = True, mode: ExecutionMode | None = None
-) -> tuple[str, AdapterSpec]:
+def _adapter(route: str, *, requires_live: bool = True, mode: ExecutionMode | None = None) -> tuple[str, AdapterSpec]:
     return route, AdapterSpec(adapter_id=f"cascadeur_2026_1.{route}", requires_live=requires_live, mode=mode)
 
 
@@ -376,10 +374,7 @@ ADAPTER_SPECS = dict(
         _adapter("system.csc_mutate"),
         _adapter("system.developer_execute_python"),
     ]
-    + [
-        _adapter(operation, mode=bindings[0].mode)
-        for operation, bindings in sorted(BY_OPERATION.items())
-    ]
+    + [_adapter(operation, mode=bindings[0].mode) for operation, bindings in sorted(BY_OPERATION.items())]
 )
 
 
@@ -495,11 +490,7 @@ def _record(
         contract_status=(
             "bound"
             if adapter
-            else (
-                "gate"
-                if dependency or product.implementation_status == "unsupported"
-                else "not_implemented"
-            )
+            else ("gate" if dependency or product.implementation_status == "unsupported" else "not_implemented")
         ),
         truth_layer="product",
     )
@@ -686,8 +677,7 @@ def registry_json(records: list[FeatureRecord]) -> str:
         },
         "feature_count": len(records),
         "unclassified_count": sum(
-            item.id in product_ids
-            and (not item.execution_mode or not item.test_ids or item.evidence_kind == "none")
+            item.id in product_ids and (not item.execution_mode or not item.test_ids or item.evidence_kind == "none")
             for item in records
         ),
         "features": [item.model_dump(mode="json") for item in records],

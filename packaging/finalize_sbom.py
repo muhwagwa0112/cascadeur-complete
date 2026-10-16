@@ -53,9 +53,7 @@ def main() -> None:
                 "properties": [{"name": "cascadeur-mcp:bundled", "value": "true"}],
             }
         )
-    component_refs = sorted(
-        item["bom-ref"] for item in components if isinstance(item, dict) and item.get("bom-ref")
-    )
+    component_refs = sorted(item["bom-ref"] for item in components if isinstance(item, dict) and item.get("bom-ref"))
     dependencies = [item for item in payload.get("dependencies", []) if item.get("ref") != root_ref]
     dependencies.append({"ref": root_ref, "dependsOn": component_refs})
     payload["dependencies"] = dependencies

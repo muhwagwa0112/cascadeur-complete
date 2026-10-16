@@ -298,10 +298,7 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         return self._host_error(
             feature_id,
             ErrorCode.UNSUPPORTED_VERSION,
-            (
-                f"Cascadeur {PRODUCT_CATALOG.supported_build} is required; "
-                f"installed build is {self._version_name}"
-            ),
+            (f"Cascadeur {PRODUCT_CATALOG.supported_build} is required; installed build is {self._version_name}"),
             mode=ExecutionMode.GATED,
         )
 
@@ -355,9 +352,7 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         return {
             "allow_unc_paths": bool(policy.get("allow_unc_paths", False)),
             "allow_device_paths": bool(policy.get("allow_device_paths", False)),
-            "require_confirmation_for_overwrite": bool(
-                policy.get("require_confirmation_for_overwrite", True)
-            ),
+            "require_confirmation_for_overwrite": bool(policy.get("require_confirmation_for_overwrite", True)),
         }
 
     def _feature_gate_error(
@@ -745,15 +740,6 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         self._remember_scene_result(result)
         return result
 
-
-
-
-
-
-
-
-
-
     @staticmethod
     def _same_path(left: str | None, right: str | None) -> bool:
         """Compare scene labels: absolute paths by file identity, untitled tabs by name."""
@@ -883,10 +869,6 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         )
         add_postconditions(initial, f"Active scene settled at {target}", "stable_scene_path")
         return initial
-
-
-
-
 
     def csc_mutate_allowed(self, chain: list[dict[str, Any]]) -> bool:
         if not chain:
