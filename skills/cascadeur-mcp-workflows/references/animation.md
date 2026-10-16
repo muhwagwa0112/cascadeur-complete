@@ -10,15 +10,15 @@ Use this reference for poses, transforms, keys, layers, interpolation/tangents, 
 4. `scene_objects` plus `object_read`: controller/object IDs and hierarchy.
 5. `generation_state`: selected layers/interval, key availability, and rig support before generation.
 
-Use `timeline_set_frame` to position and verify the playhead. Do not trust a cached frame value after a scene or tab switch.
+Use `timeline_set_frame_prepare` + `change_commit` to position and verify the playhead. Do not trust a cached frame value after a scene or tab switch.
 
 ## Draft poses and keys
 
 - Read current transforms with `transform_edit(action="get", ids=[...], frame=..., space=...)`.
-- Write position, rotation, or local scale with `transform_edit(action="set", ...)`, passing the latest scene ID/revision.
+- Write position, rotation, or local scale with `transform_edit_prepare(ids=[...], ...)`, then `change_commit`.
 - Rotation input is Euler XYZ **radians**. Convert degrees using `radians = degrees * pi / 180` and keep the convention explicit.
 - Use local space for controller-relative edits; use global space only when the tool action supports it and the intended world-space result is clear.
-- Add or list keys with `key_edit`. Key deletion is protected and must use prepare/commit.
+- List keys with `key_edit`; add or delete them with `key_edit_prepare` + `change_commit`.
 - Re-read transforms and key lists at every edited frame. A changed revision alone does not prove a correct pose.
 
 When building several poses, work pose-by-pose so each result can be inspected. Batch only independent non-destructive reads or writes that share a revision and need no intervening evaluation.
@@ -27,12 +27,11 @@ When building several poses, work pose-by-pose so each result can be inspected. 
 
 Use `layer_list` before every layer-targeted operation. IDs, not names, are the mutation contract.
 
-- `layer_write(action="create")`: create an animation layer. Use `folder_create`, `folder_move`, or `folder_rename` for folders.
-- `layer_write` visibility/lock actions: set and verify the observed boolean state.
-- Layer deletion is protected.
+- `layer_write_prepare(action="create")`: create an animation layer. Use `folder_create`, `folder_move`, or `folder_rename` for folders.
+- `layer_write_prepare` visibility/lock/activate/delete actions: commit, then verify the observed state.
 - `timeline_select_interval(first_frame, last_frame, layer_ids)`: select the exact interval required by generation or physics tools.
 - `animation_curve(action="query")`: inspect curve sections before changing them.
-- `animation_curve` interpolation/tangent actions: set an exact mode at an exact frame/layer and re-query.
+- `animation_curve_prepare` interpolation/tangent actions: set an exact mode at an exact frame/layer, commit, and re-query.
 - `cycle_list`: inspect normalized cycles. Create cycles with `feature_prepare("cycle")` and retime keys with `feature_prepare("stretch")`; both verify the resulting cycles/keys.
 
 Do not edit a hidden or locked layer accidentally. State the active/target layers and frame range in the plan.
@@ -74,7 +73,7 @@ AutoPosing requires a suitable Cascadeur rig and selected rig controls. Check `r
 
 For a protected AutoPosing add/update, use:
 
-1. `change_prepare(feature_id="auto_posing", operation_name="generation.auto_posing", arguments={"action":"add"|"update"})`;
+1. `auto_posing_prepare(action="add"|"update")`;
 2. inspect snapshot/impact and commit the token;
 3. re-read controller transforms and generation state.
 

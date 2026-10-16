@@ -18,7 +18,7 @@ Read only the references needed for the current task:
 | Quick/manual rigging, controllers, joints, rigid bodies, IK/Spline IK, twist, mass, constraints, collision, ballistics, AutoPhysics, Ragdoll | [physics-rigging.md](references/physics-rigging.md) |
 | Cameras, viewports, Filament lights/materials, still/video output, Unreal Live Link, Blender/Unity/Daz/Roblox | [render-external.md](references/render-external.md) |
 | Capability states, protected changes, jobs, errors, low-level calls, rollback, diagnosis | [safety-diagnostics.md](references/safety-diagnostics.md) |
-| Exact catalog of all 75 production MCP tools | [tool-routing.md](references/tool-routing.md) |
+| Exact catalog of all 82 production MCP tools | [tool-routing.md](references/tool-routing.md) |
 | Every adapter-bound feature id, operation, arguments and postconditions (generated) | [adapter-features.md](references/adapter-features.md) |
 | Version facts and source links | [official-sources.md](references/official-sources.md) |
 
@@ -43,7 +43,7 @@ For a multi-stage production workflow, read every domain reference that particip
 - Do not target mutable entities by display name when an ID is available. Resolve the name, show ambiguity when multiple objects match, then use IDs.
 - Cascadeur rotations in `transform_edit` are Euler XYZ radians. Convert degrees explicitly and report which unit was used.
 - Treat `ui_only`, `license_gated`, `missing_dependency`, `unsupported_version`, and `unhealthy` as results, not invitations to bypass the gate. Return the route and the concrete prerequisite or manual step.
-- Do not replace a missing adapter with guessed `action_invoke`, `tool_call`, or Python. Low-level routes are last-resort registered paths and still require observable postconditions.
+- Do not replace a missing adapter with guessed `action_invoke_prepare`, `tool_call`, or Python. Low-level routes are last-resort registered paths and still require observable postconditions.
 - `developer_execute_python` is disabled by default. Use it only for an explicit development/debugging request after confirming local policy, and never as a substitute for product support.
 - Use local absolute paths. Do not use UNC or device paths. Never overwrite an existing file unless the current request explicitly authorizes that destination and `allow_overwrite` is set during preparation.
 - If Cascadeur is not running, locked, waiting on a modal dialog, or reports an unknown outcome, stop mutation attempts. Inspect status/logs and determine whether the request was claimed before retrying.

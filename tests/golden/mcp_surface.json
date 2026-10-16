@@ -52,42 +52,18 @@
     }
   },
   "tools": {
-    "action_invoke": {
-      "description": "Invoke a known action and require an observable change or explicit postcondition.",
+    "action_invoke_prepare": {
+      "description": "Prepare a known action that must change the scene or meet a postcondition; commit with change_commit.",
       "input_schema": {
         "properties": {
           "action_id": {
             "title": "Action Id",
             "type": "string"
           },
-          "confirmation_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Confirmation Token"
-          },
           "expect_change": {
             "default": true,
             "title": "Expect Change",
             "type": "boolean"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
           },
           "feature_id": {
             "title": "Feature Id",
@@ -106,21 +82,9 @@
             "default": null,
             "title": "Postcondition"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
-          },
-          "timeout": {
-            "default": 60,
-            "title": "Timeout",
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
             "type": "number"
           }
         },
@@ -128,13 +92,13 @@
           "feature_id",
           "action_id"
         ],
-        "title": "action_invokeArguments",
+        "title": "action_invoke_prepareArguments",
         "type": "object"
       },
-      "name": "action_invoke",
+      "name": "action_invoke_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "action_invokeDictOutput",
+        "title": "action_invoke_prepareDictOutput",
         "type": "object"
       }
     },
@@ -193,29 +157,14 @@
       }
     },
     "animation_curve": {
-      "description": "Query layer sections or set interpolation and tangent modes with postcondition verification.",
+      "description": "Query layer sections; set interpolation or tangent modes with animation_curve_prepare.",
       "input_schema": {
         "properties": {
           "action": {
-            "enum": [
-              "query",
-              "set_interpolation",
-              "set_tangent"
-            ],
+            "const": "query",
+            "default": "query",
             "title": "Action",
             "type": "string"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
           },
           "first_frame": {
             "anyOf": [
@@ -228,18 +177,6 @@
             ],
             "default": null,
             "title": "First Frame"
-          },
-          "frame": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Frame"
           },
           "last_frame": {
             "anyOf": [
@@ -279,35 +216,8 @@
             ],
             "default": null,
             "title": "Layer Ids"
-          },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Value"
           }
         },
-        "required": [
-          "action"
-        ],
         "title": "animation_curveArguments",
         "type": "object"
       },
@@ -315,6 +225,52 @@
       "output_schema": {
         "additionalProperties": true,
         "title": "animation_curveDictOutput",
+        "type": "object"
+      }
+    },
+    "animation_curve_prepare": {
+      "description": "Prepare setting the interpolation or tangent mode of one key; commit with change_commit.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "set_interpolation",
+              "set_tangent"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "frame": {
+            "title": "Frame",
+            "type": "integer"
+          },
+          "layer_id": {
+            "title": "Layer Id",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "layer_id",
+          "frame",
+          "value"
+        ],
+        "title": "animation_curve_prepareArguments",
+        "type": "object"
+      },
+      "name": "animation_curve_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "animation_curve_prepareDictOutput",
         "type": "object"
       }
     },
@@ -348,69 +304,43 @@
         "type": "object"
       }
     },
-    "auto_physics_enable": {
-      "description": "Select the main Center of Mass and enable Physics Assistant before snapping.",
+    "auto_physics_enable_prepare": {
+      "description": "Prepare selecting the main Center of Mass and enabling Physics Assistant; commit with change_commit.",
       "input_schema": {
         "properties": {
-          "expected_revision": {
-            "title": "Expected Revision",
-            "type": "string"
-          },
-          "scene_id": {
-            "title": "Scene Id",
-            "type": "string"
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
-        "required": [
-          "scene_id",
-          "expected_revision"
-        ],
-        "title": "auto_physics_enableArguments",
+        "title": "auto_physics_enable_prepareArguments",
         "type": "object"
       },
-      "name": "auto_physics_enable",
+      "name": "auto_physics_enable_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "auto_physics_enableDictOutput",
+        "title": "auto_physics_enable_prepareDictOutput",
         "type": "object"
       }
     },
-    "auto_physics_snap": {
-      "description": "Snap a working AutoPhysics simulation; run auto_physics_state and auto_physics_enable first.",
+    "auto_physics_snap_prepare": {
+      "description": "Prepare snapping a working AutoPhysics simulation (enable it first); commit with change_commit.",
       "input_schema": {
         "properties": {
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
-          },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
-        "title": "auto_physics_snapArguments",
+        "title": "auto_physics_snap_prepareArguments",
         "type": "object"
       },
-      "name": "auto_physics_snap",
+      "name": "auto_physics_snap_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "auto_physics_snapDictOutput",
+        "title": "auto_physics_snap_prepareDictOutput",
         "type": "object"
       }
     },
@@ -428,8 +358,8 @@
         "type": "object"
       }
     },
-    "auto_posing": {
-      "description": "Add or update AutoPosing through Cascadeur's session API; use change_prepare/change_commit.",
+    "auto_posing_prepare": {
+      "description": "Prepare adding or updating AutoPosing through Cascadeur's session API; commit with change_commit.",
       "input_schema": {
         "properties": {
           "action": {
@@ -440,41 +370,22 @@
             "title": "Action",
             "type": "string"
           },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
-          },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
         "required": [
           "action"
         ],
-        "title": "auto_posingArguments",
+        "title": "auto_posing_prepareArguments",
         "type": "object"
       },
-      "name": "auto_posing",
+      "name": "auto_posing_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "auto_posingDictOutput",
+        "title": "auto_posing_prepareDictOutput",
         "type": "object"
       }
     },
@@ -1263,35 +1174,21 @@
         "type": "object"
       }
     },
-    "io_transfer": {
-      "description": "Run a registered import/export feature with path validation and postcondition checks.",
+    "io_transfer_prepare": {
+      "description": "Prepare a native import/export with path validation; commit with change_commit.\n\n    USD/GLB/GLTF/VRM use scene_exchange_prepare; image/video import, video export and\n    the other dialog-driven transfers use file_dialog_prepare.\n    ",
       "input_schema": {
         "properties": {
-          "confirmation_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Confirmation Token"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
-          },
           "feature_id": {
+            "enum": [
+              "import_fbx",
+              "export_fbx",
+              "blender_export",
+              "import_dae",
+              "export_dae",
+              "import_audio",
+              "export_image",
+              "selection_groups_import"
+            ],
             "title": "Feature Id",
             "type": "string"
           },
@@ -1312,21 +1209,9 @@
             "title": "Path",
             "type": "string"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
-          },
-          "timeout": {
-            "default": 180,
-            "title": "Timeout",
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
             "type": "number"
           }
         },
@@ -1334,13 +1219,13 @@
           "feature_id",
           "path"
         ],
-        "title": "io_transferArguments",
+        "title": "io_transfer_prepareArguments",
         "type": "object"
       },
-      "name": "io_transfer",
+      "name": "io_transfer_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "io_transferDictOutput",
+        "title": "io_transfer_prepareDictOutput",
         "type": "object"
       }
     },
@@ -1500,53 +1385,14 @@
       }
     },
     "key_edit": {
-      "description": "List, add or delete layer keys; deletion uses the protected change contract.",
+      "description": "List layer keys; add or delete keys with key_edit_prepare.",
       "input_schema": {
         "properties": {
           "action": {
-            "enum": [
-              "list",
-              "add",
-              "delete"
-            ],
+            "const": "list",
+            "default": "list",
             "title": "Action",
             "type": "string"
-          },
-          "confirmation_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Confirmation Token"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
-          },
-          "frame": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Frame"
           },
           "layer_id": {
             "anyOf": [
@@ -1559,23 +1405,8 @@
             ],
             "default": null,
             "title": "Layer Id"
-          },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
           }
         },
-        "required": [
-          "action"
-        ],
         "title": "key_editArguments",
         "type": "object"
       },
@@ -1583,6 +1414,47 @@
       "output_schema": {
         "additionalProperties": true,
         "title": "key_editDictOutput",
+        "type": "object"
+      }
+    },
+    "key_edit_prepare": {
+      "description": "Prepare adding or deleting a key on one layer and frame; commit with change_commit.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "delete"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "frame": {
+            "title": "Frame",
+            "type": "integer"
+          },
+          "layer_id": {
+            "title": "Layer Id",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action",
+          "layer_id",
+          "frame"
+        ],
+        "title": "key_edit_prepareArguments",
+        "type": "object"
+      },
+      "name": "key_edit_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "key_edit_prepareDictOutput",
         "type": "object"
       }
     },
@@ -1655,8 +1527,8 @@
         "type": "object"
       }
     },
-    "layer_write": {
-      "description": "Create/delete a layer or set visibility/lock with revision and deletion protection.",
+    "layer_write_prepare": {
+      "description": "Prepare a layer create/delete, visibility/lock/activate change, or folder edit; commit with change_commit.",
       "input_schema": {
         "properties": {
           "action": {
@@ -1672,30 +1544,6 @@
             ],
             "title": "Action",
             "type": "string"
-          },
-          "confirmation_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Confirmation Token"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
           },
           "item_id": {
             "anyOf": [
@@ -1757,17 +1605,10 @@
             "default": null,
             "title": "Position"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           },
           "value": {
             "anyOf": [
@@ -1790,13 +1631,13 @@
         "required": [
           "action"
         ],
-        "title": "layer_writeArguments",
+        "title": "layer_write_prepareArguments",
         "type": "object"
       },
-      "name": "layer_write",
+      "name": "layer_write_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "layer_writeDictOutput",
+        "title": "layer_write_prepareDictOutput",
         "type": "object"
       }
     },
@@ -2267,8 +2108,8 @@
         "type": "object"
       }
     },
-    "object_write": {
-      "description": "Rename, create, duplicate, reparent, unparent, or delete scene objects with safety checks.",
+    "object_write_prepare": {
+      "description": "Prepare an object rename, create, duplicate, reparent, unparent, or delete; commit with change_commit.",
       "input_schema": {
         "properties": {
           "action": {
@@ -2282,30 +2123,6 @@
             ],
             "title": "Action",
             "type": "string"
-          },
-          "confirmation_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Confirmation Token"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
           },
           "ids": {
             "anyOf": [
@@ -2373,34 +2190,27 @@
             "default": null,
             "title": "Position"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
-          },
           "size": {
             "default": 3.0,
             "title": "Size",
+            "type": "number"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
             "type": "number"
           }
         },
         "required": [
           "action"
         ],
-        "title": "object_writeArguments",
+        "title": "object_write_prepareArguments",
         "type": "object"
       },
-      "name": "object_write",
+      "name": "object_write_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "object_writeDictOutput",
+        "title": "object_write_prepareDictOutput",
         "type": "object"
       }
     },
@@ -2530,8 +2340,8 @@
         "type": "object"
       }
     },
-    "redo": {
-      "description": "Redo and verify an observable scene revision change.",
+    "redo_prepare": {
+      "description": "Prepare a redo that must change the scene revision; commit with change_commit.",
       "input_schema": {
         "properties": {
           "expect_change": {
@@ -2539,33 +2349,19 @@
             "title": "Expect Change",
             "type": "boolean"
           },
-          "expected_revision": {
-            "title": "Expected Revision",
-            "type": "string"
-          },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
-        "required": [
-          "expected_revision"
-        ],
-        "title": "redoArguments",
+        "title": "redo_prepareArguments",
         "type": "object"
       },
-      "name": "redo",
+      "name": "redo_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "redoDictOutput",
+        "title": "redo_prepareDictOutput",
         "type": "object"
       }
     },
@@ -2602,30 +2398,17 @@
         "type": "object"
       }
     },
-    "render_output": {
-      "description": "Render a still or video after change_prepare/change_commit validates the destination and snapshot.",
+    "render_output_prepare": {
+      "description": "Prepare a viewport capture or still render to a validated path; commit with change_commit.\n\n    Video renders fill Cascadeur's Export video window: use file_dialog_prepare(feature_id=\"render_video\").\n    ",
       "input_schema": {
         "properties": {
           "action": {
             "enum": [
               "viewport_capture",
-              "image",
-              "video"
+              "image"
             ],
             "title": "Action",
             "type": "string"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
           },
           "height": {
             "default": 1080,
@@ -2641,17 +2424,10 @@
             "title": "Samples",
             "type": "integer"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           },
           "width": {
             "default": 1920,
@@ -2663,13 +2439,13 @@
           "action",
           "path"
         ],
-        "title": "render_outputArguments",
+        "title": "render_output_prepareArguments",
         "type": "object"
       },
-      "name": "render_output",
+      "name": "render_output_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "render_outputDictOutput",
+        "title": "render_output_prepareDictOutput",
         "type": "object"
       }
     },
@@ -2901,46 +2677,46 @@
       }
     },
     "scene_file": {
-      "description": "Create, open, or save CASC scenes. New/open use the protected change contract.",
+      "description": "List open scene tabs or validate the current scene; change scenes with scene_file_prepare.",
       "input_schema": {
         "properties": {
           "action": {
             "enum": [
               "list",
+              "validate"
+            ],
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "scene_fileArguments",
+        "type": "object"
+      },
+      "name": "scene_file",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "scene_fileDictOutput",
+        "type": "object"
+      }
+    },
+    "scene_file_prepare": {
+      "description": "Prepare activating, creating, opening, saving, or closing a CASC scene; commit with change_commit.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
               "activate",
               "new",
               "open",
               "save",
               "save_as",
-              "close",
-              "validate"
+              "close"
             ],
             "title": "Action",
             "type": "string"
-          },
-          "confirmation_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Confirmation Token"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
           },
           "path": {
             "anyOf": [
@@ -2954,18 +2730,6 @@
             "default": null,
             "title": "Path"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
-          },
           "tab_id": {
             "anyOf": [
               {
@@ -2977,18 +2741,23 @@
             ],
             "default": null,
             "title": "Tab Id"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
         "required": [
           "action"
         ],
-        "title": "scene_fileArguments",
+        "title": "scene_file_prepareArguments",
         "type": "object"
       },
-      "name": "scene_file",
+      "name": "scene_file_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "scene_fileDictOutput",
+        "title": "scene_file_prepareDictOutput",
         "type": "object"
       }
     },
@@ -3032,46 +2801,16 @@
       }
     },
     "selection_edit": {
-      "description": "Read, replace, add, remove, or filter the current object selection.",
+      "description": "Read or filter the current object selection; change it with selection_edit_prepare.",
       "input_schema": {
         "properties": {
           "action": {
             "enum": [
               "get",
-              "set",
-              "add",
-              "remove",
               "filter"
             ],
             "title": "Action",
             "type": "string"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
-          },
-          "ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Ids"
           },
           "name_contains": {
             "anyOf": [
@@ -3097,30 +2836,6 @@
             "default": null,
             "title": "Object Type"
           },
-          "pivot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Pivot Id"
-          },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
-          },
           "selected_only": {
             "default": true,
             "title": "Selected Only",
@@ -3137,6 +2852,58 @@
       "output_schema": {
         "additionalProperties": true,
         "title": "selection_editDictOutput",
+        "type": "object"
+      }
+    },
+    "selection_edit_prepare": {
+      "description": "Prepare replacing, extending, or reducing the object selection; commit with change_commit.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "set",
+              "add",
+              "remove"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "pivot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pivot Id"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action",
+          "ids"
+        ],
+        "title": "selection_edit_prepareArguments",
+        "type": "object"
+      },
+      "name": "selection_edit_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "selection_edit_prepareDictOutput",
         "type": "object"
       }
     },
@@ -3257,49 +3024,30 @@
         "type": "object"
       }
     },
-    "timeline_set_frame": {
-      "description": "Set and verify the playhead using the domain scene getter, not cached UI telemetry.",
+    "timeline_set_frame_prepare": {
+      "description": "Prepare moving the playhead (verified with the domain scene getter); commit with change_commit.",
       "input_schema": {
         "properties": {
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
-          },
           "frame": {
             "title": "Frame",
             "type": "integer"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
         "required": [
           "frame"
         ],
-        "title": "timeline_set_frameArguments",
+        "title": "timeline_set_frame_prepareArguments",
         "type": "object"
       },
-      "name": "timeline_set_frame",
+      "name": "timeline_set_frame_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "timeline_set_frameDictOutput",
+        "title": "timeline_set_frame_prepareDictOutput",
         "type": "object"
       }
     },
@@ -3336,29 +3084,71 @@
       }
     },
     "transform_edit": {
-      "description": "Read or write position, Euler rotation (radians), and local scale for explicit or selected objects.\n\n    Cascadeur re-interpolates only up to the playhead after an edit; reads past it\n    carry a warning. Pass refresh=true to recompute the whole timeline first.\n    ",
+      "description": "Read position, Euler rotation (radians), and local scale for explicit or selected objects.\n\n    Cascadeur re-interpolates only up to the playhead after an edit; reads past it\n    carry a warning. Pass refresh=true to recompute the whole timeline first.\n    Write transforms with transform_edit_prepare.\n    ",
       "input_schema": {
         "properties": {
           "action": {
-            "enum": [
-              "get",
-              "set"
-            ],
+            "const": "get",
+            "default": "get",
             "title": "Action",
             "type": "string"
           },
-          "expected_revision": {
+          "frame": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
             "default": null,
-            "title": "Expected Revision"
+            "title": "Frame"
           },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ids"
+          },
+          "refresh": {
+            "default": false,
+            "title": "Refresh",
+            "type": "boolean"
+          },
+          "space": {
+            "default": "local",
+            "enum": [
+              "local",
+              "global"
+            ],
+            "title": "Space",
+            "type": "string"
+          }
+        },
+        "title": "transform_editArguments",
+        "type": "object"
+      },
+      "name": "transform_edit",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "transform_editDictOutput",
+        "type": "object"
+      }
+    },
+    "transform_edit_prepare": {
+      "description": "Prepare writing position, Euler rotation (radians), and local scale; commit with change_commit.",
+      "input_schema": {
+        "properties": {
           "frame": {
             "anyOf": [
               {
@@ -3401,11 +3191,6 @@
             "default": null,
             "title": "Position"
           },
-          "refresh": {
-            "default": false,
-            "title": "Refresh",
-            "type": "boolean"
-          },
           "rotation_euler_xyz_radians": {
             "anyOf": [
               {
@@ -3436,18 +3221,6 @@
             "default": null,
             "title": "Scale"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
-          },
           "space": {
             "default": "local",
             "enum": [
@@ -3456,18 +3229,20 @@
             ],
             "title": "Space",
             "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
-        "required": [
-          "action"
-        ],
-        "title": "transform_editArguments",
+        "title": "transform_edit_prepareArguments",
         "type": "object"
       },
-      "name": "transform_edit",
+      "name": "transform_edit_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "transform_editDictOutput",
+        "title": "transform_edit_prepareDictOutput",
         "type": "object"
       }
     },
@@ -3568,8 +3343,8 @@
         "type": "object"
       }
     },
-    "undo": {
-      "description": "Undo and verify an observable scene revision change.",
+    "undo_prepare": {
+      "description": "Prepare an undo that must change the scene revision; commit with change_commit.",
       "input_schema": {
         "properties": {
           "expect_change": {
@@ -3577,44 +3352,54 @@
             "title": "Expect Change",
             "type": "boolean"
           },
-          "expected_revision": {
-            "title": "Expected Revision",
-            "type": "string"
-          },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
-        "required": [
-          "expected_revision"
-        ],
-        "title": "undoArguments",
+        "title": "undo_prepareArguments",
         "type": "object"
       },
-      "name": "undo",
+      "name": "undo_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "undoDictOutput",
+        "title": "undo_prepareDictOutput",
         "type": "object"
       }
     },
     "viewport_camera": {
-      "description": "Read viewports/cameras or update and verify the active viewport camera.",
+      "description": "Read viewports or cameras; move or switch the viewport camera with viewport_camera_prepare.",
       "input_schema": {
         "properties": {
           "action": {
             "enum": [
               "viewport_state",
-              "camera_catalog",
+              "camera_catalog"
+            ],
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "viewport_cameraArguments",
+        "type": "object"
+      },
+      "name": "viewport_camera",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "viewport_cameraDictOutput",
+        "type": "object"
+      }
+    },
+    "viewport_camera_prepare": {
+      "description": "Prepare updating the active viewport camera or activating a camera; commit with change_commit.",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "enum": [
               "camera_view",
               "camera_activate"
             ],
@@ -3649,18 +3434,6 @@
             "default": null,
             "title": "Camera Type"
           },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expected Revision"
-          },
           "position": {
             "anyOf": [
               {
@@ -3676,18 +3449,6 @@
             "default": null,
             "title": "Position"
           },
-          "scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scene Id"
-          },
           "target": {
             "anyOf": [
               {
@@ -3702,50 +3463,34 @@
             ],
             "default": null,
             "title": "Target"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
           }
         },
         "required": [
           "action"
         ],
-        "title": "viewport_cameraArguments",
+        "title": "viewport_camera_prepareArguments",
         "type": "object"
       },
-      "name": "viewport_camera",
+      "name": "viewport_camera_prepare",
       "output_schema": {
         "additionalProperties": true,
-        "title": "viewport_cameraDictOutput",
+        "title": "viewport_camera_prepareDictOutput",
         "type": "object"
       }
     },
     "viewport_mode": {
-      "description": "Read or set the active (or every) viewport visualizer mode and verify the observed mode.",
+      "description": "Read the active (or every) viewport visualizer mode; change it with viewport_mode_prepare.",
       "input_schema": {
         "properties": {
           "apply_to_all": {
             "default": false,
             "title": "Apply To All",
             "type": "boolean"
-          },
-          "mode": {
-            "anyOf": [
-              {
-                "enum": [
-                  "View",
-                  "AutoPosing",
-                  "PointController",
-                  "Controller",
-                  "Joint",
-                  "Mesh",
-                  "Rigging"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Mode"
           }
         },
         "title": "viewport_modeArguments",
@@ -3755,6 +3500,47 @@
       "output_schema": {
         "additionalProperties": true,
         "title": "viewport_modeDictOutput",
+        "type": "object"
+      }
+    },
+    "viewport_mode_prepare": {
+      "description": "Prepare setting the active (or every) viewport visualizer mode; commit with change_commit.",
+      "input_schema": {
+        "properties": {
+          "apply_to_all": {
+            "default": false,
+            "title": "Apply To All",
+            "type": "boolean"
+          },
+          "mode": {
+            "enum": [
+              "View",
+              "AutoPosing",
+              "PointController",
+              "Controller",
+              "Joint",
+              "Mesh",
+              "Rigging"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "title": "Ttl Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "viewport_mode_prepareArguments",
+        "type": "object"
+      },
+      "name": "viewport_mode_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "viewport_mode_prepareDictOutput",
         "type": "object"
       }
     }

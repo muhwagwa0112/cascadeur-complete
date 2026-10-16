@@ -10,7 +10,7 @@ Use this reference for viewports, cameras, lights, Filament presentation, still/
 4. Use the camera activation/update actions with explicit camera ID, position, target, and camera type; pass the latest scene revision.
 5. Re-read viewport/camera state and affected object transforms.
 
-Use `viewport_mode` to read or set a registered visualizer mode and verify the observed mode. Viewport layout (1/2/4), grid, composition, silhouette, Material and texture maps, light and camera settings are adapter-bound. Filament environment, shadows, dynamic lights, ambient occlusion and bloom live only in Cascadeur's QML render panel and remain UI-only.
+Use `viewport_mode` to read and `viewport_mode_prepare` + `change_commit` to set a registered visualizer mode; the commit verifies the observed mode. Viewport layout (1/2/4), grid, composition, silhouette, Material and texture maps, light and camera settings are adapter-bound. Filament environment, shadows, dynamic lights, ambient occlusion and bloom live only in Cascadeur's QML render panel and remain UI-only.
 
 ## Filament presentation
 

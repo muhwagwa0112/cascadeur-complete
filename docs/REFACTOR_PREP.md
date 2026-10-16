@@ -57,7 +57,7 @@ route, action, operation, pre/postconditions, fixed_arguments, `contract_test_id
 
 ## 3. 고정해야 할 계약 (리팩토링 중 불변)
 
-- MCP 도구 이름·인자 스키마(75 tools, 8 resources). Phase 0 에서 골든 파일로 고정.
+- MCP 도구 이름·인자 스키마(82 tools, 6 resources, 2 templates). 골든 파일로 고정.
 - 브리지 프로토콜 `"2.0"`, canonical-JSON HMAC, nonce 규칙, UUID request id, 확인 토큰 서명 필드
   (`runtime.py:151-215`, `queue_auth.py`, `safety.py`).
 - 큐 경로 `state/requests|responses|seen|tokens`, `drain_active.json`, `pump.json`(schema 1), `*.working.casc`.
@@ -95,11 +95,14 @@ route, action, operation, pre/postconditions, fixed_arguments, `contract_test_id
 
 ## 5. 리팩토링 전에 고칠 버그 (동작 변경, 별도 커밋)
 
-1. 직접 변경 도구 18개가 항상 실패 — **결정: `*_prepare` 로 전환**. 대상과 operation 목록은
-   `tests/test_direct_mutation_tools.py` 의 `KNOWN_DIRECT_MUTATION_TOOLS` 가 백로그다
-   (action_invoke, animation_curve, auto_physics_enable/snap, auto_posing, io_transfer, key_edit, layer_write,
-   object_write, redo, render_output, scene_file, selection_edit, timeline_set_frame, transform_edit, undo,
-   viewport_camera, viewport_mode). 스키마의 `confirmation_token` 도 함께 정리.
+1. ~~직접 변경 도구 18개가 항상 실패~~ — **Phase 1 에서 `*_prepare` 로 전환 완료.** 규칙: 도구 X 의 쓰기는
+   `X_prepare` 가 담당하고(토큰 반환 → `change_commit`), X 에는 읽기만 남는다. 쓰기만 있던 11개
+   (object_write, io_transfer, timeline_set_frame, layer_write, render_output, auto_posing, auto_physics_enable,
+   auto_physics_snap, action_invoke, undo, redo)는 `_prepare` 버전으로 대체됐다. 도구 75 → 82.
+   `io_transfer_prepare` 는 브리지가 직접 처리하는 형식(FBX/DAE/오디오/이미지 export/selection groups)만 받고,
+   `render_output_prepare` 는 video 를 받지 않는다 — 둘 다 예전에는 받아도 commit 에서 실패하던 경로였다.
+   `tests/test_direct_mutation_tools.py` 가 execute 로 가는 mutation 이 0개임과, 각 `_prepare` 도구의
+   feature/operation 쌍이 서비스 바인딩 규칙과 브리지 처리기를 통과함을 검증한다.
 2. `system.view_mode_get` 을 브리지 `READ_ONLY_OPERATIONS` 에 추가 + 양쪽 read-only 집합 일치 계약 테스트.
 3. `runtime.py:1384` `_save_snapshot(scene, snapshot_id)` 에 `working_id` 누락 (현재 도달 불가).
 4. `_drain_once` 에서 JSON 파싱 실패 시 응답 없이 큐 처리 중단(`runtime.py:1614`).
@@ -116,9 +119,9 @@ route, action, operation, pre/postconditions, fixed_arguments, `contract_test_id
 
 | 테스트 | 고정하는 것 |
 |---|---|
-| `tests/test_mcp_surface_golden.py` + `tests/golden/mcp_surface.json` | 도구 75 / 리소스 6 / 템플릿 2 의 이름·스키마·설명. 의도된 변경은 `CASCADEUR_UPDATE_GOLDEN=1` 로 갱신 |
+| `tests/test_mcp_surface_golden.py` + `tests/golden/mcp_surface.json` | 도구 82 / 리소스 6 / 템플릿 2 의 이름·스키마·설명. 의도된 변경은 `CASCADEUR_UPDATE_GOLDEN=1` 로 갱신 |
 | `tests/test_operation_contract.py` | 호스트가 보내는 operation ↔ 브리지 처리 목록, 양쪽 read-only 판정, VIEW ⊆ YIELDING. 예외는 `KNOWN_*` 집합에 명시 |
-| `tests/test_direct_mutation_tools.py` | 모든 도구를 기록용 서비스로 호출해 `execute` 로 mutation 을 보내는 경로를 수집 → `*_prepare` 전환 백로그 |
+| `tests/test_direct_mutation_tools.py` | 모든 도구를 기록용 서비스로 호출: `execute` 로 가는 mutation 0개, `_prepare` 도구별 feature/operation 쌍 |
 | `tests/test_bridge_request_flow.py` | fake csc 로 `execute_request`/`_drain_once`: scene guard, 토큰 게이트, 예외→에러코드, HMAC·nonce 재사용·TTL·프로토콜, 응답 서명, yield, scene 필터. §5-2/3/4 는 `xfail(strict=True)` |
 
 `KNOWN_*` 항목이나 xfail 은 해당 버그를 고치는 커밋에서 같이 지운다(고치면 테스트가 일부러 실패한다).

@@ -26,13 +26,13 @@ Use this reference for scene tabs and files, object discovery and hierarchy, sel
 | Save as | `scene_save_as` / `scene.save_as` with `path` | Protected prepare/commit; overwrite needs explicit authorization |
 | Close tab | `scene_close` / `scene.close` with exact tab/scene identity | Protected prepare/commit; ensure a replacement scene remains active |
 
-Use `scene_file` for direct reads and ordinary saves. For operations that return `CONFIRMATION_REQUIRED`, call `change_prepare` with the feature/operation pair above, inspect the working scene and backup path, then call `change_commit`. Do not feed an arbitrary token back into `scene_file`.
+Use `scene_file` for `list`/`validate` reads. Every row above that changes a scene goes through `scene_file_prepare(action, path, tab_id)`: inspect the working scene and backup path in the result, then call `change_commit`.
 
 ## Selection and object changes
 
-Use `selection_edit` actions `set`, `add`, `remove`, and `filter` for ordinary selection changes. Filter by type/name only to discover candidates; resolve the result to IDs before an actual edit.
+Read the selection with `selection_edit(action="get"|"filter")` and change it with `selection_edit_prepare(action="set"|"add"|"remove", ids, pivot_id)` + `change_commit`. Filter by type/name only to discover candidates; resolve the result to IDs before an actual edit.
 
-Use `object_write` for:
+Use `object_write_prepare` (then `change_commit`) for:
 
 - `rename`: one exact object ID and new name;
 - `create`: explicit kind/name/position/size supported by the adapter;
@@ -49,20 +49,20 @@ Always call `feature_describe` for the exact format before choosing a route.
 
 | Format or media | Preferred MCP route | Notes |
 |---|---|---|
-| CASC | `scene_file` | Native scene open/save lifecycle |
-| FBX | `io_transfer` with `import_fbx` or `export_fbx` | Native baseline; protect import/export and verify artifact/scene change |
-| DAE/Collada | `io_transfer` with `import_dae` or `export_dae` | Native baseline; useful fallback when FBX parsing/rotation is problematic |
+| CASC | `scene_file_prepare` | Native scene open/save lifecycle |
+| FBX | `io_transfer_prepare` with `import_fbx` or `export_fbx` | Native baseline; protect import/export and verify artifact/scene change |
+| DAE/Collada | `io_transfer_prepare` with `import_dae` or `export_dae` | Native baseline; useful fallback when FBX parsing/rotation is problematic |
 | USD | `scene_exchange_prepare(direction, format="usd", preset, path)` | Exact UI file flow; `preset` is animation/model/scene |
 | GLB/GLTF | `scene_exchange_prepare` with the requested format | Exact UI file flow; choose model/animation/scene intent first |
 | VRM import | `scene_exchange_prepare(format="vrm")` when available | Import route exists in 2026.1; validate skeleton/material result |
 | VRM export | Capability gate | Baseline is `unsupported_version`; do not rename GLB output to VRM |
-| Audio | `io_transfer(feature_id="import_audio", ...)` | Confirm timeline/media attachment afterward |
+| Audio | `io_transfer_prepare(feature_id="import_audio", ...)` | Confirm timeline/media attachment afterward |
 | Reference image/video | `file_dialog_prepare("import_image"/"import_video", path)` | Registered action + owned dialog only |
 | Camera texture | `feature_prepare("camera_textures", {...})` | Native adapter; reads the texture paths back |
 | Still image | See render reference | Rendering/capture is a protected output operation |
 | Video | `file_dialog_prepare("export_video" or "render_video", path, width, height, quality)` | Export video form; host waits for a stable file |
 
-For USD/GLB/GLTF/VRM, the dedicated prepare tool returns a protected file-flow token. Commit it with `change_commit`; do not separately invoke `io_transfer` for the same transfer.
+For USD/GLB/GLTF/VRM, the dedicated prepare tool returns a protected file-flow token. Commit it with `change_commit`; do not separately prepare `io_transfer_prepare` for the same transfer (it only accepts the native formats).
 
 ## Import planning
 
