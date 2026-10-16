@@ -61,7 +61,7 @@ def bridge(runtime, tmp_path, monkeypatch):
     del runtime._test_handlers, runtime._test_calls
 
 
-def _request(runtime, operations, **overrides) -> dict:
+def _request(runtime, operation_list, **overrides) -> dict:
     request = {
         "protocol_version": runtime.PROTOCOL_VERSION,
         "request_id": str(uuid.uuid4()),
@@ -69,7 +69,7 @@ def _request(runtime, operations, **overrides) -> dict:
         "nonce": uuid.uuid4().hex,
         "expires_at": time.time() + 60,
         "feature_id": "probe",
-        "operations": operations,
+        "operations": operation_list,
         "safety_context": {},
         **overrides,
     }
@@ -186,20 +186,21 @@ def test_view_mode_get_with_a_mode_still_needs_a_confirmation_token(bridge):
     assert bridge._test_calls == []
 
 
-def test_snapshot_required_saves_a_snapshot(bridge, monkeypatch):
+def test_snapshot_required_is_refused_without_touching_the_scene(bridge, monkeypatch):
     saved = []
-
-    def record(scene, snapshot_id, working_id):
-        saved.append((snapshot_id, working_id))
-
-    monkeypatch.setattr(bridge, "_save_snapshot", record)
+    monkeypatch.setattr(bridge, "_save_snapshot", lambda *args: saved.append(args))
     bridge._test_handlers["scene.list"] = ({}, [])
-    request = _request(bridge, [READ], safety_context={"snapshot_required": True})
-    result = bridge.execute_request(object(), request)
-    assert result["ok"] is True
-    assert saved and saved[0][0] == request["request_id"]
-    assert str(uuid.UUID(saved[0][1])) == saved[0][1]
-    assert result["snapshot_id"] == request["request_id"]
+    result = bridge.execute_request(object(), _request(bridge, [READ], safety_context={"snapshot_required": True}))
+    assert (result["ok"], result["error_code"]) == (False, "INVALID_REQUEST")
+    assert saved == [] and bridge._test_calls == []
+
+
+@pytest.mark.parametrize("arguments", [{"mode": "Joint"}, {"mode": "Joint", "action": "get"}])
+def test_view_mode_with_a_mode_needs_a_confirmation_token(bridge, arguments):
+    bridge._test_handlers["system.view_mode"] = ({"mode": "Joint"}, [])
+    result = bridge.execute_request(object(), _request(bridge, [{"name": "system.view_mode", "arguments": arguments}]))
+    assert result["error_code"] == "INVALID_REQUEST"
+    assert bridge._test_calls == []
 
 
 # --- _drain_once -----------------------------------------------------------
@@ -293,3 +294,25 @@ def test_drain_skips_a_malformed_request_and_continues(bridge, content):
     assert bridge._drain_once(object()) == (1, False)
     assert _response(bridge, good)["ok"] is True
     assert list(requests.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"operations": ["scene.list"]},
+        {"operations": [{"name": "scene.list", "arguments": ["x"]}]},
+        {"operations": {"name": "scene.list"}},
+        {"expires_at": "soon"},
+        {"safety_context": ["x"]},
+    ],
+)
+def test_drain_answers_a_signed_but_malformed_request_and_continues(bridge, override):
+    bridge._test_handlers["scene.list"] = ({}, [])
+    broken = _request(bridge, [READ], **override)
+    _queue(bridge, broken, "1-broken.json")
+    good = _request(bridge, [READ])
+    _queue(bridge, good, "2-good.json")
+    assert bridge._drain_once(object()) == (2, False)
+    assert _response(bridge, broken)["error_code"] == "INVALID_REQUEST"
+    assert _response(bridge, good)["ok"] is True
+    assert bridge._test_calls == ["scene.list"]

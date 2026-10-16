@@ -189,13 +189,13 @@ def _claim_request_nonce(root, request):
 def _operation_is_mutating(operation):
     name = str(operation.get("name", ""))
     args = operation.get("arguments") or {}
-    if name == "system.view_mode_get":
-        # The shared view-mode handler applies any supplied mode.
-        return args.get("mode") is not None
+    if name in ("system.view_mode", "system.view_mode_get"):
+        # The shared view-mode handler applies any supplied mode, whatever the action says.
+        if args.get("mode") is not None:
+            return True
+        return name == "system.view_mode" and str(args.get("action", "get")) not in {"get", "list"}
     if name in READ_ONLY_OPERATIONS:
         return False
-    if name == "system.view_mode":
-        return str(args.get("action", "get")) not in {"get", "list"}
     return name not in {"safety.snapshot", "safety.rollback_internal"}
 
 
@@ -1389,11 +1389,11 @@ def execute_request(scene, request):
     safety = request.get("safety_context") or {}
     snapshot_id = None
     if safety.get("snapshot_required"):
-        snapshot_id = request["request_id"]
-        try:
-            _save_snapshot(scene, snapshot_id, str(uuid.uuid4()))
-        except Exception as exc:
-            return _error(feature_id, "POSTCONDITION_FAILED", str(exc), started, before)
+        # An in-request snapshot would switch the active document to a working copy
+        # the host never learns about. The host takes snapshots with safety.snapshot.
+        return _error(
+            feature_id, "INVALID_REQUEST", "snapshot_required is not supported; use safety.snapshot", started, before
+        )
     results = []
     warnings = []
     proven = []
@@ -1586,6 +1586,24 @@ def _mark_draining(until):
         atomic_json(runtime_root() / "state" / "drain_active.json", {"until": float(until), "pid": os.getpid()})
 
 
+def _request_shape_error(request):
+    """Reject a signed request whose fields the drain would otherwise trip over."""
+    expires_at = request.get("expires_at", 0)
+    if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+        return "Request expires_at must be a number"
+    if not isinstance(request.get("safety_context") or {}, dict):
+        return "Request safety_context must be an object"
+    operations = request.get("operations") or []
+    if not isinstance(operations, list):
+        return "Request operations must be a list"
+    for item in operations:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            return "Each request operation must be an object with a name"
+        if not isinstance(item.get("arguments") or {}, dict):
+            return "Request operation arguments must be an object"
+    return None
+
+
 def _drain_once(scene, *, matching_scene_only=False):
     # Event and command callbacks can carry a stale per-tab scene argument.
     # Queue routing must follow the document that is actually active now.
@@ -1643,10 +1661,13 @@ def _drain_once(scene, *, matching_scene_only=False):
                     time.monotonic(),
                     scene_state(scene),
                 )
+            shape_error = _request_shape_error(request) if authenticated else None
             if authenticated and request.get("protocol_version") != PROTOCOL_VERSION:
                 result = _error(
                     "protocol", "UNSUPPORTED_VERSION", "Bridge protocol mismatch", time.monotonic(), scene_state(scene)
                 )
+            elif shape_error:
+                result = _error("request", "INVALID_REQUEST", shape_error, time.monotonic(), scene_state(scene))
             elif authenticated and float(request.get("expires_at", 0)) < time.time():
                 result = _error(
                     "timeout", "TIMEOUT", "Request TTL expired before execution", time.monotonic(), scene_state(scene)
@@ -1673,8 +1694,10 @@ def _drain_once(scene, *, matching_scene_only=False):
                 result["mac"] = _sign_message(result, bridge_secret)
                 atomic_json(responses / (request_id + ".json"), result)
             processed += 1
-            if authenticated and any(
-                str(item.get("name")) in YIELDING_OPERATIONS for item in request.get("operations") or []
+            if (
+                authenticated
+                and not shape_error
+                and any(str(item.get("name")) in YIELDING_OPERATIONS for item in request.get("operations") or [])
             ):
                 must_yield = True
             # A request may change the active scene (open/new/rollback), so the
