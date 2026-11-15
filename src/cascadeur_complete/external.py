@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .bounded_json import read_bounded_bytes, read_bounded_json
 from .export_models import ArtifactRef, ExportExpectation, ExportProfile, TargetImportSettings, ValidationReport
 from .export_publisher import canonical_digest, write_immutable_json
 from .fbx_validation import file_sha256
@@ -66,23 +67,22 @@ def available_dependencies() -> set[str]:
 
 def verify_blender_fbx(path: str, timeout: float = 240.0) -> dict:
     """Import an FBX into a background Blender and return what Blender observed."""
+    if not np.isfinite(timeout) or timeout <= 0:
+        raise ValueError('Target validation timeout must be finite and positive')
     blender = find_blender()
     if blender is None:
         raise RuntimeError("Blender is not installed")
-    completed = subprocess.run(
-        [str(blender), "--background", "--factory-startup", "--python-expr", _SCRIPT, "--", str(path)],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        creationflags=0x08000000 if os.name == "nt" else 0,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(f"Blender import failed with exit code {completed.returncode}: "
-                           + (completed.stderr or completed.stdout)[-1500:])
-    line = next((item for item in completed.stdout.splitlines() if item.startswith(_MARKER)), None)
+    with tempfile.TemporaryDirectory(prefix='cascadeur-legacy-consumer-') as temporary:
+        directory = Path(temporary)
+        returncode = _run_target_process(
+            [str(blender), "--background", "--factory-startup", "--python-expr", _SCRIPT, "--", str(path)],
+            directory, timeout=timeout, max_log_bytes=4 * 1024**2, cancel=None)
+        output = read_bounded_bytes(directory / 'blender.log', 4 * 1024**2).decode('utf-8', errors='replace')
+    if returncode != 0:
+        raise RuntimeError(f"Blender import failed with exit code {returncode}: " + output[-1500:])
+    line = next((item for item in output.splitlines() if item.startswith(_MARKER)), None)
     if line is None:
-        raise RuntimeError("Blender did not report an import result: " + (completed.stderr or completed.stdout)[-1500:])
+        raise RuntimeError("Blender did not report an import result: " + output[-1500:])
     report = json.loads(line[len(_MARKER) :])
     report["executable"] = str(blender)
     report["verification_grade"] = "legacy_import_observed"
@@ -116,11 +116,13 @@ def observe_blender_installation(*, timeout: float = 60, cancel=None) -> dict:
                                     '--', str(manifest_path)], directory, timeout=timeout,
                                    max_log_bytes=4 * 1024**2, cancel=cancel)
         if code != 0:
-            detail = (directory / 'blender.log').read_bytes()[-1500:].decode('utf-8', errors='replace')
+            with (directory / 'blender.log').open('rb') as log:
+                log.seek(max(0, os.fstat(log.fileno()).st_size - 1500))
+                detail = log.read(1500).decode('utf-8', errors='replace')
             raise RuntimeError('TARGET_INSTALLATION_OBSERVATION_FAILED: '+detail)
         if not report_path.is_file() or report_path.is_symlink() or report_path.stat().st_size > 32768:
             raise RuntimeError('TARGET_INSTALLATION_REPORT_MISSING_OR_OVERSIZED')
-        observed = json.loads(report_path.read_text(encoding='utf-8'))
+        observed = read_bounded_json(report_path, 32768)
     fields = {'schema_version','kind','nonce','blender_version','blender_executable_sha256',
               'importer_fingerprint','importer_files','adapter_fingerprint'}
     modules = {'io_scene_fbx','io_scene_fbx.import_fbx','io_scene_fbx.parse_fbx','io_scene_fbx.fbx_utils'}
@@ -262,7 +264,7 @@ def validate_target_import(sealed_fbx: ArtifactRef, profile: ExportProfile, expe
                                    "log": str(directory / "blender.log")},))
         if not report_path.is_file() or report_path.stat().st_size > settings.max_report_bytes:
             return result("fail", "TARGET_REPORT_MISSING_OR_OVERSIZED")
-        observed = json.loads(report_path.read_text(encoding="utf-8"))
+        observed = read_bounded_json(report_path, settings.max_report_bytes)
         fields = {"schema_version", "nonce", "artifact_sha256", "adapter_fingerprint", "blender_version",
                   "settings_digest", "actions", "capture"}
         if (set(observed) != fields or observed["schema_version"] != 1 or observed["nonce"] != nonce

@@ -7,7 +7,21 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 혼합 키 구간 계획과 복원 qualification 수명
+### 최신 추가: export 검증 재개와 메모리·보고서 경계
+
+원격 r4 문서를 다시 fetch했으며 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 같다. 기존 16개 목표를 유지한다. 이번에는 native bytes를 바꾸지 않았고 실제 설치 경로 `C:\Program Files\Cascadeur\cascadeur.exe`의 PID `31060`이 계속 응답함을 확인했다. 아래 호스트 확인은 이전 epoch의 native 실행 근거를 새 구현의 실행 근거로 승계하지 않는다.
+
+- export 검증이 nonpass여도 step을 기본 `succeeded`로 저장해 resume가 검증을 건너뛰던 결함을 수정했다. 명시적 품질/구조/소비자 실패는 원 관측과 함께 step/run `failed`로 보존한다. 미확정 결과는 `ready` step과 `blocked/EXPORT_VALIDATION_UNVERIFIED` run으로 남긴다. 명시적 resume에서만 같은 sealed artifact·profile·원 intent context를 기존 `read_retries` 예산으로 다시 관측한다. 새 native export를 만들거나 기존 요청을 replay하지 않는다.
+- 이미 잘못 완료 표시된 legacy validation은 원 authenticated artifact의 nonpass를 읽고 run을 `failed/EXPORT_VALIDATION_FAILED`로 종결한다. 원 step/artifact는 고치지 않는다. publish에는 pass validation 및 artifact/profile digest가 같은 immutable bundle을 요구한다. 기존 publish intent의 reconciliation은 새 import나 권한 발급 없이 원 journal을 계속 조회한다.
+- contact solver가 각 nonfree contact마다 유지하는 전체 클립 float64 배열 네 개를 사전 메모리 예산과 반복 계산에 포함했다. 짧은 active 구간만 세어 누락되던 비용을 보완했으며 전역 해·목적함수·클립 범위를 바꾸지 않는다. 이는 host의 알려진 배열 비용 검사이며 native 보간기 `bad allocation`의 원인 해결이나 전체 프로세스 peak RSS 보장이 아니다.
+- export stage/validation, consumer raw/canonical capture, manifest와 provenance의 재읽기를 공통 bounded reader로 연결했다. regular file/reparse·크기·열린 descriptor identity를 확인하고 제한된 chunk로 읽은 뒤 변경을 다시 확인한다. raw report는 원 profile 상한, retained sidecar는 기존 report hard ceiling인 256 MiB를 적용한다. MAC/hash와 exact 내용 검사는 유지한다. legacy Blender stdout도 기존 bounded runner의 4 MiB 로그로 제한하며 성공 등급은 계속 legacy다. 이 상한은 파일 bytes에 대한 것으로 JSON 객체 전체 메모리나 Blender RSS의 상한은 아니다.
+- 실제 2026.2의 제한된 native 목록이 순수 호스트 기능인 `feature_search/feature_describe`까지 지원 불가로 만들던 표시를 수정했다. 두 contract 기능은 연결 없이 제공하되 live execution으로 세지 않는다. `inventory_refresh` 같은 native dispatcher와 미자격 mutation은 계속 gate한다.
+
+필요한 호스트 대상만 실행해 **`9 passed in 3.73s`**였다. contact 준비 전 예산 거절, JSON 크기/교체/비정규 파일의 parse 전 거절, nonzero consumer 거절, 실패·미확정 validation의 저장/예산 내 동일 입력 재관측/취소/legacy publish 차단, 두 버전의 host-only 표시를 확인했다. consumer/capture double은 실제 FBX·native 실패·Blender 품질 증거가 아니다. 전체 suite/build/CI나 새 native recipe는 실행하지 않았다. host 구현 digest가 바뀌었으므로 과거 plan/grant를 재서명하거나 재사용하지 않는다.
+
+아래의 실제 탭 수명/종료 crash 원인, 진짜 bounded partial-write 실패 뒤 조건부 복구, 일반 rig metadata·영구 key ID·공개 native 삽입과 source/frozen 설치 교체는 계속 미완료다. 전역 인증키·기존 unknown·원 receipt와 사용자의 autosave는 변경하지 않았다.
+
+### 이전 추가: 혼합 키 구간 계획과 복원 qualification 수명
 
 원격 r4 문서를 다시 fetch했으며 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`다. 기존 16개 목표를 유지한다. 아래 변경은 일반 리그, 실제 부분 실패 복구나 설치 교체의 완료를 뜻하지 않는다.
 

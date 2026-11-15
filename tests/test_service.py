@@ -164,9 +164,12 @@ def test_refresh_live_resynchronizes_instead_of_binding_to_stale_cache(tmp_path)
     assert svc._live_scene_revision == "rev-1"
 
 
-def test_product_coverage_does_not_count_discovery_or_contract_only_rows(tmp_path):
+@pytest.mark.parametrize("version", ["2026.1.3.0.15619", "2026.2.3.0.16863"])
+def test_product_coverage_does_not_count_discovery_or_contract_only_rows(tmp_path, version):
     paths = RuntimePaths.discover(tmp_path / "runtime")
     svc = CascadeurService(paths, client=FakeBridge(paths.snapshots))
+    svc.installation["version"] = version
+    svc._rebuild_features()
 
     status = svc.capabilities(live=False)
     searched = svc.feature_search("", limit=500)
@@ -176,6 +179,15 @@ def test_product_coverage_does_not_count_discovery_or_contract_only_rows(tmp_pat
     assert status["product_coverage"]["supported"] == 2
     assert status["product_coverage"]["support_percent"] == round(2 / 232 * 100, 2)
     assert searched and all(item["truth_layer"] == "product" for item in searched)
+    for feature_id in ("feature_search", "feature_describe"):
+        feature = svc.feature(feature_id)
+        assert feature.state.value == "available"
+        assert feature.runtime_available is True
+        assert feature.execution_observed is False
+    if version == "2026.2.3.0.16863":
+        # These host dispatchers still need a qualified native route.
+        assert svc.feature("inventory_refresh").state.value == "unsupported_version"
+        assert svc.feature("transform_set").runtime_available is False
 
 
 def test_ui_only_feature_returns_exact_gate_without_bridge_dispatch(tmp_path):

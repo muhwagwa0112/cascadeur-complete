@@ -212,11 +212,13 @@ class CascadeurService(RecipeNativeServiceMixin, ChangeFlowMixin, UiFileFlowMixi
         for feature in self._features:
             product = PRODUCT_CATALOG.by_id.get(feature.id)
             feature.implemented = bool(product and product.implementation_status == "implemented")
-            if narrow_build and feature.operation_id not in operations and feature.id not in {
+            host_only = (feature.verification == VerificationState.CONTRACT
+                         and feature.route.startswith("host."))
+            if narrow_build and not host_only and feature.operation_id not in operations and feature.id not in {
                     "status", "logs", "object_search", "scene_summary", "scene_list", "transform_get", "timeline_get", "key_list", "layer_list"}:
                 feature.state = CapabilityState.UNSUPPORTED_VERSION
                 feature.execution_mode = ExecutionMode.GATED
-            feature.runtime_available = connected and feature.state == CapabilityState.AVAILABLE and (not feature.mutation or feature.operation_id in operations)
+            feature.runtime_available = (host_only or connected) and feature.state == CapabilityState.AVAILABLE and (not feature.mutation or feature.operation_id in operations)
             feature.execution_observed = feature.verification.value == "verified_live"
         # This is a bridge safety capability, not a feature in the pinned
         # 2026.1 product inventory. Recipes and public preparation use the same

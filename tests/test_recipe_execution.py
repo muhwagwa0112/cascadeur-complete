@@ -38,7 +38,7 @@ def allocated(tmp_path):
     return paths, store, plan, grant, run
 
 
-def allocated_readback(tmp_path, *, export=False):
+def allocated_readback(tmp_path, *, export=False, skip_before_readback=True):
     """Persist host-state fixtures; no native failure or quality evidence."""
     from cascadeur_complete.motion_context import IntentConstraints, RigProfile
     from cascadeur_complete.motion_quality import required_motion_metrics
@@ -63,7 +63,7 @@ def allocated_readback(tmp_path, *, export=False):
     grant = store.authorize(plan, time.time() + 300)
     run = store.create(plan, grant, "readback-boundary")
     record = next(item for item in run.steps if item.step_id.endswith("-actual_readback"))
-    steps = [item.model_copy(update={"state": "skipped"}) if item.step_id < record.step_id else item
+    steps = [item.model_copy(update={"state": "skipped"}) if skip_before_readback and item.step_id < record.step_id else item
              for item in run.steps]
     run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
         transition={"state": "running", "steps": [item.model_dump(mode="json") for item in steps]})
@@ -120,6 +120,112 @@ def test_legacy_success_marked_failed_readback_cannot_resume_past_its_artifact(t
     assert stopped.state == "failed" and stopped.blocked_reason == "ACTUAL_READBACK_FAILED"
     assert stopped.steps == run.steps and stopped.artifacts == run.artifacts
     assert store.read_artifact(run.run_id, ref) == observation
+
+
+def export_validation_fixture(tmp_path, monkeypatch, validation_result):
+    """Real host persistence with consumer doubles; no native/FBX quality proof."""
+    import hashlib
+    import cascadeur_complete.recipe_runner as runner_module
+    import cascadeur_complete.export_workflow as workflow
+    import cascadeur_complete.target_capture as capture
+    paths, store, plan, run, _ = allocated_readback(tmp_path, export=True, skip_before_readback=False)
+    sealed = tmp_path / "sealed.fbx"
+    sealed.write_bytes(b"host continuity fixture only")
+    exported = {"artifact": {"path": str(sealed), "sha256": hashlib.sha256(sealed.read_bytes()).hexdigest(),
+        "bytes": sealed.stat().st_size}, "export_stage": {"directory": str(tmp_path)},
+        "before_export": {"global": {"fixture": "before-export"}}}
+    baseline = {"global": {"fixture": "original"}}
+    refs, steps = [], []
+    for item in run.steps:
+        stage = item.step_id.split("-", 1)[1]
+        if stage in {"baseline_capture", "export_stage"}:
+            value = exported if stage == "export_stage" else baseline
+            ref = store.artifact(run.run_id, item.step_id, value)
+            refs.append(ref)
+            item = item.model_copy(update={"state": "succeeded", "result": value, "artifact_refs": (ref,),
+                **({"request_id": "original-export", "attempt_id": "export-attempt", "calls_used": 1}
+                   if stage == "export_stage" else {})})
+        elif stage not in {"export_validate", "publish"} and item.state not in {"skipped", "succeeded"}:
+            item = item.model_copy(update={"state": "skipped"})
+        steps.append(item)
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+        transition={"steps": [item.model_dump(mode="json") for item in steps], "quality": "pass", "export": "staged",
+                    "artifacts": [item.model_dump(mode="json") for item in refs]})
+    calls = []
+    def validate(artifact, profile, expected, **kwargs):
+        calls.append((artifact.model_dump(mode="json"), profile, expected, kwargs["quality_context"]))
+        return validation_result
+    monkeypatch.setattr(runner_module, "_batch", lambda value: value)
+    monkeypatch.setattr(capture, "make_export_expectation", lambda *args, **kwargs: "same-expectation")
+    monkeypatch.setattr(capture, "roundtrip_quality_context", lambda *args, **kwargs: "same-original-context")
+    monkeypatch.setattr(workflow, "validate_export", validate)
+    runner = RecipeRunner(SimpleNamespace(paths=paths))
+    runner._check_plan = lambda *args: None  # These doubles do not claim a qualified live runtime.
+    runner._schedule = lambda *args: None
+    return runner, store, plan, run, calls
+
+
+@pytest.mark.parametrize("quality", ["fail", "unverified"])
+def test_export_validation_nonpass_is_never_succeeded_or_published(tmp_path, monkeypatch, quality):
+    runner, store, _, run, calls = export_validation_fixture(tmp_path, monkeypatch,
+        {"export": "staged", "quality": quality, "target": {"status": quality}})
+    runner.advance_once(run.run_id)
+    observed = store.read(run.run_id)
+    validation = next(item for item in observed.steps if item.step_id.endswith("-export_validate"))
+    assert observed.state == ("failed" if quality == "fail" else "blocked")
+    assert validation.state == ("failed" if quality == "fail" else "ready")
+    assert validation.verification_status == quality and validation.calls_used == 1
+    assert observed.export == "staged" and len(calls) == 1
+    assert store.read_artifact(run.run_id, validation.artifact_refs[-1])["quality"] == quality
+    if quality == "fail":
+        runner.resume(run.run_id)
+        assert store.read(run.run_id) == observed and len(calls) == 1
+    else:
+        # Explicit resumes consume only the existing read-retry budget, never a
+        # fresh export request/profile/context or another native export attempt.
+        for _ in range(2):
+            runner.resume(run.run_id)
+            runner.advance_once(run.run_id)
+        retried = store.read(run.run_id)
+        assert retried.budgets_used.read_retries == 2 and len(calls) == 3
+        assert all(call == calls[0] for call in calls)
+        export_step = next(item for item in retried.steps if item.step_id.endswith("-export_stage"))
+        assert export_step.request_id == "original-export" and export_step.calls_used == 1
+        runner.resume(run.run_id)
+        with pytest.raises(RecipeConflict, match="read_retries"):
+            runner.advance_once(run.run_id)
+        assert len(calls) == 3
+
+
+def test_unverified_export_validation_cancel_does_not_retry_consumer(tmp_path, monkeypatch):
+    runner, store, _, run, calls = export_validation_fixture(tmp_path, monkeypatch,
+        {"export": "staged", "quality": "unverified"})
+    runner.advance_once(run.run_id)
+    runner.cancel(run.run_id)
+    canceled = store.read(run.run_id)
+    assert canceled.state == "canceled" and canceled.export == "staged" and len(calls) == 1
+    assert next(item for item in canceled.steps if item.step_id.endswith("-export_validate")).state == "canceled"
+
+
+def test_legacy_nonpass_validation_cannot_enter_early_publish_resume(tmp_path, monkeypatch):
+    result = {"export": "staged", "quality": "unverified"}
+    runner, store, _, run, calls = export_validation_fixture(tmp_path, monkeypatch, result)
+    record = next(item for item in run.steps if item.step_id.endswith("-export_validate"))
+    ref = store.artifact(run.run_id, record.step_id, result)
+    intent = tmp_path / "legacy-publish.intent.json"
+    intent.write_text("{}", encoding="utf-8")
+    steps = [item.model_copy(update={"state": "succeeded", "result": result, "artifact_refs": (ref,)})
+        if item.step_id == record.step_id else item.model_copy(update={"state": "blocked", "stage_data": {"intent_path": str(intent)}})
+        if item.step_id.endswith("-publish") else item for item in run.steps]
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+        transition={"state": "blocked", "blocked_reason": "EXPORT_VALIDATION_FAILED",
+            "steps": [item.model_dump(mode="json") for item in steps],
+            "artifacts": [item.model_dump(mode="json") for item in (*run.artifacts, ref)]})
+    runner._export_host_step = lambda *args: pytest.fail("Nonpassing immutable validation cannot publish")
+    runner.resume(run.run_id)
+    stopped = store.read(run.run_id)
+    assert stopped.state == "failed" and stopped.blocked_reason == "EXPORT_VALIDATION_FAILED"
+    assert stopped.steps == run.steps and stopped.artifacts == run.artifacts and calls == []
 
 
 def test_r4_checkpoint_steps_and_derived_identity_are_explicit():

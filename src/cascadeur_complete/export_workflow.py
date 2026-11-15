@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-import json
 import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from .bounded_json import read_bounded_json
 from .export_models import ArtifactRef, ExportExpectation, ExportProfile, ValidationBundle, ValidationReport
 from .export_publisher import ExportPublicationError, canonical_digest, copy_exclusive, write_immutable_json
 from .fbx_validation import FbxError, ParseLimits, file_sha256, read_fbx_structure, validate_fbx_structure
@@ -31,7 +31,7 @@ class ExportStage:
         stage = cls(**{key: Path(item) if key in ('directory', 'raw_path', 'sealed_path') else item for key, item in value.items()})
         if not stage.directory.is_absolute() or stage.directory.is_symlink():
             raise ExportPublicationError('EXPORT_STAGE_MISMATCH', 'Stage must be an owned absolute directory')
-        record = json.loads((stage.directory / 'stage.json').read_text(encoding='utf-8'))
+        record = read_bounded_json(stage.directory / 'stage.json')
         if (stage.raw_path != stage.directory / 'raw.fbx' or stage.sealed_path != stage.directory / 'sealed.fbx'
                 or any(record.get(key) != getattr(stage, key) for key in ('profile_digest', 'run_id', 'step_id'))
                 or record.get('raw_path') != str(stage.raw_path) or record.get('sealed_path') != str(stage.sealed_path)):
@@ -60,7 +60,7 @@ def bind_export_stage(stage: ExportStage, *, request_id, attempt_id, lease_epoch
                'source_binding': source}
     path = stage.directory / 'stage-dispatch.json'
     if path.exists():
-        if json.loads(path.read_text(encoding='utf-8')) != payload:
+        if read_bounded_json(path) != payload:
             raise ExportPublicationError('EXPORT_STAGE_REBOUND', 'Stage dispatch binding is immutable')
     else:
         write_immutable_json(path, payload)
@@ -92,7 +92,7 @@ def seal_export(stage: ExportStage, receipt, budget) -> ArtifactRef:
             or receipt.get('dispatched') is not True or receipt.get('write_phase') != 'completed'
             or not terminal.get("ok") or native.get("native_completion") != "observed"):
         raise ExportPublicationError("NATIVE_EXPORT_COMPLETION_UNVERIFIED", "Dispatch or file existence is not completion")
-    binding = json.loads((stage.directory / 'stage-dispatch.json').read_text(encoding='utf-8'))
+    binding = read_bounded_json(stage.directory / 'stage-dispatch.json')
     if (any(receipt.get(key) != binding[key] for key in ('request_id', 'run_id', 'step_id', 'attempt_id', 'lease_epoch', 'operation_digest'))
             or receipt.get('scene_before') != binding['source_binding'].get('binding', binding['source_binding'])):
         raise ExportPublicationError("EXPORT_RECEIPT_MISMATCH", "Receipt belongs to another export stage")
@@ -129,7 +129,7 @@ def seal_export(stage: ExportStage, receipt, budget) -> ArtifactRef:
     metadata = {'artifact': artifact.model_dump(mode='json'), 'receipt_digest': canonical_digest(receipt),
                 'profile_digest': stage.profile_digest, 'dispatch_digest': canonical_digest(binding)}
     sealed_record = stage.directory / 'sealed.json'
-    if sealed_record.exists() and json.loads(sealed_record.read_text(encoding='utf-8')) != metadata:
+    if sealed_record.exists() and read_bounded_json(sealed_record) != metadata:
         raise ExportPublicationError('EXPORT_SEAL_REBOUND', 'Sealed receipt identity differs')
     if stage.sealed_path.exists():
         if (stage.sealed_path.is_symlink() or stage.sealed_path.stat().st_size != artifact.bytes
@@ -164,7 +164,7 @@ def validate_export(artifact: ArtifactRef, profile: ExportProfile, expected: Exp
             raise ExportPublicationError('EXPORT_VALIDATION_STALE', 'Retained validation is not bound to this installed decoder')
         from .target_capture import TargetCaptureEvidence, evaluate_target_capture
         from .motion_context import SampleBatch
-        bundle = ValidationBundle.model_validate_json(retained.read_text(encoding='utf-8'))
+        bundle = ValidationBundle.model_validate(read_bounded_json(retained))
         if (bundle.artifact_sha256 != artifact.sha256 or bundle.profile_digest != canonical_digest(profile)
                 or bundle.source_capture_digest != expected.source_capture_digest):
             raise ExportPublicationError('EXPORT_VALIDATION_CONFLICT', 'Retained validation belongs to different inputs')
@@ -176,13 +176,14 @@ def validate_export(artifact: ArtifactRef, profile: ExportProfile, expected: Exp
         directory = proof.parent
         if proof.name != 'capture-provenance.json' or directory.parent != Path(artifact.path).parent or directory.is_symlink():
             raise ExportPublicationError('EXPORT_VALIDATION_UNBOUND', 'Retained provenance is outside this artifact stage')
-        evidence = TargetCaptureEvidence(directory, provenance_key)
-        batch = SampleBatch.from_dict(json.loads((directory / 'canonical-capture.json').read_text(encoding='utf-8')))
+        evidence = TargetCaptureEvidence(directory, provenance_key,
+                                         max_report_bytes=profile.target_import_settings.max_report_bytes)
+        batch = SampleBatch.from_dict(read_bounded_json(directory / 'canonical-capture.json'))
         from .capture import canonical_digest as capture_digest
         if not evidence.verify(batch, capture_digest(batch.as_dict())).ok:
             raise ExportPublicationError('EXPORT_VALIDATION_CHANGED', 'Retained raw/canonical provenance no longer verifies')
-        manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
-        raw = json.loads((directory / 'capture.json').read_text(encoding='utf-8'))['capture']
+        manifest = read_bounded_json(directory / 'manifest.json')
+        raw = read_bounded_json(directory / 'capture.json', profile.target_import_settings.max_report_bytes)['capture']
         quality = evaluate_target_capture(raw, expected, profile, quality_context, directory=directory,
                                           key=provenance_key, report_path=directory / 'capture.json', manifest=manifest)
         if not quality.passed or not quality.runtime_verified:
@@ -216,7 +217,7 @@ def validate_export(artifact: ArtifactRef, profile: ExportProfile, expected: Exp
     record = Path(artifact.path).parent / 'validated.json'
     payload = bundle.model_dump(mode='json')
     if record.exists():
-        if json.loads(record.read_text(encoding='utf-8')) != payload:
+        if read_bounded_json(record) != payload:
             raise ExportPublicationError('EXPORT_VALIDATION_CONFLICT', 'A different validation is already retained')
     else:
         write_immutable_json(record, payload)

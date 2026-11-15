@@ -221,10 +221,43 @@ def test_explicit_replace_is_exact_path_and_preserves_sealed(tmp_path):
 def test_nonzero_consumer_cannot_succeed_with_a_report_marker(monkeypatch):
     from cascadeur_complete import external
     monkeypatch.setattr(external, "find_blender", lambda: Path("blender.exe"))
-    monkeypatch.setattr(external.subprocess, "run", lambda *a, **kw: SimpleNamespace(
-        returncode=2, stdout=external._MARKER + '{"bones": 100}', stderr="import failed"))
+    def failed_process(arguments, directory, **kwargs):
+        (directory / 'blender.log').write_text(external._MARKER + '{"bones": 100}\nimport failed')
+        return 2
+    monkeypatch.setattr(external, "_run_target_process", failed_process)
     with pytest.raises(RuntimeError, match="exit code 2"):
         external.verify_blender_fbx("input.fbx")
+
+
+def test_export_json_intake_rejects_oversize_and_replacement_before_parse(tmp_path, monkeypatch):
+    from cascadeur_complete import bounded_json
+    path = tmp_path / 'capture.json'
+    original = b'{"capture":[]}'
+    path.write_bytes(original)
+    assert bounded_json.read_bounded_json(path, len(original)) == {'capture': []}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Oversized/changed intake reached allocation or JSON parsing')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(bounded_json.os, 'open', forbidden)
+        patch.setattr(bounded_json.json, 'loads', forbidden)
+        with pytest.raises(ValueError, match='EXPORT_JSON_RESOURCE_LIMIT'):
+            bounded_json.read_bounded_json(path, len(original) - 1)
+
+    native_open = bounded_json.os.open
+    def change_before_open(name, flags):
+        path.write_bytes(original + b' ')
+        return native_open(name, flags)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(bounded_json.os, 'open', change_before_open)
+        patch.setattr(bounded_json.json, 'loads', forbidden)
+        with pytest.raises(ValueError, match='EXPORT_JSON_CHANGED'):
+            bounded_json.read_bounded_json(path, len(original) + 1)
+
+    with pytest.raises(ValueError, match='EXPORT_JSON_REGULAR_FILE_REQUIRED'):
+        bounded_json.read_bounded_json(tmp_path, 128)
 
 
 def test_blender45_requires_the_assigned_slot_and_single_channelbag():

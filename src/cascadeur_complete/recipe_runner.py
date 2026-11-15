@@ -256,6 +256,7 @@ class RecipeRunner:
         if run.state in TERMINAL_RUNS:
             return run_view(run)
         run = self._retain_actual_readback_failure(run)
+        run = self._retain_export_validation_failure(run)
         if run.state in TERMINAL_RUNS:
             return run_view(run)
         if run.cancel_requested:
@@ -378,6 +379,22 @@ class RecipeRunner:
             raise RecipeConflict("ACTUAL_READBACK_EVIDENCE_MISSING")
         return run
 
+    def _retain_export_validation_failure(self, run):
+        if run.state in TERMINAL_RUNS:
+            return run
+        # Legacy nonpassing validations were incorrectly made terminal success.
+        # Their signed step records cannot be reopened for another consumer run.
+        for record in run.steps:
+            if not record.step_id.endswith("-export_validate") or record.state != "succeeded":
+                continue
+            ref = next((item for item in reversed(record.artifact_refs) if item.kind == record.step_id), None)
+            if ref is None:
+                raise RecipeConflict("EXPORT_VALIDATION_EVIDENCE_MISSING")
+            result = self.store.read_artifact(run.run_id, ref)
+            if result.get("export") != "validated" or result.get("quality") != "pass":
+                return self._update(run, state="failed", blocked_reason="EXPORT_VALIDATION_FAILED")
+        return run
+
     def advance_once(self, run_id):
         with store_lock(self.store.run_dir(run_id) / ".execution.lock"):
             run = self.store.read(run_id)
@@ -386,6 +403,7 @@ class RecipeRunner:
             if run.state in TERMINAL_RUNS or run.state == "blocked":
                 return run
             run = self._retain_actual_readback_failure(run)
+            run = self._retain_export_validation_failure(run)
             if run.state in TERMINAL_RUNS:
                 return run
             plan = self.store.read_plan(run.plan_id)
@@ -941,6 +959,15 @@ class RecipeRunner:
         exported = self._latest(run, "export_stage")
         artifact = ExportArtifact.model_validate(exported["artifact"])
         if step.stage == "export_validate":
+            usage = run.budgets_used.model_dump()
+            # A returned unverified result or interrupted consumer may be
+            # observed again only as an explicitly resumed read retry. Keep the
+            # original export request, sealed artifact, profile and captures.
+            usage["read_retries"] += int(record.calls_used > 0)
+            usage = BudgetUsage.model_validate(usage)
+            validate_usage(plan, usage, run.deadline)
+            record = record.model_copy(update={"state": "ready", "calls_used": record.calls_used + 1})
+            run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
             # Persisted captures preserve both original intent and the actual
             # pre-export state. Reconstructing this host context is safe to repeat.
             before = _batch(exported["before_export"]["global"])
@@ -956,8 +983,20 @@ class RecipeRunner:
                                      provenance_key=self.store._secret, timeout=plan.spec.budgets.per_step_seconds,
                                      cancel=lambda: self.store.read(run.run_id).cancel_requested)
             if result.get("export") != "validated" or result.get("quality") != "pass":
-                return self._persist_result(run, record, result, state="blocked", blocked_reason="EXPORT_VALIDATION_FAILED")
+                failed = (result.get("quality") == "fail" or any(
+                    isinstance(result.get(key), dict) and result[key].get("status") == "fail"
+                    for key in ("structure", "target", "quality_report")))
+                record = record.model_copy(update={"verification_status": "fail" if failed else "unverified"})
+                return self._persist_result(run, record, result, step_state="failed" if failed else "ready",
+                    state="failed" if failed else "blocked", blocked_reason="EXPORT_VALIDATION_FAILED" if failed else "EXPORT_VALIDATION_UNVERIFIED")
+            record = record.model_copy(update={"verification_status": "pass"})
             return self._persist_result(run, record, result, export="validated")
+        validation = self._latest(run, "export_validate")
+        if validation.get("export") != "validated" or validation.get("quality") != "pass":
+            raise RecipeConflict("EXPORT_VALIDATION_REQUIRED")
+        bundle = ValidationBundle.model_validate(validation.get("validation_bundle"))
+        if bundle.artifact_sha256 != artifact.sha256 or bundle.profile_digest != digest(plan.spec.export):
+            raise RecipeConflict("EXPORT_VALIDATION_ARTIFACT_MISMATCH")
         if record.stage_data is None:
             grant = self.store.read_grant(run.authorization_id)
             permit = PublishPermit(destination=plan.spec.export.destination, authorization_digest=digest(grant),
@@ -978,8 +1017,7 @@ class RecipeRunner:
             self.store.verify_grant(self.store.read_grant(run.authorization_id), plan)
             if run.cancel_requested:
                 return self._step_update(run, record.model_copy(update={"state": "canceled"}), state="canceled")
-            validation = self._latest(run, "export_validate")
-            result = publish_verified(artifact, ValidationBundle.model_validate(validation["validation_bundle"]), permit,
+            result = publish_verified(artifact, bundle, permit,
                                       journal_directory=data["journal"])
         if result.get("status") != "published":
             return self._persist_result(run, record, result, step_state="blocked", state="blocked", blocked_reason="PUBLISH_OUTCOME_UNKNOWN")

@@ -95,6 +95,25 @@ def test_global_contact_tracks_a_moving_support_and_keeps_exact_lengths():
     assert np.linalg.norm(goal["a"]-goal["k"],axis=1)==pytest.approx(lengths["Left.lower_leg"],abs=1e-8)
 
 
+def test_short_contacts_budget_their_retained_full_clip_arrays_before_sparse_allocation(monkeypatch):
+    from cascadeur_complete import motion_quality,motion_solvers
+    n=100
+    capture=batch({key:np.tile(position,(n,1)) for key,position in
+                   (("h",[0,.9,0]),("k",[0,.45,.2]),("a",[0,.01,0]))},n)
+    rig=RigProfile("p","c",{"Left.hip":"h","Left.knee":"k","Left.ankle":"a"},frozenset(("k","a")))
+    contact=ContactSegment(role="Left.ankle",support_id="floor",first_frame=0,last_frame=0,
+                           mode="planted",provenance="explicit")
+    contacts=(contact,)*1000
+    intent=IntentConstraints(editable_frames=(0,n-1),contacts=contacts)
+    # Isolate resource ordering from baseline measurement. These full-clip
+    # preparations alone require 1000 * 100 * 4 * 3 * 8 = 9,600,000 bytes.
+    monkeypatch.setattr(motion_quality,"contact_metrics",lambda *_,**__: {"contact_gap_m":{"max":.01}})
+    monkeypatch.setattr(motion_solvers,"temporal_operators",lambda _:pytest.fail("sparse allocation preceded preparation budget"))
+    result=solve_contacts_v2(capture,rig,{"floor":object()},contacts,intent,{"max_memory_bytes":8*1024*1024})
+    assert result.reason_codes==["RESOURCE_BUDGET_EXCEEDED"]
+    assert "max_memory_bytes" in result.report["detail"]
+
+
 def test_rest_relative_retarget_and_planned_parent_inverse():
     rest=Rotation.from_euler("z",np.pi/2).as_matrix()
     delta=Rotation.from_euler("x",.2).as_matrix()

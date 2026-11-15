@@ -182,12 +182,13 @@ def _skew(vector):
     return np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
 
 
-def _sequence_resource_gate(batch, count, limits, *, constraint_nonzeros):
+def _sequence_resource_gate(batch, count, limits, *, constraint_nonzeros, retained_working_bytes=0):
     from .capture import estimate_motion_resources,enforce_motion_budget
     estimate=estimate_motion_resources(len(batch.context.frames),{},variables=count,
         constraint_nonzeros=constraint_nonzeros+count*6,
-        retained_capture_bytes=sum(x.nbytes for x in batch.position_m.values())*3,
+        retained_capture_bytes=sum(x.nbytes for x in batch.position_m.values())*3+retained_working_bytes,
         factorization_workspace_bytes=limits.get("factorization_workspace_bytes"))
+    estimate["retained_working_bytes"]=retained_working_bytes
     enforce_motion_budget(estimate,{"max_variables":1_000_000,"max_nonzeros":2_000_000,
                                    "max_memory_bytes":512*1024*1024,**limits})
     return estimate
@@ -460,8 +461,13 @@ def solve_contacts_v2(batch, rig, supports, contacts, intent, limits):
     contact_rows=sum(int(np.searchsorted(batch.context.frames,contact.last_frame,side="right")
                          -np.searchsorted(batch.context.frames,contact.first_frame,side="left"))
                      for contact in contacts if contact.mode!="free")
+    # prepared_contacts keeps local, target, world normals and local normals
+    # for the full clip for EACH contact, even if its active interval is short.
+    # These arrays coexist with the sparse solve and every subsequent iterate.
+    prepared_contact_bytes=sum(contact.mode!="free" for contact in contacts)*n*4*3*np.dtype(np.float64).itemsize
     try:
-        resources=_sequence_resource_gate(batch,count,limits,constraint_nonzeros=max(count*36,contact_rows*18))
+        resources=_sequence_resource_gate(batch,count,limits,constraint_nonzeros=max(count*36,contact_rows*18),
+                                          retained_working_bytes=prepared_contact_bytes)
     except MotionInputError as exc:
         return SolverResult("unsupported",[exc.code],report={"detail":str(exc)})
     d1, d2 = temporal_operators(batch.context.time_s)
@@ -533,7 +539,8 @@ def solve_contacts_v2(batch, rig, supports, contacts, intent, limits):
         if maximum <= min(gap_limit, drift_limit):
             break
         try:
-            resources=_sequence_resource_gate(batch,count,limits,constraint_nonzeros=len(data)+count*6)
+            resources=_sequence_resource_gate(batch,count,limits,constraint_nonzeros=len(data)+count*6,
+                                              retained_working_bytes=prepared_contact_bytes)
         except MotionInputError as exc:
             return SolverResult("unsupported",[exc.code],report={"detail":str(exc)})
         a = sp.csc_matrix((data, (rows, cols)), shape=(len(rhs), count))

@@ -39,6 +39,14 @@ dedicated adapter, exact postcondition, and version-matched live evidence exist.
 - License/dependency/UI gates are reported as gates, not successful execution
 - Arbitrary developer Python is disabled by the production policy
 
+Host-only `feature_search` and `feature_describe` remain available without a
+connected native adapter; this does not count as observed native execution.
+Recipe export validation preserves explicit failures as terminal failures.
+An unverified consumer result blocks publication and can be observed again only
+on explicit resume, using the same sealed inputs and the original read-retry
+budget. Retained consumer/export JSON reads enforce file-byte budgets and
+descriptor consistency before parsing; these are not whole-process memory caps.
+
 See [the support matrix](docs/SUPPORT_MATRIX.md) for the evidence rules and
 limitations, and [the support status](docs/SUPPORT_STATUS.md) for the per-feature
 result of the latest live validation run. The generated feature registry remains the runtime source of

@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from .bounded_json import MAX_EXPORT_JSON_BYTES, read_bounded_json
 from .capture import canonical_digest as capture_digest
 from .export_models import ExportExpectation
 from .export_publisher import canonical_digest, write_immutable_json
@@ -21,7 +21,7 @@ from .models import ResultEnvelope, ExecutionMode
 
 def _retain_json(path, payload):
     if path.exists():
-        if path.is_symlink() or json.loads(path.read_text(encoding='utf-8')) != payload:
+        if path.is_symlink() or read_bounded_json(path) != payload:
             raise ValueError('TARGET_PROVENANCE_RECORD_CONFLICT')
     else:
         write_immutable_json(path,payload)
@@ -198,19 +198,22 @@ def decode_target_capture(raw, expected, profile, context, *, source_binding):
 
 class TargetCaptureEvidence:
     """Internal subprocess completion evidence; a wire boolean is never consulted."""
-    def __init__(self, directory, key):
+    def __init__(self, directory, key, *, max_report_bytes=MAX_EXPORT_JSON_BYTES):
         if not isinstance(key,bytes) or len(key)<32:
             raise ValueError('TARGET_PROVENANCE_KEY_UNAVAILABLE')
         self.directory,self.key=Path(directory),key
+        if type(max_report_bytes) is not int or not 0 < max_report_bytes <= MAX_EXPORT_JSON_BYTES:
+            raise ValueError('TARGET_REPORT_BUDGET_INVALID')
+        self.max_report_bytes=max_report_bytes
 
     @classmethod
-    def record(cls,directory,key,*,report_path,manifest,canonical):
-        evidence=cls(directory,key)
+    def record(cls,directory,key,*,report_path,manifest,canonical,max_report_bytes=MAX_EXPORT_JSON_BYTES):
+        evidence=cls(directory,key,max_report_bytes=max_report_bytes)
         canonical_path=Path(directory)/'canonical-capture.json'
         _retain_json(canonical_path,canonical.as_dict())
         payload={'schema_version':1,'manifest_digest':canonical_digest(manifest),
-                 'raw_report_sha256':file_sha256(report_path),'raw_report_path':str(report_path),
-                 'canonical_file_sha256':file_sha256(canonical_path),'canonical_path':str(canonical_path),
+                 'raw_report_sha256':file_sha256(report_path,evidence.max_report_bytes),'raw_report_path':str(report_path),
+                 'canonical_file_sha256':file_sha256(canonical_path,MAX_EXPORT_JSON_BYTES),'canonical_path':str(canonical_path),
                  'capture_digest':capture_digest(canonical.as_dict()),'artifact_sha256':manifest['artifact']['sha256'],
                  'profile_digest':canonical_digest(manifest['profile']),'nonce':manifest['nonce']}
         payload['mac']=hmac.new(key,canonical_digest(payload).encode(),hashlib.sha256).hexdigest()
@@ -219,16 +222,16 @@ class TargetCaptureEvidence:
 
     def verify(self,batch,digest):
         try:
-            payload=json.loads((self.directory/'capture-provenance.json').read_text(encoding='utf-8'))
+            payload=read_bounded_json(self.directory/'capture-provenance.json')
             mac=payload.pop('mac')
             valid=hmac.compare_digest(mac,hmac.new(self.key,canonical_digest(payload).encode(),hashlib.sha256).hexdigest())
             valid=valid and payload['capture_digest']==digest==capture_digest(batch.as_dict())
             valid=valid and Path(payload['raw_report_path']).parent==self.directory and Path(payload['canonical_path']).parent==self.directory
             valid=valid and not Path(payload['raw_report_path']).is_symlink() and not Path(payload['canonical_path']).is_symlink()
-            valid=valid and file_sha256(payload['raw_report_path'])==payload['raw_report_sha256']
-            valid=valid and file_sha256(payload['canonical_path'])==payload['canonical_file_sha256']
-            valid=valid and capture_digest(json.loads(Path(payload['canonical_path']).read_text(encoding='utf-8')))==digest
-            valid=valid and canonical_digest(json.loads((self.directory/'manifest.json').read_text(encoding='utf-8')))==payload['manifest_digest']
+            valid=valid and file_sha256(payload['raw_report_path'],self.max_report_bytes)==payload['raw_report_sha256']
+            valid=valid and file_sha256(payload['canonical_path'],MAX_EXPORT_JSON_BYTES)==payload['canonical_file_sha256']
+            valid=valid and capture_digest(read_bounded_json(payload['canonical_path']))==digest
+            valid=valid and canonical_digest(read_bounded_json(self.directory/'manifest.json'))==payload['manifest_digest']
         except (OSError,ValueError,KeyError,TypeError):
             valid=False
         return ResultEnvelope(ok=bool(valid),feature_id='export.target_capture',execution_mode=ExecutionMode.EXTERNAL,
@@ -238,17 +241,17 @@ class TargetCaptureEvidence:
         if not self.verify(batch,capture_digest(batch.as_dict())).ok:
             raise ValueError('TARGET_CAPTURE_PROVENANCE_CHANGED')
         payload={'manifest':manifest,'capture_digest':capture_digest(batch.as_dict()),
-                 'raw_report_sha256':file_sha256(self.directory/'capture.json')}
+                 'raw_report_sha256':file_sha256(self.directory/'capture.json',self.max_report_bytes)}
         payload['mac']=hmac.new(self.key,canonical_digest(payload).encode(),hashlib.sha256).hexdigest()
         _retain_json(self.directory/'geometry-provenance.json',payload)
 
     def verify_geometry(self,manifest,digest):
         try:
-            payload=json.loads((self.directory/'geometry-provenance.json').read_text(encoding='utf-8'))
+            payload=read_bounded_json(self.directory/'geometry-provenance.json')
             mac=payload.pop('mac')
             valid=hmac.compare_digest(mac,hmac.new(self.key,canonical_digest(payload).encode(),hashlib.sha256).hexdigest())
             valid=valid and canonical_digest(payload['manifest'])==digest==canonical_digest(manifest)
-            valid=valid and payload['raw_report_sha256']==file_sha256(self.directory/'capture.json')
+            valid=valid and payload['raw_report_sha256']==file_sha256(self.directory/'capture.json',self.max_report_bytes)
             valid=valid and payload['capture_digest']==manifest['motion_capture_digest']
         except (OSError,ValueError,KeyError,TypeError):
             valid=False
@@ -270,14 +273,17 @@ def evaluate_target_capture(raw,expected,profile,quality_context,*,directory,key
             or canonical_digest(manifest.get('expected'))!=canonical_digest(expected)
             or manifest['report_path']!=str(report_path)):
         raise ValueError('TARGET_MANIFEST_CONTEXT_STALE')
-    observed=json.loads(Path(report_path).read_text(encoding='utf-8'))
+    report_budget=(profile.target_import_settings.max_report_bytes
+                   if profile.target_import_settings is not None else MAX_EXPORT_JSON_BYTES)
+    observed=read_bounded_json(report_path,report_budget)
     if (canonical_digest(observed['capture'])!=canonical_digest(raw) or observed['nonce']!=manifest['nonce']
             or observed['artifact_sha256']!=manifest['artifact']['sha256']):
         raise ValueError('TARGET_REPORT_CHANGED')
     batch=decode_target_capture(raw,expected,profile,ctx.before_export.context,source_binding={
         'kind':'target_subprocess','nonce':manifest['nonce'],'artifact_sha256':manifest['artifact']['sha256'],
-        'raw_report_sha256':file_sha256(report_path)})
-    evidence=TargetCaptureEvidence.record(directory,key,report_path=report_path,manifest=manifest,canonical=batch)
+        'raw_report_sha256':file_sha256(report_path,report_budget)})
+    evidence=TargetCaptureEvidence.record(directory,key,report_path=report_path,manifest=manifest,canonical=batch,
+                                          max_report_bytes=report_budget)
     mesh_evaluator=None
     if profile.include_mesh:
         from itertools import combinations
@@ -290,7 +296,7 @@ def evaluate_target_capture(raw,expected,profile,quality_context,*,directory,key
                 for name,value in raw['mesh'].items()}
         windows={name:track.windows for name,track in tracks.items()}
         geometry_manifest={'capture_kind':'target_actual','source_digest':expected.source_capture_digest,
-            'successor_digest':capture_digest(batch.as_dict()),'completion_receipt_digest':file_sha256(report_path),
+            'successor_digest':capture_digest(batch.as_dict()),'completion_receipt_digest':file_sha256(report_path,report_budget),
             'topology_digest':canonical_digest({name:value[0]['triangles_sha256'] for name,value in windows.items()}),
             'skin_digest':raw['mesh_skin_digest'],'context_digest':capture_digest(batch.context.as_dict()),
             'motion_capture_digest':capture_digest(batch.as_dict()),'frames':batch.context.frames.tolist(),
