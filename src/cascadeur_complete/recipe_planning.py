@@ -131,6 +131,9 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
                 {"cleanup_index": index}, ("evaluation",), postconditions=("evaluation_settled",))
             add("insertion_readback", "transform_get", "motion.capture", "read", {"cleanup_index": index},
                 postconditions=("completed_exact_topology", "original_intent_preserved", "predicted_target_readback"))
+            add("refinement_correction", "motion_cleanup", "motion.refine_correction", "host_compute",
+                {"cleanup_index": index}, postconditions=("authenticated_inserted_layout", "original_intent_preserved",
+                "existing_key_correction_candidate"), objects=cleanup.object_ids, lowering="insertion-refinement-v1")
         rotations = cleanup.kind in {"fingers", "finger_fan", "hand_pose", "wrist_soften"}
         add("correction", "rotation_keys" if rotations else "position_keys",
             "animation.rotation_keys_set" if rotations else "animation.position_keys_set", "scene_mutation",

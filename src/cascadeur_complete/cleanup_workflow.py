@@ -438,6 +438,53 @@ class CleanupWorkflow:
         self._key_layout_digest=model.descriptor_digest
         return model
 
+    @staticmethod
+    def _position_driver_prediction(context, driver):
+        frames=np.asarray(driver.frames)
+        values=context.positions_to_solver(driver.values)
+        if (driver.channel!="position" or driver.space!="local" or len(values)!=len(frames)
+                or values.shape!=(len(frames),3) or not np.isfinite(values).all()
+                or set(driver.segment_modes)-{"LINEAR","STEP"}
+                or context.frames[0]<frames[0] or context.frames[-1]>frames[-1]):
+            raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","complete finite local position model required")
+        prediction=[]
+        for frame in context.frames:
+            left=max(0,min(len(frames)-1,int(np.searchsorted(frames,frame,side="right")-1)))
+            if left==len(frames)-1 or frame<=frames[0] or driver.segment_modes[left]=="STEP":
+                prediction.append(values[left])
+            else:
+                alpha=(int(frame)-frames[left])/(frames[left+1]-frames[left])
+                prediction.append(values[left]*(1-alpha)+values[left+1]*alpha)
+        return np.asarray(prediction)
+
+    def _validate_refinement_curve(self, prediction, original, key, goal, limits, driver, *, require_fit=True):
+        wanted=np.asarray(goal[key],dtype=float)
+        if prediction.shape!=wanted.shape or wanted.shape!=original.position_m[key].shape or not np.isfinite(wanted).all():
+            raise MotionInputError("INVALID_GOAL","complete finite refinement goal required")
+        residual=float(np.max(np.linalg.norm(prediction-wanted,axis=1)))
+        correction=float(np.max(np.linalg.norm(prediction-original.position_m[key],axis=1)))
+        if require_fit and residual>float(limits.get("fit_error_m",.0005)):
+            raise MotionInputError("KEY_LAYOUT_INSUFFICIENT","native float32 prediction exceeds full-domain fit tolerance")
+        cap=min(self.intent.correction_envelope.get("position_m",0.),limits.get("position_correction_m",float("inf")))
+        if correction>cap+1e-12:
+            raise MotionInputError("INTENT_LOCK_VIOLATION","full refinement influence exceeds the original correction envelope")
+        self._validate_candidate_effect([{"id":key,"frame":int(frame),"position":value.tolist()}
+            for frame,value in zip(self.context.frames,self.context.positions_to_scene(prediction),strict=True)],original)
+        protected={int(frame) for frame in self.context.frames
+                   if not self.intent.editable_frames[0]<=frame<=self.intent.editable_frames[1]}
+        for role,object_id in self.profile.role_ids.items():
+            if object_id==key:
+                protected.update(self.intent.locked_roles_frames.get(role,()))
+        for contact in self.intent.contacts:
+            if self.profile.role_ids.get(contact.role)==key:
+                protected.update((contact.first_frame,contact.last_frame))
+        protected.update(row["frame"] for row in driver.boundary_keys if row.get("locked") or row.get("event"))
+        rows={int(frame):row for row,frame in enumerate(self.context.frames)}
+        if any(frame not in rows or np.linalg.norm(prediction[rows[frame]]-original.position_m[key][rows[frame]])>1e-8
+               for frame in protected):
+            raise MotionInputError("INTENT_LOCK_VIOLATION","native float32 refinement changes a protected sample")
+        return residual,correction
+
     def _plan_sparse_insertion(self, batch, goal, locks, limits, budget, report, requested):
         """Plan a separate insertion; never reinterpret a global rig as local.
 
@@ -449,12 +496,20 @@ class CleanupWorkflow:
         from bisect import bisect_right
         from dataclasses import replace
         from .motion_solvers import refine_sparse_keys
-        from .motion_key_layout import plan_key_insertion, verify_key_layout
+        from .motion_key_layout import DriverKeyLayout, plan_key_insertion, verify_key_layout
         if not self.intent.allow_key_insertion or type(budget) is not int or budget <= 0:
             return {"status":"failed","reason_codes":["KEY_LAYOUT_INSUFFICIENT"],"report":report}
         if len(goal)!=1 or not set(goal)<=set(requested):
             raise MotionInputError("KEY_INSERTION_SCOPE_UNQUALIFIED","sparse insertion requires one explicitly writable driver")
-        local=self.capture_batch(list(batch.object_ids),space="local")
+        # Keep the actual rotations required by the recipe's original-intent
+        # checks. Native capture may omit every unrequested rotation channel.
+        roles={"root",*self.intent.key_pose_locks,*self.intent.locked_roles_frames}
+        rotations=tuple(sorted(set(batch.rotation_wxyz)|{
+            self.profile.role_ids[role] for role in roles if role in self.profile.role_ids
+            and self.profile.role_ids[role] in batch.object_ids}))
+        if set(rotations)-set(batch.rotation_wxyz):
+            batch=self.capture_batch(list(batch.object_ids),space="global",required_rotation_ids=rotations)
+        local=self.capture_batch(list(batch.object_ids),space="local",required_rotation_ids=rotations)
         reader=getattr(self.service,"observe_key_layout",None)
         if not callable(reader):
             raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native local layout reader unavailable")
@@ -480,10 +535,12 @@ class CleanupWorkflow:
         refined=refine_sparse_keys(goal,local,replace(self.profile,writable_ids=frozenset(goal)),
             self.intent,locks,refinement_limits,key_layout=observed.model_dump(mode="json"),
             verifier=getattr(self.service,"verify_key_layout",None),
-            allow_key_insertion=True,max_added_keys=budget)
+            allow_key_insertion=True,max_added_keys=budget,allow_existing_key_updates=True)
         if refined.status!="candidate":
             return refined.as_dict()
         driver=observed.drivers[0]
+        joint=bool(refined.values["existing_writes"])
+        rows={int(frame):row for row,frame in enumerate(local.context.frames)}
         additions=[]
         for row in refined.values["additions"]:
             left=bisect_right(driver.frames,row["frame"])-1
@@ -491,7 +548,11 @@ class CleanupWorkflow:
             # runtime constructs the real Section and rejects any difference.
             tangent={**driver.tangents[left],"mode":"Continuous",
                      "key_common":{"ik_fk":"FK","fixation":"Free"},"label":None}
-            raw=np.asarray(self.context.positions_to_scene(row["position_m"]),dtype=np.float32)
+            # A joint fit first inserts neutral samples of the ACTUAL source
+            # curve. Its final original/new key values are a separate plan,
+            # applied only after the insertion's authenticated readback.
+            value=local.position_m[key][rows[row["frame"]]] if joint else row["position_m"]
+            raw=np.asarray(self.context.positions_to_scene(value),dtype=np.float32)
             if not np.isfinite(raw).all():
                 raise MotionInputError("INVALID_POLICY","new positions exceed native float32 range")
             additions.append({"object_id":row["object_id"],"channel":"position","layer_id":row["layer_id"],
@@ -502,52 +563,153 @@ class CleanupWorkflow:
         if delta.locator_insertion is None:
             raise MotionInputError("KEY_INSERTION_ADAPTER_UNVERIFIED","independent native locator prediction required")
         expected=delta.locator_insertion.expected_driver
-        frames=np.asarray(expected.frames)
-        values=self.context.positions_to_solver(expected.values)
-        prediction=[]
-        for frame in self.context.frames:
-            left=max(0,min(len(frames)-1,int(np.searchsorted(frames,frame,side="right")-1)))
-            if left==len(frames)-1 or frame<=frames[0] or expected.segment_modes[left]=="STEP":
-                prediction.append(values[left])
-            else:
-                alpha=(int(frame)-frames[left])/(frames[left+1]-frames[left])
-                prediction.append(values[left]*(1-alpha)+values[left+1]*alpha)
-        prediction=np.asarray(prediction)
-        residual=float(np.max(np.linalg.norm(prediction-np.asarray(goal[key]),axis=1)))
-        correction=float(np.max(np.linalg.norm(prediction-local.position_m[key],axis=1)))
-        if residual>float(limits.get("fit_error_m",.0005)):
-            raise MotionInputError("KEY_LAYOUT_INSUFFICIENT","native float32 prediction exceeds full-domain fit tolerance")
-        if correction>self.intent.correction_envelope.get("position_m",0.)+1e-12:
-            raise MotionInputError("INTENT_LOCK_VIOLATION","full insertion influence exceeds the original correction envelope")
-        self._validate_candidate_effect([{"id":key,"frame":int(frame),"position":value.tolist()}
-            for frame,value in zip(self.context.frames,self.context.positions_to_scene(prediction),strict=True)],local)
-        protected={int(frame) for frame in self.context.frames
-                   if not self.intent.editable_frames[0]<=frame<=self.intent.editable_frames[1]}
-        for role,object_id in self.profile.role_ids.items():
-            if object_id==key:
-                protected.update(self.intent.locked_roles_frames.get(role,()))
-        for contact in self.intent.contacts:
-            if self.profile.role_ids.get(contact.role)==key:
-                protected.update((contact.first_frame,contact.last_frame))
-        rows={int(frame):row for row,frame in enumerate(self.context.frames)}
-        if any(frame not in rows or np.linalg.norm(prediction[rows[frame]]-local.position_m[key][rows[frame]])>1e-8
-               for frame in protected):
-            raise MotionInputError("INTENT_LOCK_VIOLATION","native float32 prediction changes a protected sample")
+        prediction=self._position_driver_prediction(self.context,expected)
+        residual,correction=self._validate_refinement_curve(prediction,local,key,goal,limits,driver,require_fit=not joint)
         target=replace(local,position_m={**local.position_m,key:prediction})
+        refinement=None
+        if joint:
+            final_values=dict(zip(expected.frames,expected.values,strict=True))
+            updates=refined.values["existing_writes"]+refined.values["additions"]
+            if (len({row["frame"] for row in updates})!=len(updates)
+                    or any((row["object_id"],row["channel"],row["layer_id"])!=(key,"position",driver.layer_id)
+                           or row["frame"] not in final_values for row in updates)):
+                raise MotionInputError("INVALID_WRITE_SCOPE","refinement escapes the exact inserted driver")
+            for row in updates:
+                raw=np.asarray(self.context.positions_to_scene(row["position_m"]),dtype=np.float32)
+                if raw.shape!=(3,) or not np.isfinite(raw).all():
+                    raise MotionInputError("INVALID_POLICY","final positions exceed native float32 range")
+                final_values[row["frame"]]=tuple(raw.astype(float))
+            final_driver=DriverKeyLayout.model_validate({**expected.model_dump(mode="json"),
+                "values":[list(final_values[frame]) for frame in expected.frames]})
+            final_prediction=self._position_driver_prediction(self.context,final_driver)
+            final_residual,final_correction=self._validate_refinement_curve(
+                final_prediction,local,key,goal,limits,driver)
+            refinement={"schema_version":1,"final_driver":final_driver.model_dump(mode="json"),
+                "final_target":replace(local,position_m={**local.position_m,key:final_prediction}).as_dict(),
+                "requested_target_digest":canonical_digest(goal),"original_capture_digest":canonical_digest(local.as_dict()),
+                "limits":{"fit_error_m":float(limits.get("fit_error_m",.0005)),
+                          "position_correction_m":float(min(limits.get("position_correction_m",float("inf")),
+                              self.intent.correction_envelope.get("position_m",0.)))}}
+            report={**report,"native_float32_final_fit_residual_m":final_residual,
+                    "predicted_final_cumulative_position_m":final_correction}
         arguments={"object_id":key,"layer_id":driver.layer_id,
             "additions":[{"frame":row.frame,"position":list(row.value),"mode":row.mode} for row in delta.additions],
             "space":"local","allow_key_insertion":True,"max_added_keys":min(budget,8)}
         self._key_layout_digest=layout_digest
         self._key_insertion_plan={"delta_digest":canonical_digest(delta.model_dump(mode="json")),
             "predicted_target_digest":canonical_digest(target.as_dict()),"original_capture_digest":canonical_digest(local.as_dict()),
-            "requested_target_digest":canonical_digest(goal)}
-        return {"status":"candidate","feature_id":"key_insert","operation_name":"motion.key_topology_insert",
+            "requested_target_digest":canonical_digest(goal),"refinement_digest":canonical_digest(refinement)}
+        result={"status":"candidate","feature_id":"key_insert","operation_name":"motion.key_topology_insert",
             "arguments":arguments,"source_binding":self._bind_source("motion.key_topology_insert",arguments),
             "existing_writes":[],"chunks":[],"key_topology_delta":delta.model_dump(mode="json"),
             "original_capture":local.as_dict(),"original_key_layout":observed.model_dump(mode="json"),
             "predicted_target":target.as_dict(),"requested_target":canonical_data(goal),
             "report":{**report,**refined.report,"native_float32_fit_residual_m":residual,
                 "predicted_cumulative_position_m":correction,"runtime_quality":"unverified"}}
+        if refinement is not None:
+            result["refinement"]=refinement
+        return result
+
+    def plan_refined_correction(self, candidate):
+        """Bind retained final values to the actually completed inserted layout.
+
+        This does not rerun styling/contact goal construction or add keys. It
+        authenticates the original insertion completion and the fresh complete
+        layout, then prepares only the existing position-key values from the
+        retained final model. The recipe separately authorizes the write.
+        """
+        from dataclasses import replace
+        from .motion_key_layout import DriverKeyLayout, KeyTopologyDelta, verify_key_layout, validate_key_topology_readback
+        self._require_contract("refinement")
+        refinement=candidate.get("refinement")
+        fields={"schema_version","final_driver","final_target","requested_target_digest","original_capture_digest","limits"}
+        if (not isinstance(refinement,dict) or set(refinement)!=fields or type(refinement["schema_version"]) is not int
+                or refinement["schema_version"]!=1 or candidate.get("existing_writes")!=[]
+                or candidate.get("feature_id")!="key_insert" or candidate.get("operation_name")!="motion.key_topology_insert"):
+            raise MotionInputError("KEY_REFINEMENT_PLAN_INVALID","retained separate insertion/final-value plan required")
+        original=SampleBatch.from_dict(candidate["original_capture"])
+        interim=SampleBatch.from_dict(candidate["predicted_target"])
+        final=SampleBatch.from_dict(refinement["final_target"])
+        delta=KeyTopologyDelta.model_validate(candidate["key_topology_delta"])
+        proof=delta.locator_insertion
+        requested=candidate.get("requested_target")
+        limits=refinement["limits"]
+        if (proof is None or len(original.object_ids)!=1 or original.space!="local"
+                or original.object_ids!=interim.object_ids or original.object_ids!=final.object_ids
+                or original.object_ids[0] not in self.profile.writable_ids
+                or refinement["requested_target_digest"]!=canonical_digest(requested)
+                or refinement["original_capture_digest"]!=canonical_digest(original.as_dict())
+                or proof.capture_digest!=canonical_digest(original.as_dict())
+                or proof.key_layout_digest!=canonical_digest(candidate["original_key_layout"])
+                or not isinstance(requested,dict) or set(requested)!=set(original.object_ids)
+                or not isinstance(limits,dict) or set(limits)!={"fit_error_m","position_correction_m"}
+                or any(type(value) not in (int,float) or not np.isfinite(value) or value<0 for value in limits.values())
+                or canonical_digest(original.context.as_dict())!=canonical_digest(self.context.as_dict())):
+            raise MotionInputError("KEY_REFINEMENT_PLAN_INVALID","original capture, goal or limits differ from retained plan")
+        key=original.object_ids[0]
+        expected=proof.expected_driver
+        final_driver=DriverKeyLayout.model_validate(refinement["final_driver"])
+        if (final_driver.model_dump(exclude={"values"})!=expected.model_dump(exclude={"values"})
+                or expected.object_id!=key or proof.source_binding_digest!=canonical_digest(original.source_binding)):
+            raise MotionInputError("KEY_REFINEMENT_TOPOLOGY_CHANGED","final values cannot change insertion topology or metadata")
+        values=np.asarray(final_driver.values,dtype=float)
+        if not np.isfinite(values).all() or not np.array_equal(values,values.astype(np.float32).astype(float)):
+            raise MotionInputError("KEY_REFINEMENT_PLAN_INVALID","final model requires exact finite native float32 values")
+        for prediction,driver in ((interim,expected),(final,final_driver)):
+            if (prediction.space!="local" or canonical_digest(prediction.context.as_dict())!=canonical_digest(original.context.as_dict())
+                    or canonical_digest(prediction.source_binding)!=canonical_digest(original.source_binding)
+                    or set(prediction.position_m)!={key}
+                    or not np.array_equal(prediction.position_m[key],self._position_driver_prediction(self.context,driver))
+                    or set(prediction.rotation_wxyz)!=set(original.rotation_wxyz)
+                    or any(not np.array_equal(prediction.rotation_wxyz[item],original.rotation_wxyz[item]) for item in original.rotation_wxyz)
+                    or set(prediction.channel_valid)!=set(original.channel_valid)
+                    or any(not np.array_equal(prediction.channel_valid[item],original.channel_valid[item]) for item in original.channel_valid)):
+                raise MotionInputError("KEY_REFINEMENT_PREDICTION_CHANGED","retained full-grid prediction or protected channels differ")
+        self._validate_refinement_curve(final.position_m[key],original,key,requested,limits,delta.original_layout[0])
+        current_source=SourceBinding.model_validate(self.source_binding)
+        if (not current_source.complete or current_source.adapter_fingerprint!=proof.runtime_fingerprint
+                or any(getattr(current_source.binding,name)!=getattr(proof,name)
+                       for name in ("runtime_epoch","scene_instance_id","document_lineage_id"))):
+            raise MotionInputError("KEY_REFINEMENT_SOURCE_CHANGED","current successor differs from original insertion identity")
+        local=self.capture_batch([key],space="local",required_rotation_ids=tuple(original.rotation_wxyz))
+        world=self.capture_batch([key],space="global",required_rotation_ids=tuple(original.rotation_wxyz))
+        if (local.object_ids!=world.object_ids or local.space!="local" or world.space!="global"
+                or canonical_digest(local.context.as_dict())!=canonical_digest(self.context.as_dict())
+                or canonical_digest(world.context.as_dict())!=canonical_digest(self.context.as_dict())
+                or not np.allclose(local.position_m[key],world.position_m[key],rtol=0,atol=1e-10)
+                or not np.allclose(local.position_m[key],interim.position_m[key],rtol=0,atol=1e-8)):
+            raise MotionInputError("KEY_REFINEMENT_SOURCE_CHANGED","fresh local/world curve differs from completed insertion")
+        reader=getattr(self.service,"observe_key_layout",None)
+        topology_verifier=getattr(self.service,"verify_key_topology",None)
+        if not callable(reader) or not callable(topology_verifier):
+            raise MotionInputError("KEY_TOPOLOGY_READBACK_UNVERIFIED","private topology completion authenticator unavailable")
+        receipt=reader({"ids":[key],"space":"local","channel":"position","frames":self.context.frames.tolist(),
+            "capture_digest":canonical_digest(local.as_dict()),"capture_object_ids":[key],"context":self.context.as_dict()})
+        if not getattr(receipt,"ok",False):
+            raise MotionInputError("KEY_TOPOLOGY_READBACK_UNVERIFIED","fresh inserted layout unavailable")
+        observed,layout_digest=verify_key_layout(receipt.result,local,getattr(self.service,"verify_key_layout",None))
+        completion=validate_key_topology_readback(delta,observed.model_dump(mode="json"),verifier=lambda item,sha:
+            topology_verifier(item,sha,delta.adapter_evidence_ref))
+        if len(observed.drivers)!=1 or observed.drivers[0]!=expected:
+            raise MotionInputError("KEY_REFINEMENT_TOPOLOGY_CHANGED","actual inserted driver differs from private expected topology")
+        self._validate_refinement_curve(local.position_m[key],original,key,requested,limits,delta.original_layout[0],require_fit=False)
+        writes=[{"id":key,"frame":int(frame),"position":list(value)}
+                for frame,value,before in zip(final_driver.frames,final_driver.values,expected.values,strict=True) if value!=before]
+        validate_write_scope(writes,self.profile,self.intent)
+        self._key_layout_digest=layout_digest
+        self._key_insertion_plan=None
+        self._planning_parameters={"refinement_parent_digest":canonical_digest(candidate),
+            "final_driver_digest":canonical_digest(final_driver.model_dump(mode="json")),
+            "final_target_digest":canonical_digest(final.as_dict()),"completion":completion}
+        arguments={"writes":writes,"space":"global"}
+        prediction=replace(world,position_m={**world.position_m,key:final.position_m[key]})
+        return {"status":"candidate" if writes else "no_change","feature_id":"position_keys",
+            "operation_name":"animation.position_keys_set","arguments":arguments,
+            "source_binding":self._bind_source("animation.position_keys_set",arguments) if writes else canonical_data(self.source_binding),
+            "chunks":partition_writes(writes),"refinement_parent_digest":canonical_digest(candidate),
+            "refinement_prediction":prediction.as_dict(),"report":{"runtime_quality":"unverified",
+                "coverage":"sampled_frames","key_layout_digest":layout_digest,
+                "completion_receipt_digest":completion["completion_receipt_digest"]}}
 
     def plan_pass(self, kind, parameters=None, *, generated_keys_budget=0):
         """Compute a whole-domain candidate, without preparing a token or changing a scene."""

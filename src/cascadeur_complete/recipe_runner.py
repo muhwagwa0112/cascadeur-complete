@@ -26,7 +26,7 @@ from .recipe_store import HOST_INSTANCE_ID, RecipeConflict, RecipeRunStore, TERM
 from .store_lock import store_lock
 from .stage_contracts import StageEffect
 from .capture import estimate_motion_resources, enforce_motion_budget
-from .motion_key_layout import KeyTopologyDelta, validate_key_topology_readback
+from .motion_key_layout import DriverKeyLayout, KeyLayoutObservation, KeyTopologyDelta, validate_key_topology_readback
 
 
 def _json(value):
@@ -440,14 +440,16 @@ class RecipeRunner:
                 self._check_plan(plan, run)
                 return self._persist_result(run, pending, {"reason": step.not_required_reason,
                                                            "verified_by": "live_preflight"}, step_state="skipped")
-            if step.stage in {"key_insert", "insertion_evaluation", "insertion_readback"}:
-                candidate = self._latest(run, "solve")
+            if step.stage in {"key_insert", "insertion_evaluation", "insertion_readback", "refinement_correction"}:
+                candidate = self._cleanup_result(run, plan, "solve", step.fixed_parameters["cleanup_index"])
                 if candidate.get("key_topology_delta") is None:
                     return self._persist_result(run, pending, {"reason": "candidate_has_no_key_insertion"}, step_state="skipped")
+                if step.stage == "refinement_correction" and candidate.get("refinement") is None:
+                    return self._persist_result(run, pending, {"reason": "candidate_has_no_refinement"}, step_state="skipped")
             if step.stage == "preflight":
                 self._check_plan(plan, run)
                 return self._persist_result(run, pending, {"supported": True})
-            if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "insertion_readback", "analyze", "solve", "quality", "host_retarget"}:
+            if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "insertion_readback", "refinement_correction", "analyze", "solve", "quality", "host_retarget"}:
                 return self._host_step(run, pending, step, plan)
             if step.stage in {"export_validate", "publish"}:
                 return self._export_host_step(run, pending, step, plan)
@@ -541,6 +543,51 @@ class RecipeRunner:
         ref = records[-1].artifact_refs[-1]
         return self.store.read_artifact(run.run_id, ref)
 
+    def _cleanup_result(self, run, plan, stage, cleanup_index):
+        permits = [item for item in plan.steps if item.stage == stage
+                   and item.fixed_parameters.get("cleanup_index") == cleanup_index]
+        if len(permits) != 1:
+            raise RecipeConflict("CLEANUP_STAGE_MAPPING_AMBIGUOUS:" + stage)
+        record = next((item for item in run.steps if item.step_id == permits[0].step_id), None)
+        if record is None or record.state not in {"succeeded", "no_change", "skipped"}:
+            raise RecipeConflict("CLEANUP_STAGE_EVIDENCE_MISSING:" + stage)
+        ref = next((item for item in reversed(record.artifact_refs) if item.kind == record.step_id), None)
+        if ref is None:
+            raise RecipeConflict("CLEANUP_STAGE_EVIDENCE_MISSING:" + stage)
+        return self.store.read_artifact(run.run_id, ref)
+
+    def _verified_insertion(self, run, plan, cleanup_index, candidate):
+        observed = self._cleanup_result(run, plan, "insertion_readback", cleanup_index)
+        verification, topology = observed.get("verification", {}), observed.get("topology_verification", {})
+        permit = next(item for item in plan.steps if item.stage == "key_insert"
+                      and item.fixed_parameters.get("cleanup_index") == cleanup_index)
+        record = next(item for item in run.steps if item.step_id == permit.step_id)
+        ref = next((item for item in record.artifact_refs if item.path == record.receipt_ref), None)
+        if (verification.get("status") != "pass" or verification.get("candidate_digest") != digest(candidate)
+                or topology.get("status") != "matched" or ref is None
+                or record.state != "succeeded" or record.execution_outcome != "succeeded"):
+            raise RecipeConflict("KEY_INSERTION_READBACK_REQUIRED")
+        receipt = self.store.read_artifact(run.run_id, ref)
+        if (topology.get("completion_receipt_digest") != digest(receipt)
+                or topology.get("key_layout_digest") != digest(KeyLayoutObservation.model_validate(
+                    observed.get("key_layout")).model_dump(mode="json"))):
+            raise RecipeConflict("KEY_INSERTION_RECEIPT_MISMATCH")
+        return observed
+
+    def _correction_candidate(self, run, plan, cleanup_index):
+        parent = self._cleanup_result(run, plan, "solve", cleanup_index)
+        if parent.get("key_topology_delta") is None or parent.get("refinement") is None:
+            return parent
+        observed = self._verified_insertion(run, plan, cleanup_index, parent)
+        candidate = self._cleanup_result(run, plan, "refinement_correction", cleanup_index)
+        if (candidate.get("refinement_parent_digest") != digest(parent)
+                or candidate.get("key_topology_delta") is not None
+                or not isinstance(candidate.get("refinement_prediction"), dict)
+                or candidate.get("report", {}).get("completion_receipt_digest")
+                    != observed["topology_verification"]["completion_receipt_digest"]):
+            raise RecipeConflict("REFINEMENT_CANDIDATE_PARENT_MISMATCH")
+        return candidate
+
     def _host_step(self, run, record, step, plan):
         # Resolve symbolic selectors only from immutable producer evidence.
         plan = plan.model_copy(update={"spec": self.effective_spec(plan.spec, run)})
@@ -574,6 +621,12 @@ class RecipeRunner:
             if step.stage == "insertion_readback":
                 used["bridge_requests"] += 4
             used["memory_bytes"] = max(used["memory_bytes"], n * len(plan.spec.character.object_ids) * 2048)
+        if step.stage == "refinement_correction":
+            candidate = self._cleanup_result(run, plan, "solve", step.fixed_parameters["cleanup_index"])
+            self._verified_insertion(run, plan, step.fixed_parameters["cleanup_index"], candidate)
+            n = plan.spec.clip.last_frame - plan.spec.clip.first_frame + 1
+            used["bridge_requests"] += 4 * ((n * len(plan.spec.character.object_ids) + 24) // 25) + 16
+            used["memory_bytes"] = max(used["memory_bytes"], n * len(plan.spec.character.object_ids) * 4096)
         if step.stage == "solve":
             cleanup = plan.spec.cleanup[step.fixed_parameters["cleanup_index"]]
             insertion_step = next((item for item in plan.steps if item.stage == "key_insert"
@@ -588,15 +641,15 @@ class RecipeRunner:
             positional = cleanup.kind in {"foot_contacts", "arm_clearance", "hand_rest", "wrist_accent"}
             if positional and insertion_cap:
                 # Reserve the initial existing-key fits and the finite sparse
-                # refinement (initial grid plus at most one refit per added
-                # key), each with three scalar-axis solver invocations. These
+                # refinement (initial grid plus each added key, with at most
+                # one stabilizing refit per grid), each with three axes. These
                 # are maximum numerical iterations, never implicit new grants.
                 used["solve_iterations"] += sum(3 * int(item.parameters.get("limits", {}).get("fit_iterations", 10000))
-                    * (len(plan.spec.character.object_ids) + 1 + insertion_cap) for item in step.candidate_variants)
-                # A second local capture and its verification, both layout
-                # observations/authenticators, insertion proof and exact source
-                # binding all precede returning a candidate.
-                used["bridge_requests"] += len(step.candidate_variants) * (2 * chunks + 12)
+                    * (len(plan.spec.character.object_ids) + 2 * (1 + insertion_cap)) for item in step.candidate_variants)
+                # Local capture and any needed global recapture of protected
+                # rotations, their verification, both layout authenticators,
+                # insertion proof and exact source binding precede a candidate.
+                used["bridge_requests"] += len(step.candidate_variants) * (4 * chunks + 12)
             if positional:
                 estimate = estimate_motion_resources(n, {key: n for key in cleanup.object_ids},
                     retained_capture_bytes=n * len(plan.spec.character.object_ids) * (4096 if insertion_cap else 2048))
@@ -619,7 +672,7 @@ class RecipeRunner:
                 validate_quality_policy(plan.spec.quality, self._profile(plan.spec), plan.spec.intent,
                     self._include_mesh(plan.spec,self._profile(plan.spec)),capture=_batch(value["global"]))
             if step.stage == "insertion_readback":
-                candidate = self._latest(run, "solve")
+                candidate = self._cleanup_result(run, plan, "solve", step.fixed_parameters["cleanup_index"])
                 delta = KeyTopologyDelta.model_validate(candidate["key_topology_delta"])
                 local = _batch(value["local"])
                 observed = self.service.observe_key_layout({"ids": [delta.additions[0].object_id],
@@ -642,7 +695,7 @@ class RecipeRunner:
                     raise RecipeConflict("KEY_INSERTION_RECEIPT_MISMATCH")
                 value.update(key_layout=observed.result, topology_verification=topology)
             if step.stage in {"actual_readback", "insertion_readback"}:
-                verification = self._verify_actual(run, plan, value)
+                verification = self._verify_actual(run, plan, value, step)
                 value["verification"] = verification
                 if verification["status"] != "pass":
                     record = record.model_copy(update={"verification_status": "fail"})
@@ -650,6 +703,21 @@ class RecipeRunner:
                                                 blocked_reason="ACTUAL_READBACK_FAILED",
                                                 current_binding=binding.model_dump(mode="json"))
             return self._persist_result(run, record, value, current_binding=binding.model_dump(mode="json"))
+        if step.stage == "refinement_correction":
+            candidate = self._cleanup_result(run, plan, "solve", step.fixed_parameters["cleanup_index"])
+            observed = self._verified_insertion(run, plan, step.fixed_parameters["cleanup_index"], candidate)
+            workflow = self._workflow(plan.spec, run.current_binding, planning=True)
+            result = _json(workflow.plan_refined_correction(candidate))
+            if (result.get("status") not in {"candidate", "no_change"}
+                    or result.get("refinement_parent_digest") != digest(candidate)
+                    or not isinstance(result.get("refinement_prediction"), dict)
+                    or result.get("key_topology_delta") is not None
+                    or result.get("report", {}).get("completion_receipt_digest")
+                        != observed["topology_verification"]["completion_receipt_digest"]):
+                return self._persist_result(run, record, result, step_state="failed", state="failed",
+                                            blocked_reason="REFINEMENT_CORRECTION_UNVERIFIED")
+            self._refinement_prediction(result, candidate, plan)
+            return self._persist_result(run, record, result)
         baseline = self._latest(run, "baseline_capture")
         actual = self._latest(run, "actual_readback") if any(
             item.step_id.endswith("-actual_readback") and item.result for item in run.steps) else baseline
@@ -734,12 +802,15 @@ class RecipeRunner:
         return [f"ORIGINAL_INTENT_VIOLATION:{name}" for name, cap in caps.items()
                 if name in metrics and metrics[name].get("status") == "measured" and metrics[name]["max"] > cap]
 
-    def _verify_actual(self, run, plan, actual):
+    def _verify_actual(self, run, plan, actual, step=None):
         original = self._latest(run, "baseline_capture")
         metrics = original_intent_metrics(_batch(original["global"]), _batch(actual["global"]),
                                            self._profile(plan.spec), plan.spec.intent)
         reasons = self._original_constraints(plan, metrics)
-        candidate = self._latest(run, "solve")
+        index = None if step is None else step.fixed_parameters["cleanup_index"]
+        parent = self._latest(run, "solve") if index is None else self._cleanup_result(run, plan, "solve", index)
+        interim = step is not None and step.stage == "insertion_readback" and parent.get("refinement") is not None
+        candidate = parent if index is None or step.stage == "insertion_readback" else self._correction_candidate(run, plan, index)
         if candidate.get("key_topology_delta") is not None:
             prediction = self._insertion_prediction(candidate, plan)
             # The privately qualified contract is one parentless Transform.
@@ -753,9 +824,28 @@ class RecipeRunner:
             full_policy = plan.spec.quality
             policy = full_policy.model_copy(update={"required_metrics": tuple(name for name in full_policy.required_metrics
                 if not (plan.spec.export is not None and name in {"position_readback_m", "rotation_readback_rad"}))})
-            report = evaluate_actual_quality(_batch(original["global"]), world, self._profile(plan.spec), plan.spec.intent,
-                policy, supports=self._supports(plan.spec), prediction=prediction,
-                capture_verifier=self.service.recipe_verify_capture).as_dict()
+            if interim:
+                # Neutral insertion closes topology and original invariants;
+                # repair/contact/collision goals are obligations of the final
+                # correction, not a claim about the intermediate curve.
+                invariant_names = {"duration_error_s", "position_correction_m", "rotation_correction_rad",
+                    "root_preservation_m", "root_preservation_rad", "key_pose_position_m", "key_pose_rotation_rad",
+                    "non_target_scope_m", "non_target_scope_rad", "bone_length_error_m",
+                    "correction_envelope_violation_count"}
+                required = required_motion_metrics(self._profile(plan.spec), plan.spec.intent,
+                    capture=_batch(original["global"])) & invariant_names
+                missing = [name for name in required if metrics.get(name, {}).get("status") != "measured"
+                           or metrics[name].get("sample_count", 0) <= 0]
+                reasons.extend("INSERTION_INVARIANT_UNMEASURED:" + name for name in sorted(missing))
+                reasons.extend("INSERTION_INVARIANT_VIOLATION:" + name for name in sorted(required - set(missing))
+                    if metrics[name]["max"] > full_policy.limits_si[name])
+                report = {"status": "fail" if reasons else "pass", "reason_codes": [],
+                    "evaluated_required_metrics": sorted(required),
+                    "deferred_required_metrics": sorted(set(full_policy.required_metrics) - required)}
+            else:
+                report = evaluate_actual_quality(_batch(original["global"]), world, self._profile(plan.spec), plan.spec.intent,
+                    policy, supports=self._supports(plan.spec), prediction=prediction,
+                    capture_verifier=self.service.recipe_verify_capture).as_dict()
             from .motion_quality import compare_captures
             readback = compare_captures(_batch(candidate["predicted_target"]), local)
             for name, metric in readback.items():
@@ -765,8 +855,31 @@ class RecipeRunner:
             if reasons:
                 report["status"] = "fail"
                 report["reason_codes"].extend(reasons)
-            report.update(quality_scope="insertion_native", approved_quality_policy_digest=digest(full_policy),
+            report.update(quality_scope="insertion_interim_integrity" if interim else "insertion_native", approved_quality_policy_digest=digest(full_policy),
                 candidate_digest=digest(candidate), predicted_readback=readback, original_metrics=metrics)
+            return report
+        if parent.get("refinement") is not None:
+            prediction = self._refinement_prediction(candidate, parent, plan)
+            full_policy = plan.spec.quality
+            deferred = tuple(name for name in full_policy.required_metrics if plan.spec.export is not None
+                             and name in {"position_readback_m", "rotation_readback_rad"})
+            policy = full_policy.model_copy(update={"required_metrics": tuple(name for name in full_policy.required_metrics if name not in deferred)})
+            world = _batch(actual["global"])
+            report = evaluate_actual_quality(_batch(original["global"]), world, self._profile(plan.spec), plan.spec.intent,
+                policy, supports=self._supports(plan.spec), prediction=prediction,
+                capture_verifier=self.service.recipe_verify_capture).as_dict()
+            from .motion_quality import compare_captures
+            readback = compare_captures(prediction, world)
+            for name, metric in readback.items():
+                if (metric.get("status") != "measured" or metric.get("sample_count", 0) <= 0
+                        or metric["max"] > full_policy.limits_si.get(name, 1e-12 if name == "duration_error_s" else 1e-8)):
+                    reasons.append("REFINEMENT_PREDICTION_READBACK_MISMATCH:" + name)
+            if reasons:
+                report["status"] = "fail"
+                report["reason_codes"].extend(reasons)
+            report.update(quality_scope="refinement_final_native", approved_quality_policy_digest=digest(full_policy),
+                evaluated_required_metrics=list(policy.required_metrics), deferred_required_metrics=list(deferred),
+                candidate_digest=digest(candidate), refinement_parent_digest=digest(parent), predicted_readback=readback)
             return report
         arguments = candidate.get("arguments", {})
         batch = _batch(actual[arguments.get("space", "global")])
@@ -844,15 +957,63 @@ class RecipeRunner:
         return SampleBatch(predicted.context, predicted.object_ids, "global", predicted.position_m,
                            predicted.rotation_wxyz, predicted.channel_valid, predicted.source_binding)
 
+    def _refinement_prediction(self, candidate, parent, plan):
+        self._insertion_prediction(parent, plan)
+        refinement = parent.get("refinement")
+        if (not isinstance(refinement, dict) or set(refinement) != {"schema_version", "final_driver", "final_target",
+                "requested_target_digest", "original_capture_digest", "limits"}
+                or refinement.get("schema_version") != 1
+                or refinement.get("original_capture_digest") != digest(parent["original_capture"])
+                or refinement.get("requested_target_digest") != digest(parent.get("requested_target"))
+                or candidate.get("refinement_parent_digest") != digest(parent)):
+            raise RecipeConflict("REFINEMENT_CANDIDATE_PARENT_MISMATCH")
+        original = _batch(parent["original_capture"])
+        target, prediction = _batch(refinement["final_target"]), _batch(candidate["refinement_prediction"])
+        expected = KeyTopologyDelta.model_validate(parent["key_topology_delta"]).locator_insertion.expected_driver
+        final = DriverKeyLayout.model_validate(refinement["final_driver"])
+        before_fields, final_fields = expected.model_dump(mode="json"), final.model_dump(mode="json")
+        before_fields.pop("values")
+        final_fields.pop("values")
+        if (before_fields != final_fields or len(final.values) != len(final.frames)
+                or target.space != "local" or prediction.space != "global"
+                or target.object_ids != original.object_ids or prediction.object_ids != original.object_ids
+                or digest(target.context.as_dict()) != digest(original.context.as_dict())
+                or digest(prediction.context.as_dict()) != digest(original.context.as_dict())
+                or digest(target.source_binding) != digest(original.source_binding)
+                or set(target.position_m) != set(original.position_m)
+                or set(prediction.position_m) != set(original.position_m)):
+            raise RecipeConflict("REFINEMENT_PREDICTION_SCOPE_MISMATCH")
+        validate_samples(target, {key: ("position",) for key in original.object_ids})
+        validate_samples(prediction, {key: ("position",) for key in original.object_ids})
+        values = original.context.positions_to_solver(final.values)
+        curve = []
+        for frame in original.context.frames:
+            left = max(0, min(len(final.frames) - 1, int(np.searchsorted(final.frames, frame, side="right") - 1)))
+            if left == len(final.frames) - 1 or frame <= final.frames[0] or final.segment_modes[left] == "STEP":
+                curve.append(values[left])
+            else:
+                alpha = (int(frame) - final.frames[left]) / (final.frames[left + 1] - final.frames[left])
+                curve.append(values[left] * (1 - alpha) + values[left + 1] * alpha)
+        if (not np.isfinite(values).all() or not np.array_equal(target.position_m[final.object_id], np.asarray(curve))
+                or any(not np.array_equal(prediction.position_m[key], target.position_m[key]) for key in original.object_ids)):
+            raise RecipeConflict("REFINEMENT_TARGET_DIFFERS_FROM_RETAINED_DRIVER")
+        for channels in ("rotation_wxyz", "channel_valid"):
+            original_values = getattr(original, channels)
+            for batch in (target, prediction):
+                actual_values = getattr(batch, channels)
+                if (set(original_values) != set(actual_values)
+                        or any(not np.array_equal(original_values[key], actual_values[key]) for key in original_values)):
+                    raise RecipeConflict("REFINEMENT_PREDICTION_ROTATION_OR_COVERAGE_CHANGED")
+        return prediction
+
     def _prepare(self, run, record, step, plan):
         context = {}
         topology_delta = None
         if step.stage == "correction":
-            candidate = self._latest(run, "solve")
+            index = step.fixed_parameters["cleanup_index"]
+            candidate = self._correction_candidate(run, plan, index)
             if candidate.get("key_topology_delta") is not None:
-                verified = self._latest(run, "insertion_readback")
-                if verified.get("verification", {}).get("status") != "pass" or verified.get("verification", {}).get("candidate_digest") != digest(candidate):
-                    raise RecipeConflict("KEY_INSERTION_READBACK_REQUIRED")
+                self._verified_insertion(run, plan, index, candidate)
                 return self._persist_result(run, record, {"reason": "standalone_insertion_has_no_existing_writes",
                     "candidate_digest": digest(candidate)}, step_state="skipped")
             if candidate.get("status") == "no_change":
@@ -867,7 +1028,7 @@ class RecipeRunner:
         else:
             measured = None
         if step.stage == "key_insert":
-            candidate = self._latest(run, "solve")
+            candidate = self._cleanup_result(run, plan, "solve", step.fixed_parameters["cleanup_index"])
             prediction = self._insertion_prediction(candidate, plan)
             topology_delta = KeyTopologyDelta.model_validate(candidate["key_topology_delta"])
             used = run.budgets_used.model_dump()

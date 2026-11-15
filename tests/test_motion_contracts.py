@@ -555,13 +555,22 @@ def test_sparse_refinement_cannot_spend_a_contact_boundary_or_locked_frame():
         assert result.reason_codes==["KEY_LAYOUT_INSUFFICIENT"]
 
 
-def test_sparse_workflow_authenticates_native_units_and_keeps_original_capture(monkeypatch):
+def _sparse_workflow_domain_case(monkeypatch, *, joint=False, with_rotation=False):
+    """Host-contract doubles only; these do not qualify a native operation."""
     from copy import deepcopy
     from dataclasses import replace
     from types import SimpleNamespace
     from cascadeur_complete.capture import canonical_digest
     from cascadeur_complete.cleanup_workflow import CleanupWorkflow
     capture,rig,intent,observed,verifier,goal=_sparse_refinement_case()
+    capture=replace(capture,source_binding={**capture.source_binding,"complete":True})
+    if with_rotation:
+        capture=replace(capture,rotation_wxyz={"a":np.tile([1.,0.,0.,0.],(9,1))},
+                        channel_valid={"a":np.ones((9,2),dtype=bool)})
+    if joint:
+        goal={"a":np.column_stack(([0.,.005,.01,.01,.01,.0075,.005,.0025,0.],np.zeros((9,2))))}
+        intent=intent.model_copy(update={"root_policy":"explicit_mapped_trajectory"})
+    observed["capture_digest"]=canonical_digest(capture.as_dict())
     observed["native_source_scope"]={"objects":[{"id":"a","parent_id":None}]}
     _,_,_,_,_,proof,_,_,_=_locator_insertion_domain_case()
     before_digest=canonical_digest(capture.as_dict())
@@ -583,7 +592,7 @@ def test_sparse_workflow_authenticates_native_units_and_keeps_original_capture(m
                 *expected["boundary_keys"][1:]])
         issued={**proof,"request_digest":sha,"key_layout_digest":canonical_digest(observed),
             "original_topology_digest":canonical_digest(observed["drivers"]),"capture_digest":before_digest,
-            "expected_driver":expected}
+            "source_binding_digest":canonical_digest(capture.source_binding),"expected_driver":expected}
         return SimpleNamespace(ok=True,result={"request_digest":sha,"shared_layer_effects_observed":True,
             "non_target_effects":[],"adapter_evidence_ref":"domain-only-private-proof","locator_insertion":issued})
     service=SimpleNamespace(observe_key_layout=lambda request:SimpleNamespace(ok=True,result=observed),
@@ -594,6 +603,17 @@ def test_sparse_workflow_authenticates_native_units_and_keeps_original_capture(m
     monkeypatch.setattr(workflow,"_bind_source",lambda op,args:(bound.append((op,args)) or capture.source_binding))
     result=workflow._plan_sparse_insertion(replace(capture,space="global"),goal,{},
         {"velocity_weight":0,"acceleration_weight":0,"fit_error_m":1e-7},1,{},frozenset(("a",)))
+    return SimpleNamespace(capture=capture,rig=rig,intent=intent,observed=observed,goal=goal,
+        workflow=workflow,result=result,requests=requests,bound=bound,before_digest=before_digest)
+
+
+def test_sparse_workflow_authenticates_native_units_and_keeps_original_capture(monkeypatch):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from cascadeur_complete.capture import canonical_digest
+    case=_sparse_workflow_domain_case(monkeypatch)
+    result,capture,goal=case.result,case.capture,case.goal
+    requests,bound,before_digest=case.requests,case.bound,case.before_digest
     assert result["operation_name"]=="motion.key_topology_insert"
     assert result["existing_writes"]==[]
     assert requests[0]["additions"][0]["value"]==pytest.approx([1.,0.,0.],abs=1e-6)
@@ -612,3 +632,141 @@ def test_sparse_workflow_authenticates_native_units_and_keeps_original_capture(m
     tampered["predicted_target"]["position_m"]["a"][2][0]+=.001
     with pytest.raises(RecipeConflict,match="KEY_INSERTION_.*PREDICTION|KEY_INSERTION_.*TARGET"):
         runner._insertion_prediction(tampered,plan)
+
+
+def test_joint_sparse_fit_moves_existing_keys_only_with_explicit_optin():
+    from cascadeur_complete.motion_solvers import refine_sparse_keys
+    capture,rig,intent,observed,verifier,_=_sparse_refinement_case()
+    goal={"a":np.column_stack(([0.,.005,.01,.01,.01,.0075,.005,.0025,0.],np.zeros((9,2))))}
+    settings={"velocity_weight":0,"acceleration_weight":0,"fit_error_m":1e-7}
+    fixed=refine_sparse_keys(goal,capture,rig,intent,{},settings,key_layout=observed,
+        verifier=verifier,allow_key_insertion=True,max_added_keys=1)
+    assert fixed.status=="failed" and fixed.reason_codes==["KEY_LAYOUT_INSUFFICIENT"]
+    result=refine_sparse_keys(goal,capture,rig,intent,{},settings,key_layout=observed,
+        verifier=verifier,allow_key_insertion=True,max_added_keys=1,allow_existing_key_updates=True)
+    assert result.status=="candidate",result.as_dict()
+    assert [row["frame"] for row in result.values["additions"]]==[2]
+    assert [row["frame"] for row in result.values["existing_writes"]]==[4]
+    assert np.asarray(result.values["predicted_position_m"]["a"])==pytest.approx(goal["a"],abs=1e-7)
+    assert result.report["resources"]["maximum_qp_solves"]==12
+    assert result.report["qp_solves"]<=12
+    protected=intent.model_copy(update={"locked_roles_frames":{"a":(4,)}})
+    locked=refine_sparse_keys(goal,capture,rig,protected,{},settings,key_layout=observed,
+        verifier=verifier,allow_key_insertion=True,max_added_keys=1,allow_existing_key_updates=True)
+    assert locked.status=="failed" and locked.reason_codes==["KEY_LAYOUT_INSUFFICIENT"]
+
+
+def test_joint_sparse_workflow_binds_existing_values_only_after_private_completion(monkeypatch):
+    from copy import deepcopy
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from cascadeur_complete.capture import canonical_digest
+    from cascadeur_complete.motion_key_layout import KeyTopologyDelta
+    from cascadeur_complete.recipe_runner import RecipeRunner
+    from cascadeur_complete.recipe_store import RecipeConflict
+    case=_sparse_workflow_domain_case(monkeypatch,joint=True,with_rotation=True)
+    parent,workflow,capture=case.result,case.workflow,case.capture
+    assert parent["status"]=="candidate",parent
+    assert parent["arguments"]["additions"]==[{"frame":2,"position":[0.,0.,0.],"mode":"LINEAR"}]
+    assert parent["existing_writes"]==[] and parent["chunks"]==[]
+    assert np.array_equal(parent["predicted_target"]["position_m"]["a"],capture.position_m["a"])
+    assert np.asarray(parent["refinement"]["final_target"]["position_m"]["a"])==pytest.approx(case.goal["a"],abs=1e-7)
+    proof=KeyTopologyDelta.model_validate(parent["key_topology_delta"]).locator_insertion
+    successor={**capture.source_binding,"sample_digest":canonical_digest({"domain_successor":True})}
+    workflow.source_binding=successor
+    fresh=replace(capture,source_binding=successor)
+    after={**deepcopy(case.observed),"capture_digest":canonical_digest(fresh.as_dict()),
+           "drivers":[proof.expected_driver.model_dump(mode="json")]}
+    workflow.service.observe_key_layout=lambda request:SimpleNamespace(ok=True,result=after)
+    captures=[]
+    def actual_capture(ids,*,space,required_rotation_ids=()):
+        captures.append((space,required_rotation_ids))
+        return replace(fresh,space=space)
+    monkeypatch.setattr(workflow,"capture_batch",actual_capture)
+    completion={name:getattr(proof,name) for name in ("contract","request_digest","source_binding_digest",
+        "runtime_epoch","runtime_fingerprint","scene_instance_id","document_lineage_id","before_projection_digest")}
+    completion.update(key_layout_digest=canonical_digest(after),adapter_evidence_ref=parent["key_topology_delta"]["adapter_evidence_ref"],
+        after_projection_digest=canonical_digest({"domain_after":True}),
+        completion_receipt_digest=canonical_digest({"domain_completion":True}))
+    rejected=SimpleNamespace(ok=False,result={})
+    workflow.service.verify_key_topology=lambda *args:rejected
+    binds=len(case.bound)
+    with pytest.raises(MotionInputError,match="KEY_TOPOLOGY_READBACK_UNVERIFIED"):
+        workflow.plan_refined_correction(parent)
+    assert len(case.bound)==binds
+    workflow.service.verify_key_topology=lambda *args:SimpleNamespace(ok=True,result={
+        "key_layout_digest":canonical_digest(after),"completion_receipt_digest":completion["completion_receipt_digest"],
+        "locator_insertion_completion":completion})
+    result=workflow.plan_refined_correction(parent)
+    assert result["status"]=="candidate"
+    assert result["operation_name"]=="animation.position_keys_set" and result["arguments"]["space"]=="global"
+    assert [row["frame"] for row in result["arguments"]["writes"]]==[2,4]
+    assert np.asarray([row["position"] for row in result["arguments"]["writes"]])==pytest.approx(np.asarray([[1.,0.,0.],[1.,0.,0.]]),abs=1e-6)
+    assert result["refinement_parent_digest"]==canonical_digest(parent)
+    assert result["report"]["completion_receipt_digest"]==completion["completion_receipt_digest"]
+    assert all(rotations==("a",) for _,rotations in captures)
+    assert canonical_digest(capture.as_dict())==case.before_digest
+    plan=SimpleNamespace(spec=SimpleNamespace(character=SimpleNamespace(object_ids=("a",))))
+    runner=RecipeRunner.__new__(RecipeRunner)
+    prediction=runner._refinement_prediction(result,parent,plan)
+    assert prediction.source_binding.model_dump(mode="json")==successor
+    assert prediction.position_m["a"]==pytest.approx(case.goal["a"],abs=1e-7)
+    tampered=deepcopy(result)
+    tampered["refinement_prediction"]["position_m"]["a"][3][0]+=.001
+    with pytest.raises(RecipeConflict,match="REFINEMENT_TARGET_DIFFERS_FROM_RETAINED_DRIVER"):
+        runner._refinement_prediction(tampered,parent,plan)
+    tampered=deepcopy(parent)
+    tampered["refinement"]["final_driver"]["segment_modes"][0]="STEP"
+    binds=len(case.bound)
+    with pytest.raises(MotionInputError,match="KEY_REFINEMENT_TOPOLOGY_CHANGED"):
+        workflow.plan_refined_correction(tampered)
+    assert len(case.bound)==binds
+    # Exercise the real phase-specific quality logic using host capture
+    # doubles. A neutral insertion cannot satisfy the deferred final target.
+    from cascadeur_complete.motion_quality import QualityPolicy,required_motion_metrics
+    baseline=replace(capture,space="global")
+    required=required_motion_metrics(case.rig,case.intent,capture=baseline)|{"acceleration_m_s2"}
+    quality=QualityPolicy(profile_id="domain",profile_revision="1",required_metrics=tuple(sorted(required)),
+        limits_si={**{name:0. for name in required},"position_correction_m":.03,"acceleration_m_s2":100.})
+    plan.spec.intent,plan.spec.quality,plan.spec.export=case.intent,quality,None
+    runner._profile=lambda spec:case.rig
+    runner._supports=lambda spec:{}
+    runner._latest=lambda run,stage:{"global":baseline.as_dict()} if stage=="baseline_capture" else parent
+    runner._cleanup_result=lambda run,plan,stage,index:parent
+    runner._correction_candidate=lambda *args:result
+    runner.service=SimpleNamespace(recipe_verify_capture=lambda actual,sha:SimpleNamespace(ok=True,result={"capture_digest":sha}))
+    insertion_step=SimpleNamespace(stage="insertion_readback",fixed_parameters={"cleanup_index":0})
+    actual_step=SimpleNamespace(stage="actual_readback",fixed_parameters={"cleanup_index":0})
+    neutral={"local":fresh.as_dict(),"global":replace(fresh,space="global").as_dict()}
+    report=runner._verify_actual(None,plan,neutral,insertion_step)
+    assert report["status"]=="pass",report
+    assert report["quality_scope"]=="insertion_interim_integrity"
+    assert "acceleration_m_s2" in report["deferred_required_metrics"]
+    report=runner._verify_actual(None,plan,neutral,actual_step)
+    assert report["status"]=="fail"
+    assert "REFINEMENT_PREDICTION_READBACK_MISMATCH:position_readback_m" in report["reason_codes"]
+    final_actual={"global":prediction.as_dict(),"local":replace(prediction,space="local").as_dict()}
+    report=runner._verify_actual(None,plan,final_actual,actual_step)
+    assert report["status"]=="pass",report
+    assert report["quality_scope"]=="refinement_final_native"
+    assert "acceleration_m_s2" in report["evaluated_required_metrics"]
+
+
+def test_sparse_insertion_requests_protected_rotations_in_both_actual_spaces(monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from cascadeur_complete.cleanup_workflow import CleanupWorkflow
+    capture,rig,intent,_,_,goal=_sparse_refinement_case()
+    rig=replace(rig,role_ids={"root":"a"})
+    intent=intent.model_copy(update={"root_policy":"explicit_mapped_trajectory"})
+    service=SimpleNamespace(observe_key_layout=lambda request:SimpleNamespace(ok=False))
+    workflow=CleanupWorkflow(service,profile=rig,context=capture.context,intent=intent,source_binding=capture.source_binding)
+    calls=[]
+    def actual_capture(ids,*,space,required_rotation_ids):
+        calls.append((space,required_rotation_ids))
+        return replace(capture,space=space,rotation_wxyz={"a":np.tile([1.,0.,0.,0.],(9,1))},
+                       channel_valid={"a":np.ones((9,2),dtype=bool)})
+    monkeypatch.setattr(workflow,"capture_batch",actual_capture)
+    with pytest.raises(MotionInputError,match="INTERPOLATION_MODEL_UNVERIFIED"):
+        workflow._plan_sparse_insertion(replace(capture,space="global"),goal,{}, {},1,{},frozenset(("a",)))
+    assert calls==[("global",("a",)),("local",("a",))]

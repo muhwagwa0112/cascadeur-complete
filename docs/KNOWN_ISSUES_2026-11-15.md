@@ -7,7 +7,21 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 설치 실패 정리와 설치 진단 연결
+### 최신 추가: 새 키와 기존 키의 공동 fitting 및 후속 보정 연결
+
+원격 개선안 branch를 다시 조회했으며 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하다. 기존 16개 목표는 계속 진행 중이다. 실제 설치 파일의 ProductVersion/FileVersion은 `2026.2.3.0.16863`이며 이번 CIM 조회에도 PID `2328`이 실행 중이었다. 전역 설치 교체나 앱 종료·재시작, loaded qualification은 이번에 실행하지 않았다.
+
+- `refine_sparse_keys`의 기본 동작은 원 키 고정이다. cleanup fallback만 `allow_existing_key_updates=True`를 명시하여 새 키와 변경 가능한 기존 키 값을 공동 QP로 푼다. 원 key/frame/mode/tangent/section은 유지하며 lock/contact/event/편집 범위 밖/root-preserve 값은 고정한다. 기존 키만으로 해결되는 결과를 삽입 또는 `no_change` 성공으로 위장하지 않고 `KEY_INSERTION_NOT_REQUIRED`로 돌려준다. 이전 existing-key fit 경로는 유지한다.
+- 공동 fitting은 실제 원 곡선의 중립 값으로 새 키만 먼저 삽입한다. 원본 capture/layout/source, 삽입 직후 private 예측, 요청 목표와 최종 float32 driver/full-grid 목표를 별도로 보존한다. float32 변환 후 fit 잔차와 원본 기준 전체 영향 구간의 correction/pose/보호 조건을 다시 검사한다. 삽입 단계에서 기존 키를 함께 쓰지 않는다.
+- 승인 plan은 `solve → key_insert → insertion_evaluation → insertion_readback → refinement_correction → correction → actual_readback`을 미리 선언한다. 후속 host planner는 같은 cleanup index의 원 삽입 receipt, private topology completion, 새 실제 local/global capture 및 정확한 삽입 layout을 다시 확인한 뒤 일반 `animation.position_keys_set` 후보만 발급한다. 쓰기는 기존 별도 permit/prepare/commit 경로로 간다. 나중 cleanup의 후보나 다른 receipt를 가져와 이어갈 수 없다.
+- 중간 readback은 `insertion_interim_integrity`로 원본 불변 조건과 private 삽입 예측을 확인하고 최종 repair/contact 등의 의무를 명시적으로 연기한다. 최종 readback은 원본 intent의 전체 native quality policy와 retained 최종 full-grid 곡선을 확인한다. 중간 pass를 최종 pass로 재사용하지 않는다. 필요한 root/lock/이미 관측된 회전은 실제 global/local capture로 수집하며 추정 quaternion으로 채우지 않는다.
+- QP의 변경 가능 기존 키 변수·최대 두 번의 grid별 fitting·3축·각 `fit_iterations` 상한, 추가 실제 capture/read 및 메모리를 호출 전에 예약한다. 미세한 기존 키 수치 오차는 모든 해당 열을 실제 원 값에 고정한 전역 재계산 한 번으로 처리하며, 최종 예측에 남긴 변경을 write에서 누락하지 않는다. 기본 run 예산은 자동 확장하지 않는다.
+
+이 계산과 continuation 경계를 확인할 필요가 있어 선택한 호스트 사례만 실행했다. 첫 실행은 **`1 failed, 9 passed, 59 deselected in 1.93s`**였다. 실패는 테스트에서 `SourceBinding` DTO를 dict와 직접 비교한 assertion이었으며 canonical JSON 비교로 고쳤다. 여기에 최종 품질 경계와 보호 회전 실제 요청 사례를 묶어 해당 두 사례만 실행한 결과는 **`2 passed in 0.93s`**다. 고유 사례 11개가 통과했다. 기존 키 고정 기본값/opt-in, 기존 키 lock, 새 키 native units, 중립 삽입과 기존 키 후속 보정, 원 capture 보존, private 완료 없는 continuation 거절, topology/prediction 변조 거절, 동일 cleanup/원 receipt 연결을 확인했다. 중간 중립 곡선은 무결성만 pass이고 최종 곡선과 다르면 실패하며, 최종 full-grid 값과 실제 품질 계산이 일치할 때만 최종 경계가 pass였다. native proof/capture/receipt doubles는 호스트 계약용이며 실제 앱 성공 증거가 아니다.
+
+**남은 제한:** 현재 isolated/global의 원 `outcome_unknown`과 전체 unresolved-effect barrier를 보존한다. 새 runtime root, 직접 setter 또는 원 요청 재분류로 우회하지 않았다. 새 공동 fitting 레시피의 native 실행, 새 loaded bytes의 자격 확인, 일반 rig/rotation/coupled 모델·retarget refinement·unbaking·실패 복구·실제 설치 연속성·최종 consumer 납품은 미완료다. 새 host bytes/compiled 단계에는 새 plan/grant가 필요하다. 전체 suite/build/CI는 실행하지 않았다.
+
+### 이전 추가: 설치 실패 정리와 설치 진단 연결
 
 원격 개선 문서 branch의 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하며 기존 16개 목표를 유지한다. 실제 설치 파일의 ProductVersion은 `2026.2.3.0.16863`이다. **이전 턴의 "실행 중 프로세스 없음" 기록을 정정한다.** `Win32_Process`와 `Get-Process -Id 2328`에서 `2026-11-16 06:14:42 KST`부터 실행 중인 Cascadeur를 확인했고, UI에서도 `guarded-spaced-key-insertion-8e409ec0-0054-4982-a654-ce04d572c37c/working.casc`와 기존 retained 탭들이 열려 있음을 확인했다. 앱은 응답했다. 해당 프로세스에 새 bridge bytes를 hot reload하지 않았다.
 

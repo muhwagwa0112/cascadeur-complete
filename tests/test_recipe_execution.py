@@ -39,8 +39,8 @@ def test_sparse_insertion_stages_are_predeclared_with_one_finite_shared_budget()
     assert sum(step.max_effect_from_baseline.maximum_added_keys for step in insertion)==5
     for step in insertion:
         index=plan.steps.index(step)
-        assert [item.stage for item in plan.steps[index-1:index+5]]==[
-            "solve","key_insert","insertion_evaluation","insertion_readback","correction","actual_readback"]
+        assert [item.stage for item in plan.steps[index-1:index+6]]==[
+            "solve","key_insert","insertion_evaluation","insertion_readback","refinement_correction","correction","actual_readback"]
         assert step.operation_name=="motion.key_topology_insert"
         assert plan.steps[index+1].prerequisite_step_ids==(step.step_id,)
         assert step.fixed_parameters["max_added_keys"]==step.max_effect_from_baseline.maximum_added_keys
@@ -54,6 +54,86 @@ def allocated(tmp_path):
     grant = store.authorize(plan, time.time() + 300)
     run = store.create(plan, grant, "same-start")
     return paths, store, plan, grant, run
+
+
+def allocated_refinement_boundary(tmp_path, *, fault=None):
+    """Persist host continuity doubles, never native topology/completion proof."""
+    from cascadeur_complete.motion_key_layout import KeyLayoutObservation
+    value = spec_dict()
+    value["intent"].update(allow_key_insertion=True, correction_envelope={"added_keys": 2, "position_m": .03})
+    value["budgets"] = {"generated_keys": 2}
+    value["cleanup"] = [{"kind": "foot_contacts", "object_ids": ["root"]} for _ in range(2)]
+    paths = RuntimePaths.discover(tmp_path)
+    paths.ensure()
+    store = RecipeRunStore(paths)
+    plan = store.save_plan(build_plan(RecipeSpec.model_validate(value), []))
+    grant = store.authorize(plan, time.time() + 300)
+    run = store.create(plan, grant, "refinement-host-continuity")
+    parents = [{"status": "candidate", "key_topology_delta": {"host_fixture_index": index},
+                "refinement": {"host_fixture_index": index}} for index in range(2)]
+    receipts = [{"phase": "terminal", "outcome": "succeeded", "request_id": f"original-insertion-{index}"}
+                for index in range(2)]
+    layout = KeyLayoutObservation(build_fingerprint="host-fixture", evaluator_fingerprint="host-fixture",
+        source_fingerprint="host-fixture", capture_digest="host-fixture", drivers=(), evidence_ref="host-fixture"
+        ).model_dump(mode="json")
+    candidates, records, refs = {}, [], []
+    for permit, record in zip(plan.steps, run.steps, strict=True):
+        index = permit.fixed_parameters.get("cleanup_index")
+        if permit.stage == "key_insert":
+            ref = store.artifact(run.run_id, "runtime_receipt", receipts[index])
+            refs.append(ref)
+            record = record.model_copy(update={"state": "succeeded", "execution_outcome": "succeeded",
+                "request_id": receipts[index]["request_id"], "attempt_id": f"original-attempt-{index}",
+                "calls_used": 1, "receipt_ref": ref.path, "artifact_refs": (ref,)})
+        elif permit.stage in {"solve", "insertion_readback", "refinement_correction"}:
+            completion = digest(receipts[1 if index == 0 and fault == "other_receipt" else index])
+            if permit.stage == "solve":
+                result = parents[index]
+            elif permit.stage == "insertion_readback":
+                result = {"verification": {"status": "pass", "candidate_digest": digest(
+                    parents[1 if index == 0 and fault == "other_cleanup_parent" else index])},
+                    "key_layout": layout, "topology_verification": {"status": "matched",
+                        "key_layout_digest": digest(layout), "completion_receipt_digest": completion}}
+            else:
+                result = {"status": "candidate", "refinement_parent_digest": digest(parents[index]),
+                    "refinement_prediction": {"host_fixture_index": index},
+                    "report": {"completion_receipt_digest": completion}}
+                candidates[index] = result
+            ref = store.artifact(run.run_id, record.step_id, result)
+            refs.append(ref)
+            record = record.model_copy(update={"state": "succeeded", "result": result, "artifact_refs": (ref,)})
+        records.append(record)
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+        transition={"state": "running", "steps": [item.model_dump(mode="json") for item in records],
+                    "artifacts": [item.model_dump(mode="json") for item in refs]})
+    return RecipeRunner(SimpleNamespace(paths=paths)), store, plan, run, candidates
+
+
+def test_refinement_candidate_uses_same_cleanup_index(tmp_path):
+    """Later persisted passes cannot replace an earlier pass's host candidate."""
+    runner, store, plan, run, candidates = allocated_refinement_boundary(tmp_path)
+    assert runner._correction_candidate(run, plan, 0) == candidates[0]
+    assert runner._correction_candidate(run, plan, 1) == candidates[1]
+    assert store.read(run.run_id) == run
+
+
+@pytest.mark.parametrize("fault, reason", [("other_cleanup_parent", "KEY_INSERTION_READBACK_REQUIRED"),
+                                         ("other_receipt", "KEY_INSERTION_RECEIPT_MISMATCH")])
+def test_refinement_correction_requires_original_insertion_readback(tmp_path, fault, reason):
+    """Real host persistence only; these doubles do not authenticate native effects."""
+    runner, store, plan, run, candidates = allocated_refinement_boundary(tmp_path, fault=fault)
+    permit = next(item for item in plan.steps if item.stage == "correction"
+                  and item.fixed_parameters["cleanup_index"] == 0)
+    record = next(item for item in run.steps if item.step_id == permit.step_id)
+    runner.service.prepare_change = lambda *args, **kwargs: pytest.fail("Mismatched insertion cannot prepare a write")
+    with pytest.raises(RecipeConflict, match=reason):
+        runner._prepare(run, record, permit, plan)
+    assert runner._correction_candidate(run, plan, 1) == candidates[1]
+    assert store.read(run.run_id) == run
+    for item in run.steps:
+        if item.receipt_ref:
+            ref = next(ref for ref in item.artifact_refs if ref.path == item.receipt_ref)
+            assert store.read_artifact(run.run_id, ref)["request_id"] == item.request_id
 
 
 def allocated_readback(tmp_path, *, export=False, skip_before_readback=True):

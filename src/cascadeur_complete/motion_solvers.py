@@ -193,71 +193,95 @@ def _refinement_interpolant(frames, keys, modes):
     return sp.csr_matrix((values, (rows, columns)), shape=(len(frames), len(keys)))
 
 
-def _fit_refinement_grid(original, base, wanted, keys, modes, original_values, locks, cap, limits):
-    """Eliminate old keys exactly; solve only new values against all samples."""
+def _fit_refinement_grid(original, base, wanted, keys, modes, original_values, locks, cap, limits,
+                         *, allow_existing_key_updates=False):
+    """Globally fit free values, algebraically eliminating protected columns."""
     import osqp
     import scipy.sparse as sp
     frames = original.context.frames
-    if all(frame in original_values for frame in keys):
+    if not allow_existing_key_updates and all(frame in original_values for frame in keys):
         # No insertion means the independently observed source remains exact;
         # native float32 cache rounding is not a reason to invent old writes.
-        return base.copy(), {}
+        return base.copy(), {}, 0
     b = _refinement_interpolant(frames, keys, modes)
-    old_columns = [i for i, frame in enumerate(keys) if frame in original_values]
-    new_columns = [i for i, frame in enumerate(keys) if frame not in original_values]
-    fixed = b[:, old_columns] @ np.asarray([original_values[keys[i]] for i in old_columns])
-    z = b[:, new_columns].tocsc()
     d1, d2 = temporal_operators(original.context.time_s)
-    v, a = d1 @ z, d2 @ z
     velocity, acceleration = limits.get("velocity_weight", .01), limits.get("acceleration_weight", .001)
-    h = (z.T @ z + velocity * v.T @ v + acceleration * a.T @ a
-         + sp.identity(len(new_columns)) * 1e-10).tocsc()
     frame_rows = {int(frame): row for row, frame in enumerate(frames)}
     lock_frames = sorted(locks)
     lock_rows = [frame_rows[frame] for frame in lock_frames]
-    matrix = sp.vstack((sp.identity(len(new_columns), format="csc"), z, z[lock_rows]), format="csc")
-    new_base = base[[frame_rows[keys[i]] for i in new_columns]]
-    output = np.empty((len(new_columns), 3))
-    for axis in range(3):
-        lock_values = np.asarray([locks[frame][axis] - fixed[frame_rows[frame], axis] for frame in lock_frames])
-        lower = np.concatenate((new_base[:, axis] - cap, base[:, axis] - fixed[:, axis] - cap, lock_values))
-        upper = np.concatenate((new_base[:, axis] + cap, base[:, axis] - fixed[:, axis] + cap, lock_values))
-        linear = -2 * (z.T @ (wanted[:, axis] - fixed[:, axis])
-            + velocity * v.T @ (d1 @ (base[:, axis] - fixed[:, axis]))
-            + acceleration * a.T @ (d2 @ (base[:, axis] - fixed[:, axis])) + new_base[:, axis] * 1e-10)
-        solver = osqp.OSQP()
-        solver.setup(sp.triu(2 * h).tocsc(), linear, matrix, lower, upper,
-                     verbose=False, eps_abs=1e-8, eps_rel=1e-8, max_iter=limits.get("fit_iterations", 10000))
-        result = solver.solve(raise_error=False)
-        if (result.info.status not in ("solved", "solved inaccurate") or result.x is None
-                or not np.isfinite(result.x).all() or result.info.prim_res > 1e-6 or result.info.dual_res > 1e-6):
-            raise MotionInputError("KEY_FIT_FAILED", "global insertion fit: " + result.info.status)
-        output[:, axis] = result.x
-    predicted = fixed + z @ output
+    fixed_values = ({frame: locks[frame] for frame in original_values if frame in locks}
+                    if allow_existing_key_updates else dict(original_values))
+    solve_count = 0
+    # Pin negligible old-key solver noise and resolve the full objective. Never
+    # omit a returned value while continuing to predict its numerical movement.
+    for stabilization in range(2 if allow_existing_key_updates else 1):
+        fixed_columns = [i for i, frame in enumerate(keys) if frame in fixed_values]
+        free_columns = [i for i, frame in enumerate(keys) if frame not in fixed_values]
+        fixed = (b[:, fixed_columns] @ np.asarray([fixed_values[keys[i]] for i in fixed_columns])
+                 if fixed_columns else np.zeros_like(base))
+        values = dict(fixed_values)
+        if not free_columns:
+            predicted = fixed
+            break
+        z = b[:, free_columns].tocsc()
+        v, a = d1 @ z, d2 @ z
+        h = (z.T @ z + velocity * v.T @ v + acceleration * a.T @ a
+             + sp.identity(len(free_columns)) * 1e-10).tocsc()
+        matrix = sp.vstack((sp.identity(len(free_columns), format="csc"), z, z[lock_rows]), format="csc")
+        free_base = base[[frame_rows[keys[i]] for i in free_columns]]
+        output = np.empty((len(free_columns), 3))
+        for axis in range(3):
+            lock_values = np.asarray([locks[frame][axis] - fixed[frame_rows[frame], axis] for frame in lock_frames])
+            lower = np.concatenate((free_base[:, axis] - cap, base[:, axis] - fixed[:, axis] - cap, lock_values))
+            upper = np.concatenate((free_base[:, axis] + cap, base[:, axis] - fixed[:, axis] + cap, lock_values))
+            linear = -2 * (z.T @ (wanted[:, axis] - fixed[:, axis])
+                + velocity * v.T @ (d1 @ (base[:, axis] - fixed[:, axis]))
+                + acceleration * a.T @ (d2 @ (base[:, axis] - fixed[:, axis])) + free_base[:, axis] * 1e-10)
+            solver = osqp.OSQP()
+            solver.setup(sp.triu(2 * h).tocsc(), linear, matrix, lower, upper,
+                         verbose=False, eps_abs=1e-8, eps_rel=1e-8, max_iter=limits.get("fit_iterations", 10000))
+            result = solver.solve(raise_error=False)
+            solve_count += 1
+            if (result.info.status not in ("solved", "solved inaccurate") or result.x is None
+                    or not np.isfinite(result.x).all() or result.info.prim_res > 1e-6 or result.info.dual_res > 1e-6):
+                raise MotionInputError("KEY_FIT_FAILED", "global insertion fit: " + result.info.status)
+            output[:, axis] = result.x
+        predicted = fixed + z @ output
+        values.update({keys[column]: output[index] for index, column in enumerate(free_columns)})
+        noisy = [frame for frame in original_values if frame not in fixed_values
+                 and np.linalg.norm(values[frame] - original_values[frame]) <= 1e-10]
+        if not allow_existing_key_updates or not noisy or stabilization == 1:
+            break
+        fixed_values.update({frame: original_values[frame] for frame in noisy})
     # These are feasibility checks, never post-solve clipping or replacement.
     if np.max(np.linalg.norm(predicted - base, axis=1)) > cap + 1e-9:
         raise MotionInputError("ORIGINAL_INTENT_VIOLATION", "insertion fit exceeds the original position envelope")
     if any(np.linalg.norm(predicted[frame_rows[frame]] - value) > 1e-8 for frame, value in locks.items()):
         raise MotionInputError("INTENT_LOCK_VIOLATION", "global insertion fit changes a protected pose")
-    return predicted, {keys[column]: output[index] for index, column in enumerate(new_columns)}
+    return predicted, values, solve_count
 
 
 def refine_sparse_keys(goal, original, rig, intent, constraints, limits, *, key_layout, verifier,
-                       allow_key_insertion=False, max_added_keys=0):
+                       allow_key_insertion=False, max_added_keys=0, allow_existing_key_updates=False):
     """Propose bounded independent local position keys; never issue native proof.
 
     The existing ``fit_keys`` path is unchanged. This explicit opt-in route
-    fixes every original key, greedily selects the largest eligible residual
-    (earliest frame breaks ties), then globally refits all proposed keys.
+    fixes every original key by default. Explicit joint mode also fits eligible
+    original values. It greedily selects the largest eligible residual (earliest
+    frame breaks ties), then globally refits all free keys.
     Positions returned in additions are solver-space metres, not native write
     vectors. Tangents and actual topology authority require the native planner.
+    Joint results also return original-frame position changes in existing_writes.
+    A feasible existing-only change returns KEY_INSERTION_NOT_REQUIRED rather
+    than claiming a topology candidate or an unchanged scene.
     """
     from bisect import bisect_right
     from .capture import canonical_digest, estimate_motion_resources, enforce_motion_budget
     from .motion_key_layout import verify_key_layout
     if allow_key_insertion is not True or not intent.allow_key_insertion:
         return SolverResult("failed", ["KEY_INSERTION_NOT_AUTHORIZED"])
-    if type(max_added_keys) is not int or not 0 <= max_added_keys <= 8:
+    if (type(max_added_keys) is not int or not 0 <= max_added_keys <= 8
+            or type(allow_existing_key_updates) is not bool):
         return SolverResult("failed", ["INVALID_POLICY"])
     names = {"position_correction_m", "velocity_weight", "acceleration_weight", "fit_error_m",
              "fit_iterations", "max_variables", "max_nonzeros", "max_memory_bytes", "factorization_workspace_bytes",
@@ -351,15 +375,20 @@ def refine_sparse_keys(goal, original, rig, intent, constraints, limits, *, key_
             if row.get("event") or row.get("locked"):
                 frame = row.get("frame")
                 lock(frame, base[frame_rows[frame]] if frame in frame_rows else [])
-        if any(frame in original_values and not np.array_equal(value, original_values[frame]) for frame, value in locks.items()):
+        if not allow_existing_key_updates and any(frame in original_values and not np.array_equal(value, original_values[frame]) for frame, value in locks.items()):
             raise MotionInputError("INTENT_LOCK_VIOLATION", "original key preservation conflicts with a declared pose")
         # Every retained full-grid array and the maximum refined topology is
         # reserved before creating interpolation/temporal matrices or OSQP.
         retained = sum(value.nbytes for value in original.position_m.values()) + wanted.nbytes
         retained += len(frames) * (3 * 8 * 5 + 8 * 12) + (len(driver.frames) + grant) * 3 * 8 * 4
+        free_original = sum(frame not in locks for frame in original_values) if allow_existing_key_updates else 0
+        maximum_variables = 3 * (grant + free_original)
         resources = estimate_motion_resources(len(frames), {object_id: len(driver.frames) + grant},
-            variables=3 * grant, constraint_nonzeros=6 * len(frames) + 6 * len(locks) + 3 * grant,
+            variables=maximum_variables, constraint_nonzeros=6 * len(frames) + 6 * len(locks) + maximum_variables,
             retained_capture_bytes=retained, factorization_workspace_bytes=limits.get("factorization_workspace_bytes"))
+        maximum_qp_solves = 3 * (grant + 1) * (2 if allow_existing_key_updates else 1)
+        resources["maximum_qp_solves"] = maximum_qp_solves
+        resources["maximum_fit_iterations"] = maximum_qp_solves * limits.get("fit_iterations", 10000)
         enforce_motion_budget(resources, {"max_variables": 1_000_000, "max_nonzeros": 2_000_000,
                                          "max_memory_bytes": 512 * 1024 * 1024, **limits})
         keys = list(driver.frames)
@@ -369,7 +398,8 @@ def refine_sparse_keys(goal, original, rig, intent, constraints, limits, *, key_
         if baseline_raw_error > 1e-5:
             raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED", "raw samples disagree with the qualified finite model")
         del baseline_raw
-        predicted, values = _fit_refinement_grid(original, base, wanted, keys, modes, original_values, locks, cap, limits)
+        predicted, values, solve_count = _fit_refinement_grid(original, base, wanted, keys, modes,
+            original_values, locks, cap, limits, allow_existing_key_updates=allow_existing_key_updates)
         selected = []
         tolerance = limits.get("fit_error_m", .0005)
         forbidden = set(locks) | {row["frame"] for row in driver.sections}
@@ -382,7 +412,11 @@ def refine_sparse_keys(goal, original, rig, intent, constraints, limits, *, key_
                 additions = [{"object_id": object_id, "channel": "position", "layer_id": driver.layer_id,
                     "frame": frame, "position_m": values[frame].tolist(),
                     "mode": driver.segment_modes[bisect_right(driver.frames, frame) - 1]} for frame in sorted(selected)]
-                return SolverResult("candidate" if additions else "no_change", values={"existing_writes": [],
+                existing_writes = [{"object_id": object_id, "channel": "position", "layer_id": driver.layer_id,
+                    "frame": frame, "position_m": values[frame].tolist()} for frame in driver.frames
+                    if allow_existing_key_updates and not np.array_equal(values[frame], original_values[frame])]
+                status = "candidate" if additions else "failed" if existing_writes else "no_change"
+                return SolverResult(status, ["KEY_INSERTION_NOT_REQUIRED"] if status == "failed" else [], values={"existing_writes": existing_writes,
                     "additions": additions, "predicted_position_m": {object_id: predicted.tolist()}}, report={
                     "fit_residual_m": {object_id: maximum}, "selected_frames": selected,
                     "original_topology_digest": canonical_digest([row.model_dump(mode="json") for row in observed.drivers]),
@@ -390,6 +424,8 @@ def refine_sparse_keys(goal, original, rig, intent, constraints, limits, *, key_
                     "capture_digest": canonical_digest(original.as_dict()), "context_digest": canonical_digest(original.context.as_dict()),
                     "source_binding_digest": canonical_digest(original.as_dict()["source_binding"]),
                     "baseline_raw_fit_scene_units": baseline_raw_error,
+                    "fit_mode": "joint_existing_and_new" if allow_existing_key_updates else "original_keys_fixed",
+                    "qp_solves": solve_count, "old_key_noise_tolerance_m": 1e-10 if allow_existing_key_updates else 0.,
                     "sample_frames": frames.tolist(), "resources": resources, "runtime_quality": "unverified",
                     "position_units": "solver_metres", "selection_rule": "max_residual_then_earliest_frame"})
             if len(selected) >= grant:
@@ -406,7 +442,9 @@ def refine_sparse_keys(goal, original, rig, intent, constraints, limits, *, key_
             # resources reserves the final grant, not just the current iterate.
             enforce_motion_budget(resources, {"max_variables": 1_000_000, "max_nonzeros": 2_000_000,
                                              "max_memory_bytes": 512 * 1024 * 1024, **limits})
-            predicted, values = _fit_refinement_grid(original, base, wanted, keys, modes, original_values, locks, cap, limits)
+            predicted, values, current_solves = _fit_refinement_grid(original, base, wanted, keys, modes,
+                original_values, locks, cap, limits, allow_existing_key_updates=allow_existing_key_updates)
+            solve_count += current_solves
     except MotionInputError as exc:
         return SolverResult("failed", [exc.code], report={"detail": str(exc),
             **({"resources": resources} if "resources" in locals() else {})})

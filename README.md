@@ -143,17 +143,24 @@ The additional explicit setup commands are:
   successor and evaluation receipts for the two-frame route are not yet observed.
   The host cleanup path now falls back from insufficient existing-key fitting
   to explicitly budgeted sparse refinement for one independent local position
-  driver. Original keys stay fixed. It retains the original evaluated capture,
+  driver. The solver keeps original keys fixed by default; the cleanup fallback
+  explicitly enables a joint fit of eligible old and new values. It retains the original evaluated capture,
   exact topology delta and full prediction, converts solver metres to native
   float32 scene units, then rechecks the entire influence interval. Recipes
   predeclare separate insertion, evaluation and topology/readback stages; the
-  insertion consumes its generated-key allocation once and cannot continue
-  without the original successful receipt and actual baseline quality checks.
-  This first path has no following existing-key writes. General rigs, retarget
+  insertion consumes its generated-key allocation once. A joint fit inserts
+  neutral samples of the actual original curve first. Only the same cleanup's
+  original successful receipt and authenticated topology/readback permit the
+  separate `refinement_correction` planner to bind its retained final values to
+  the existing-key writer. Intermediate integrity and final quality are separate:
+  final readback must match the full retained curve and the original intent's
+  complete quality policy. Protected rotations are actually captured in both
+  spaces; missing channels are not filled in. General rigs, retarget
   refinement and unbaking completion remain outside its qualified scope. The
   new host integration has not been executed as a native recipe.
   Opt-in plans must explicitly budget the numerical fit-iteration ceiling
-  across three axes and all bounded refinement attempts; the default run
+  across three axes, all bounded refinement attempts and at most one stabilizing
+  refit per grid; the default run
   budget is not expanded automatically. Solver memory limits are narrowed to
   the approved run ceiling before computation.
 - `Cascadeur Complete.Qualify complete scene adapter`: shipped-file full reader,
