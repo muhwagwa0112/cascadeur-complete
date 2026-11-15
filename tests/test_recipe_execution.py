@@ -28,6 +28,24 @@ def spec_dict():
                     "limits_si": {"duration_error_s": 0}}}
 
 
+def test_sparse_insertion_stages_are_predeclared_with_one_finite_shared_budget():
+    value=spec_dict()
+    value["intent"].update(allow_key_insertion=True,correction_envelope={"added_keys":5,"position_m":.03})
+    value["budgets"]={"generated_keys":7}
+    value["cleanup"]=[{"kind":"foot_contacts","object_ids":["root"]} for _ in range(3)]
+    plan=build_plan(RecipeSpec.model_validate(value),[])
+    insertion=[step for step in plan.steps if step.stage=="key_insert"]
+    assert [step.max_effect_from_baseline.maximum_added_keys for step in insertion]==[2,2,1]
+    assert sum(step.max_effect_from_baseline.maximum_added_keys for step in insertion)==5
+    for step in insertion:
+        index=plan.steps.index(step)
+        assert [item.stage for item in plan.steps[index-1:index+5]]==[
+            "solve","key_insert","insertion_evaluation","insertion_readback","correction","actual_readback"]
+        assert step.operation_name=="motion.key_topology_insert"
+        assert plan.steps[index+1].prerequisite_step_ids==(step.step_id,)
+        assert step.fixed_parameters["max_added_keys"]==step.max_effect_from_baseline.maximum_added_keys
+
+
 def allocated(tmp_path):
     paths = RuntimePaths.discover(tmp_path)
     paths.ensure()

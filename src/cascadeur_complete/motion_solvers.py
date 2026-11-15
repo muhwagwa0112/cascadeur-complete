@@ -177,6 +177,241 @@ def fit_keys(goal, original, key_model, constraints, limits):
                          "sample_frames":original.context.frames.tolist(),"resources":estimate})
 
 
+def _refinement_interpolant(frames, keys, modes):
+    """The observed frame-domain LINEAR/STEP model, over the complete grid."""
+    import scipy.sparse as sp
+    rows, columns, values = [], [], []
+    for row, frame in enumerate(frames):
+        left = int(np.clip(np.searchsorted(keys, frame, side="right") - 1, 0, len(keys) - 1))
+        rows.append(row); columns.append(left)
+        if left == len(keys) - 1 or frame <= keys[0] or modes[left] == "STEP":
+            values.append(1.)
+        else:
+            alpha = float(frame - keys[left]) / (keys[left + 1] - keys[left])
+            values.append(1. - alpha)
+            rows.append(row); columns.append(left + 1); values.append(alpha)
+    return sp.csr_matrix((values, (rows, columns)), shape=(len(frames), len(keys)))
+
+
+def _fit_refinement_grid(original, base, wanted, keys, modes, original_values, locks, cap, limits):
+    """Eliminate old keys exactly; solve only new values against all samples."""
+    import osqp
+    import scipy.sparse as sp
+    frames = original.context.frames
+    if all(frame in original_values for frame in keys):
+        # No insertion means the independently observed source remains exact;
+        # native float32 cache rounding is not a reason to invent old writes.
+        return base.copy(), {}
+    b = _refinement_interpolant(frames, keys, modes)
+    old_columns = [i for i, frame in enumerate(keys) if frame in original_values]
+    new_columns = [i for i, frame in enumerate(keys) if frame not in original_values]
+    fixed = b[:, old_columns] @ np.asarray([original_values[keys[i]] for i in old_columns])
+    z = b[:, new_columns].tocsc()
+    d1, d2 = temporal_operators(original.context.time_s)
+    v, a = d1 @ z, d2 @ z
+    velocity, acceleration = limits.get("velocity_weight", .01), limits.get("acceleration_weight", .001)
+    h = (z.T @ z + velocity * v.T @ v + acceleration * a.T @ a
+         + sp.identity(len(new_columns)) * 1e-10).tocsc()
+    frame_rows = {int(frame): row for row, frame in enumerate(frames)}
+    lock_frames = sorted(locks)
+    lock_rows = [frame_rows[frame] for frame in lock_frames]
+    matrix = sp.vstack((sp.identity(len(new_columns), format="csc"), z, z[lock_rows]), format="csc")
+    new_base = base[[frame_rows[keys[i]] for i in new_columns]]
+    output = np.empty((len(new_columns), 3))
+    for axis in range(3):
+        lock_values = np.asarray([locks[frame][axis] - fixed[frame_rows[frame], axis] for frame in lock_frames])
+        lower = np.concatenate((new_base[:, axis] - cap, base[:, axis] - fixed[:, axis] - cap, lock_values))
+        upper = np.concatenate((new_base[:, axis] + cap, base[:, axis] - fixed[:, axis] + cap, lock_values))
+        linear = -2 * (z.T @ (wanted[:, axis] - fixed[:, axis])
+            + velocity * v.T @ (d1 @ (base[:, axis] - fixed[:, axis]))
+            + acceleration * a.T @ (d2 @ (base[:, axis] - fixed[:, axis])) + new_base[:, axis] * 1e-10)
+        solver = osqp.OSQP()
+        solver.setup(sp.triu(2 * h).tocsc(), linear, matrix, lower, upper,
+                     verbose=False, eps_abs=1e-8, eps_rel=1e-8, max_iter=limits.get("fit_iterations", 10000))
+        result = solver.solve(raise_error=False)
+        if (result.info.status not in ("solved", "solved inaccurate") or result.x is None
+                or not np.isfinite(result.x).all() or result.info.prim_res > 1e-6 or result.info.dual_res > 1e-6):
+            raise MotionInputError("KEY_FIT_FAILED", "global insertion fit: " + result.info.status)
+        output[:, axis] = result.x
+    predicted = fixed + z @ output
+    # These are feasibility checks, never post-solve clipping or replacement.
+    if np.max(np.linalg.norm(predicted - base, axis=1)) > cap + 1e-9:
+        raise MotionInputError("ORIGINAL_INTENT_VIOLATION", "insertion fit exceeds the original position envelope")
+    if any(np.linalg.norm(predicted[frame_rows[frame]] - value) > 1e-8 for frame, value in locks.items()):
+        raise MotionInputError("INTENT_LOCK_VIOLATION", "global insertion fit changes a protected pose")
+    return predicted, {keys[column]: output[index] for index, column in enumerate(new_columns)}
+
+
+def refine_sparse_keys(goal, original, rig, intent, constraints, limits, *, key_layout, verifier,
+                       allow_key_insertion=False, max_added_keys=0):
+    """Propose bounded independent local position keys; never issue native proof.
+
+    The existing ``fit_keys`` path is unchanged. This explicit opt-in route
+    fixes every original key, greedily selects the largest eligible residual
+    (earliest frame breaks ties), then globally refits all proposed keys.
+    Positions returned in additions are solver-space metres, not native write
+    vectors. Tangents and actual topology authority require the native planner.
+    """
+    from bisect import bisect_right
+    from .capture import canonical_digest, estimate_motion_resources, enforce_motion_budget
+    from .motion_key_layout import verify_key_layout
+    if allow_key_insertion is not True or not intent.allow_key_insertion:
+        return SolverResult("failed", ["KEY_INSERTION_NOT_AUTHORIZED"])
+    if type(max_added_keys) is not int or not 0 <= max_added_keys <= 8:
+        return SolverResult("failed", ["INVALID_POLICY"])
+    names = {"position_correction_m", "velocity_weight", "acceleration_weight", "fit_error_m",
+             "fit_iterations", "max_variables", "max_nonzeros", "max_memory_bytes", "factorization_workspace_bytes",
+             "require_factorization_bound"}
+    if (not isinstance(limits, dict) or set(limits) - names or not isinstance(constraints, dict)
+            or any(isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value < 0
+                   for key, value in limits.items() if key != "require_factorization_bound")
+            or type(limits.get("require_factorization_bound", False)) is not bool
+            or type(limits.get("fit_iterations", 10000)) is not int
+            or not 0 < limits.get("fit_iterations", 10000) <= 1_000_000):
+        return SolverResult("failed", ["INVALID_POLICY"])
+    try:
+        observed, layout_digest = verify_key_layout(key_layout, original, verifier)
+        if len(observed.drivers) != 1 or not isinstance(goal, dict) or len(goal) != 1:
+            raise MotionInputError("KEY_INSERTION_ADAPTER_UNVERIFIED", "one observed independent position driver required")
+        driver = observed.drivers[0]
+        object_id = driver.object_id
+        models = {"linear_position_independent_v1", "step_position_independent_v1",
+                  "piecewise_linear_step_position_independent_v1"}
+        if (set(goal) != {object_id} or original.space != "local" or driver.space != "local"
+                or driver.channel != "position" or driver.key_id_kind != "layer_frame_locator"
+                or driver.layer_objects != (object_id,) or driver.data_mode != "Animation" or not driver.data_id
+                or driver.native_model not in models or driver.native_model not in observed.qualified_models
+                or driver.reason_codes or set(driver.influences) != {"controllers", "blend", "cycle"}
+                or any(driver.influences.values()) or not 2 <= len(driver.frames) <= 16
+                or set(driver.segment_modes) - {"LINEAR", "STEP"}
+                or original.object_ids != (object_id,) or rig.writable_ids != frozenset((object_id,))
+                or driver.key_ids != tuple(driver.layer_id + ":" + str(frame) for frame in driver.frames)):
+            raise MotionInputError("KEY_INSERTION_ADAPTER_UNVERIFIED", "descriptor is outside the finite local independent domain")
+        frames = original.context.frames
+        if (not 3 <= len(frames) <= 33 or not np.array_equal(frames, np.arange(len(frames)))
+                or not set(driver.frames) <= set(map(int, frames))):
+            raise MotionInputError("KEY_LAYOUT_INSUFFICIENT", "complete bounded original key/sample grid required")
+        validate_samples(original, {object_id: ("position",)})
+        wanted = np.asarray(goal[object_id], dtype=float)
+        base = original.position_m[object_id]
+        if wanted.shape != base.shape or not np.isfinite(wanted).all():
+            raise MotionInputError("INVALID_GOAL", "finite complete position goal required")
+        if len(driver.values) != len(driver.frames) or len(driver.tangents) != len(driver.frames):
+            raise MotionInputError("KEY_LAYOUT_INSUFFICIENT", "original values and tangents are incomplete")
+        raw_values = original.context.positions_to_solver(driver.values)
+        frame_rows = {int(frame): row for row, frame in enumerate(frames)}
+        if not np.array_equal(raw_values, base[[frame_rows[frame] for frame in driver.frames]]):
+            raise MotionInputError("INCOMPLETE_CAPTURE", "authored keys differ from the exact source capture")
+        projection = observed.raw_sample_projection
+        samples = projection.get("samples")
+        if (projection.get("space") != "local" or projection.get("frames") != frames.tolist()
+                or not isinstance(samples, list) or len(samples) != len(frames)
+                or any(not isinstance(row, dict) or row.get("id") != object_id or type(row.get("frame")) is not int
+                       or row["frame"] != int(frame) for row, frame in zip(samples, frames, strict=True))):
+            raise MotionInputError("INCOMPLETE_CAPTURE", "exact independent raw sample projection required")
+        raw_samples = np.asarray([row.get("position") for row in samples], dtype=float)
+        if (raw_samples.shape != base.shape or not np.isfinite(raw_samples).all()
+                or not np.array_equal(original.context.positions_to_solver(raw_samples), base)):
+            raise MotionInputError("INCOMPLETE_CAPTURE", "raw source projection differs from canonical capture")
+        original_values = dict(zip(driver.frames, raw_values, strict=True))
+        roles = [role for role, key in rig.role_ids.items() if key == object_id]
+        cap = min([intent.correction_envelope.get("position_m", 0.), limits.get("position_correction_m", float("inf")),
+                   *(intent.correction_envelope[role + ".position_m"] for role in roles
+                     if role + ".position_m" in intent.correction_envelope)])
+        grant = min(max_added_keys, int(intent.correction_envelope.get("added_keys", 0)), 16 - len(driver.frames))
+        if set(constraints) - {object_id} or not isinstance(constraints.get(object_id, {}), dict):
+            raise MotionInputError("INVALID_POLICY", "constraints escape the exact driver")
+        locks = {}
+        def lock(frame, value):
+            if type(frame) is not int or frame not in frame_rows:
+                raise MotionInputError("INVALID_POLICY", "position lock outside complete captured frame grid")
+            value = np.asarray(value, dtype=float)
+            if value.shape != (3,) or not np.isfinite(value).all() or (frame in locks and not np.array_equal(locks[frame], value)):
+                raise MotionInputError("INTENT_LOCK_VIOLATION", "invalid or conflicting position lock")
+            locks[frame] = value
+        for frame, value in constraints.get(object_id, {}).items():
+            lock(frame, value)
+        for role in roles:
+            for frame in intent.locked_roles_frames.get(role, ()):
+                lock(frame, base[frame_rows[frame]] if frame in frame_rows else [])
+            for frame, value in intent.key_pose_locks.get(role, {}).items():
+                if len(value) == 3:
+                    lock(frame, value)
+        if rig.role_ids.get("root") == object_id and intent.root_policy == "preserve":
+            for frame in frames:
+                lock(int(frame), base[frame_rows[int(frame)]])
+        for contact in intent.contacts:
+            if rig.role_ids.get(contact.role) == object_id:
+                for frame in (contact.first_frame, contact.last_frame):
+                    lock(frame, base[frame_rows[frame]] if frame in frame_rows else [])
+        for frame in frames:
+            if not intent.editable_frames[0] <= frame <= intent.editable_frames[1]:
+                lock(int(frame), base[frame_rows[int(frame)]])
+        for row in driver.boundary_keys:
+            if row.get("event") or row.get("locked"):
+                frame = row.get("frame")
+                lock(frame, base[frame_rows[frame]] if frame in frame_rows else [])
+        if any(frame in original_values and not np.array_equal(value, original_values[frame]) for frame, value in locks.items()):
+            raise MotionInputError("INTENT_LOCK_VIOLATION", "original key preservation conflicts with a declared pose")
+        # Every retained full-grid array and the maximum refined topology is
+        # reserved before creating interpolation/temporal matrices or OSQP.
+        retained = sum(value.nbytes for value in original.position_m.values()) + wanted.nbytes
+        retained += len(frames) * (3 * 8 * 5 + 8 * 12) + (len(driver.frames) + grant) * 3 * 8 * 4
+        resources = estimate_motion_resources(len(frames), {object_id: len(driver.frames) + grant},
+            variables=3 * grant, constraint_nonzeros=6 * len(frames) + 6 * len(locks) + 3 * grant,
+            retained_capture_bytes=retained, factorization_workspace_bytes=limits.get("factorization_workspace_bytes"))
+        enforce_motion_budget(resources, {"max_variables": 1_000_000, "max_nonzeros": 2_000_000,
+                                         "max_memory_bytes": 512 * 1024 * 1024, **limits})
+        keys = list(driver.frames)
+        modes = list(driver.segment_modes)
+        baseline_raw = _refinement_interpolant(frames, keys, modes) @ np.asarray(driver.values)
+        baseline_raw_error = float(np.linalg.norm(baseline_raw - raw_samples, axis=1).max())
+        if baseline_raw_error > 1e-5:
+            raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED", "raw samples disagree with the qualified finite model")
+        del baseline_raw
+        predicted, values = _fit_refinement_grid(original, base, wanted, keys, modes, original_values, locks, cap, limits)
+        selected = []
+        tolerance = limits.get("fit_error_m", .0005)
+        forbidden = set(locks) | {row["frame"] for row in driver.sections}
+        while True:
+            errors = np.linalg.norm(predicted - wanted, axis=1)
+            maximum = float(errors.max())
+            if maximum <= tolerance:
+                if any(np.linalg.norm(predicted[frame_rows[frame]] - value) > 1e-8 for frame, value in locks.items()):
+                    raise MotionInputError("INTENT_LOCK_VIOLATION", "fit does not satisfy every protected pose")
+                additions = [{"object_id": object_id, "channel": "position", "layer_id": driver.layer_id,
+                    "frame": frame, "position_m": values[frame].tolist(),
+                    "mode": driver.segment_modes[bisect_right(driver.frames, frame) - 1]} for frame in sorted(selected)]
+                return SolverResult("candidate" if additions else "no_change", values={"existing_writes": [],
+                    "additions": additions, "predicted_position_m": {object_id: predicted.tolist()}}, report={
+                    "fit_residual_m": {object_id: maximum}, "selected_frames": selected,
+                    "original_topology_digest": canonical_digest([row.model_dump(mode="json") for row in observed.drivers]),
+                    "key_layout_digest": layout_digest, "model_source_fingerprint": observed.source_fingerprint,
+                    "capture_digest": canonical_digest(original.as_dict()), "context_digest": canonical_digest(original.context.as_dict()),
+                    "source_binding_digest": canonical_digest(original.as_dict()["source_binding"]),
+                    "baseline_raw_fit_scene_units": baseline_raw_error,
+                    "sample_frames": frames.tolist(), "resources": resources, "runtime_quality": "unverified",
+                    "position_units": "solver_metres", "selection_rule": "max_residual_then_earliest_frame"})
+            if len(selected) >= grant:
+                raise MotionInputError("KEY_LAYOUT_INSUFFICIENT", "finite insertion grant cannot fit the complete goal")
+            eligible = [int(frame) for frame in frames if frame not in forbidden
+                and intent.editable_frames[0] <= frame <= intent.editable_frames[1]
+                and driver.frames[0] < frame < driver.frames[-1] and min(abs(int(frame) - key) for key in keys) >= 2]
+            if not eligible:
+                raise MotionInputError("KEY_LAYOUT_INSUFFICIENT", "no unlocked absent interior frame with the required two-frame gap")
+            frame = max(eligible, key=lambda value: (errors[frame_rows[value]], -value))
+            index = bisect_right(keys, frame)
+            mode = modes[index - 1]
+            keys.insert(index, frame); modes.insert(index, mode); selected.append(frame)
+            # resources reserves the final grant, not just the current iterate.
+            enforce_motion_budget(resources, {"max_variables": 1_000_000, "max_nonzeros": 2_000_000,
+                                             "max_memory_bytes": 512 * 1024 * 1024, **limits})
+            predicted, values = _fit_refinement_grid(original, base, wanted, keys, modes, original_values, locks, cap, limits)
+    except MotionInputError as exc:
+        return SolverResult("failed", [exc.code], report={"detail": str(exc),
+            **({"resources": resources} if "resources" in locals() else {})})
+
+
 def _skew(vector):
     x, y, z = vector
     return np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])

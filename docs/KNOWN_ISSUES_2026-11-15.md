@@ -7,7 +7,19 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: private locator 예측과 durable 완료 인증 연결
+### 최신 추가: sparse refinement와 별도 recipe 삽입 단계 연결
+
+원격을 다시 fetch했으며 개선 문서 최신 커밋은 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하다. 전체 16개 목표를 유지한다. 설치 파일 `C:\Program Files\Cascadeur\cascadeur.exe`의 ProductVersion은 `2026.2.3.0.16863`으로 다시 확인했다. 이번 확인 시 실행 중인 `cascadeur` 프로세스는 없었다. 이전 PID `2328`의 관측을 현재 실행 상태로 승계하지 않으며, 프로세스 부재만으로 종료 원인을 확정하지 않는다.
+
+- 기존 key fitting이 `KEY_LAYOUT_INSUFFICIENT`일 때만, 원 intent의 명시적 opt-in과 별도 승인 생성 키 예산으로 sparse refinement를 호출한다. 실제 발급된 local layout/capture, 0부터 시작하는 전체 3–33 frame grid, 한 독립 position driver, LINEAR/STEP 구간을 요구한다. 원 키 값은 변수에서 제거해 고정하고 기존 mode를 보존한다. 잔차가 큰 frame부터 같은 잔차면 이른 frame을 택하며 기존/새 key와 최소 2 frame 간격, 원 key/section 부재, lock/contact/event/편집 구간을 지킨다. 새 키 8개·전체 16개 상한, full-grid QP·sparse/메모리 예산을 적용한다.
+- workflow는 실제 global/local capture의 일치와 parentless 관측을 확인한 제한된 경우만 global 목표를 local로 사용한다. solver metre 값을 정확한 context로 native scene units에 변환하고 float32로 제한한 뒤 native-private 예측을 인증한다. 그 예측으로 전체 frame의 fit 잔차·correction envelope·role/pose/root/lock/contact 보호를 다시 확인한다. 원 capture/source/layout와 요청 목표·예측·delta는 별도로 보존하며 발급된 capture의 binding을 덮어쓰지 않는다.
+- recipe는 승인 시 `solve → key_insert → insertion_evaluation → insertion_readback → correction → actual_readback`를 고정한다. 각 cleanup의 생성 상한 합은 원 intent와 run budget을 넘지 않으며 실제 추가 수와 written 비용을 원 request의 `preparing` CAS에서 한 번 계상한다. 이 최초 경로는 기존 키를 쓰지 않는 insertion-only 후보이며, 원 terminal receipt·private actual topology·전체 예측 readback·원 baseline 대비 quality가 맞은 뒤만 correction을 생략한다. ordinary 후보는 삽입 단계를 생략하고 기존 key만 쓸 수 있다. unknown은 원 요청 재관측만 하며 재dispatch하지 않는다.
+
+현재 native `key_topology_write` capability는 여전히 열지 않았다. 일반 리그·retarget refinement·unbaking의 action 완료/생성 key 예산은 이 제한된 경로의 지원 근거가 아니다. 아래의 원 unknown 요청과 global barrier, native 탭 수명/종료 crash 및 설치 연속성의 미완료 범위는 유지한다. 새 native 코드의 실앱 recipe 성공은 아직 관측하지 못했다. 과거 proof/grant를 새 bytes에 재사용하거나 runtime root를 바꾸어 barrier를 우회하지 않았다.
+
+필요한 host 경계만 실행한 최종 결과는 **`5 passed, 59 deselected in 1.14s`**다. 새 키만으로 내부 tent 궤적 fitting·원 키 고정, opt-in/행렬 할당 전 예산 거절, lock/contact 경계 보호, metre→native float32 변환·원 capture 보존·인증된 예측과 다른 목표 거절, 단계별 불변 생성 상한을 확인했다. native proof/receipt double은 호스트 계약 확인용이며 실앱 완료 근거가 아니다. 전체 suite/build/CI는 실행하지 않았다. 삽입 가능 positional solve는 3축과 모든 유한 refit의 `fit_iterations` 상한을 호출 전 예약하고 메모리 ceiling을 승인 run 상한으로 좁힌다. 기본 `solve_iterations=100`을 자동 확장하지 않으므로 opt-in recipe는 필요한 수치 반복 예산을 명시적으로 승인해야 한다.
+
+### 이전 추가: private locator 예측과 durable 완료 인증 연결
 
 `native_key_insertion_evidence.py`와 실제 공개 readonly 도구 `position_keys_insertion_plan`, `position_keys_topology_verify`를 연결했다. 예측은 현재 native registry가 발급한 evaluated capture/key-layout와 source, 전체 frame grid, owned checkpoint, 현재 finite/insertion proof만 사용한다. caller가 준 layout/완료 flag를 registry에 등록하지 않는다. 실행기의 section/전체 projection 예측 함수를 공유하며 기존 key/section·비대상 채널을 생략하지 않는다. 값은 정확한 native float32 local scene units, tangent는 실제 생성할 section 값과 같아야 한다. 예측 자체는 intent·삽입 예산·recipe 권한을 발급하지 않는다.
 

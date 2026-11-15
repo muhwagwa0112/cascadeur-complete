@@ -496,8 +496,8 @@ class RecipeNativeServiceMixin:
             path, working = str(directory / f"{step.step_id}-backup.casc"), str(directory / f"{step.step_id}-working.casc")
             args = {"checkpoint_path": path, "working_path": working}
             outputs = [path, working]
-        elif stage == "evaluation":
-            args = dict(step.fixed_parameters)
+        elif stage in {"evaluation", "insertion_evaluation"}:
+            args = {} if stage == "insertion_evaluation" else dict(step.fixed_parameters)
         elif stage == "rig":
             if spec.rig.mode == "template":
                 args = {"path": spec.rig.template.path}
@@ -541,7 +541,7 @@ class RecipeNativeServiceMixin:
                 args = context["candidate"]["arguments"]
             else:
                 raise RecipeConflict("MOTION_STAGE_UNSUPPORTED")
-        elif stage == "correction":
+        elif stage in {"correction", "key_insert"}:
             args = context["candidate"]["arguments"]
         elif stage == "export_stage":
             export = context["export_stage"]
@@ -564,7 +564,7 @@ class RecipeNativeServiceMixin:
         return StageEffect(step_id=step.step_id, declaration_digest=step.fixed_parameters_digest,
             lowering_rule_id=step.lowering_rule_id, lowering_rule_digest=step.lowering_rule_digest,
             feature_id=step.feature_id, operation_name=step.operation_name,
-            effect_class="mixed" if stage in {"checkpoint", "initial_checkpoint"} else "file" if stage == "export_stage" else "evaluation" if stage == "evaluation" else "scene",
+            effect_class="mixed" if stage in {"checkpoint", "initial_checkpoint"} else "file" if stage == "export_stage" else "evaluation" if stage in {"evaluation", "insertion_evaluation"} else "scene",
             arguments=args, arguments_digest=digest(args), operation_digest=digest([{"name": step.operation_name, "arguments": args}]),
             effect_bounds_digest=digest(step.max_effect_from_baseline),
             source_binding=source, input_files=tuple(inputs), output_paths=tuple(outputs), target_object_ids=ids,

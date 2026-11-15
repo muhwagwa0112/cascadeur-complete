@@ -46,7 +46,7 @@ def validate_step_authorization(
     store: RecipeRunStore, grant: ScopedAuthorization, plan: WorkflowPlan,
     run: RecipeRunRecord, step: StepPermit, *, source: SourceBinding | None,
     arguments: dict[str, Any], measured_effect: dict[str, float] | None = None,
-    stage_effect: StageEffect | None = None,
+    stage_effect: StageEffect | None = None, topology_delta=None,
 ) -> None:
     store.verify_grant(grant, plan)
     if run.plan_digest != plan.plan_digest or run.authorization_id != grant.authorization_id:
@@ -107,6 +107,38 @@ def validate_step_authorization(
         expected_lineage = step.target.lineage_id
         if expected_lineage is not None and source.binding.document_lineage_id != expected_lineage:
             raise RecipeConflict("Target document lineage differs from the authorized plan")
+    if step.stage == "key_insert":
+        from .motion_key_layout import KeyTopologyDelta
+        delta = KeyTopologyDelta.model_validate(topology_delta)
+        proof = delta.locator_insertion
+        cap = step.max_effect_from_baseline.maximum_added_keys
+        additions = delta.additions
+        expected = {"object_id": additions[0].object_id, "layer_id": additions[0].layer_id,
+            "additions": [{"frame": row.frame, "position": list(row.value), "mode": row.mode} for row in additions],
+            "space": "local", "allow_key_insertion": True, "max_added_keys": cap} if additions else None
+        approved_total = sum(item.max_effect_from_baseline.maximum_added_keys for item in plan.steps if item.stage == "key_insert")
+        original_cap = min(plan.spec.budgets.generated_keys, int(plan.spec.intent.correction_envelope.get("added_keys", 0)))
+        if (not plan.spec.intent.allow_key_insertion or approved_total > original_cap
+                or stage_effect is None or source is None or proof is None or not 1 <= len(additions) <= cap <= 8
+                or arguments != expected or step.feature_id != "key_insert"
+                or step.operation_name != "motion.key_topology_insert"
+                or len({(row.object_id, row.channel, row.layer_id) for row in additions}) != 1
+                or any(row.channel != "position" or row.object_id not in stage_effect.target_object_ids
+                       or row.layer_id not in stage_effect.target_layer_ids
+                       or not any(first <= row.frame <= last for first, last in step.frame_ranges) for row in additions)
+                or proof.before_projection_digest != source.sample_digest
+                or proof.runtime_epoch != source.binding.runtime_epoch
+                or proof.runtime_fingerprint != source.adapter_fingerprint
+                or proof.scene_instance_id != source.binding.scene_instance_id
+                or proof.document_lineage_id != source.binding.document_lineage_id):
+            raise RecipeConflict("KEY_INSERTION_AUTHORIZATION_MISMATCH")
+        if measured_effect is None or any(
+                name not in measured_effect or not math.isfinite(measured_effect[name])
+                or measured_effect[name] < 0 or measured_effect[name] > limit
+                for name, limit in (("position_m", step.max_effect_from_baseline.maximum_position_m),
+                                    ("rotation_rad", step.max_effect_from_baseline.maximum_rotation_rad))):
+            raise RecipeConflict("CORRECTION_ENVELOPE_EXCEEDED: insertion prediction")
+        return
     writes = arguments.get("writes", [])
     if writes:
         creation = step.stage == "motion" and plan.spec.motion.mode == "keyposes"

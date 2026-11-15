@@ -98,6 +98,7 @@ class CleanupWorkflow:
             "support_tracks":{key:asdict(value) for key,value in self.supports.items()},
             "planning_parameters":getattr(self,"_planning_parameters",{}),
             "key_layout_digest":getattr(self,"_key_layout_digest",None),
+            "key_insertion_plan":getattr(self,"_key_insertion_plan",None),
             "mesh_artifacts":self._mesh_artifacts,
             "evaluated_captures":[{"capture_digest":item["capture_digest"],
                                    "evaluation_receipt_digest":item["evaluation_receipt_digest"]}
@@ -437,7 +438,118 @@ class CleanupWorkflow:
         self._key_layout_digest=model.descriptor_digest
         return model
 
-    def plan_pass(self, kind, parameters=None):
+    def _plan_sparse_insertion(self, batch, goal, locks, limits, budget, report, requested):
+        """Plan a separate insertion; never reinterpret a global rig as local.
+
+        This first path covers the native independent Transform contract only.
+        Both spaces are actually captured and checked before the local model
+        is used. The native verifier still has to authenticate the complete
+        projection, new sections and current private insertion qualification.
+        """
+        from bisect import bisect_right
+        from dataclasses import replace
+        from .motion_solvers import refine_sparse_keys
+        from .motion_key_layout import plan_key_insertion, verify_key_layout
+        if not self.intent.allow_key_insertion or type(budget) is not int or budget <= 0:
+            return {"status":"failed","reason_codes":["KEY_LAYOUT_INSUFFICIENT"],"report":report}
+        if len(goal)!=1 or not set(goal)<=set(requested):
+            raise MotionInputError("KEY_INSERTION_SCOPE_UNQUALIFIED","sparse insertion requires one explicitly writable driver")
+        local=self.capture_batch(list(batch.object_ids),space="local")
+        reader=getattr(self.service,"observe_key_layout",None)
+        if not callable(reader):
+            raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native local layout reader unavailable")
+        receipt=reader({"ids":sorted(goal),"space":"local","channel":"position",
+            "frames":local.context.frames.tolist(),"capture_digest":canonical_digest(local.as_dict()),
+            "capture_object_ids":list(local.object_ids),"context":local.context.as_dict()})
+        if not getattr(receipt,"ok",False):
+            raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native local layout observation failed")
+        observed,layout_digest=verify_key_layout(receipt.result,local,getattr(self.service,"verify_key_layout",None))
+        key=next(iter(goal))
+        objects=observed.native_source_scope.get("objects",[])
+        owned=[row for row in objects if row.get("id")==key]
+        if (batch.space!="global" or len(owned)!=1 or "parent_id" not in owned[0]
+                or owned[0]["parent_id"] is not None or len(observed.drivers)!=1
+                or observed.drivers[0].object_id!=key
+                or any(observed.drivers[0].influences.get(name) for name in ("controllers","blend","cycle"))
+                or canonical_digest(batch.context.as_dict())!=canonical_digest(local.context.as_dict())
+                or not np.allclose(batch.position_m[key],local.position_m[key],rtol=0,atol=1e-10)):
+            raise MotionInputError("KEY_INSERTION_SCOPE_UNQUALIFIED","global targets require observed independent local/global equivalence")
+        refinement_limits={name:value for name,value in limits.items() if name in {
+            "position_correction_m","velocity_weight","acceleration_weight","fit_error_m","fit_iterations",
+            "max_variables","max_nonzeros","max_memory_bytes","factorization_workspace_bytes","require_factorization_bound"}}
+        refined=refine_sparse_keys(goal,local,replace(self.profile,writable_ids=frozenset(goal)),
+            self.intent,locks,refinement_limits,key_layout=observed.model_dump(mode="json"),
+            verifier=getattr(self.service,"verify_key_layout",None),
+            allow_key_insertion=True,max_added_keys=budget)
+        if refined.status!="candidate":
+            return refined.as_dict()
+        driver=observed.drivers[0]
+        additions=[]
+        for row in refined.values["additions"]:
+            left=bisect_right(driver.frames,row["frame"])-1
+            # This is a proposal copied from an observed split segment. The
+            # runtime constructs the real Section and rejects any difference.
+            tangent={**driver.tangents[left],"mode":"Continuous",
+                     "key_common":{"ik_fk":"FK","fixation":"Free"},"label":None}
+            raw=np.asarray(self.context.positions_to_scene(row["position_m"]),dtype=np.float32)
+            if not np.isfinite(raw).all():
+                raise MotionInputError("INVALID_POLICY","new positions exceed native float32 range")
+            additions.append({"object_id":row["object_id"],"channel":"position","layer_id":row["layer_id"],
+                "frame":row["frame"],"value":raw.astype(float).tolist(),"mode":row["mode"],"tangent":tangent})
+        delta=plan_key_insertion(observed.model_dump(mode="json"),local,self.profile,self.intent,additions,
+            verifier=getattr(self.service,"verify_key_layout",None),
+            insertion_verifier=getattr(self.service,"verify_key_insertion",None),generated_keys_budget=budget)
+        if delta.locator_insertion is None:
+            raise MotionInputError("KEY_INSERTION_ADAPTER_UNVERIFIED","independent native locator prediction required")
+        expected=delta.locator_insertion.expected_driver
+        frames=np.asarray(expected.frames)
+        values=self.context.positions_to_solver(expected.values)
+        prediction=[]
+        for frame in self.context.frames:
+            left=max(0,min(len(frames)-1,int(np.searchsorted(frames,frame,side="right")-1)))
+            if left==len(frames)-1 or frame<=frames[0] or expected.segment_modes[left]=="STEP":
+                prediction.append(values[left])
+            else:
+                alpha=(int(frame)-frames[left])/(frames[left+1]-frames[left])
+                prediction.append(values[left]*(1-alpha)+values[left+1]*alpha)
+        prediction=np.asarray(prediction)
+        residual=float(np.max(np.linalg.norm(prediction-np.asarray(goal[key]),axis=1)))
+        correction=float(np.max(np.linalg.norm(prediction-local.position_m[key],axis=1)))
+        if residual>float(limits.get("fit_error_m",.0005)):
+            raise MotionInputError("KEY_LAYOUT_INSUFFICIENT","native float32 prediction exceeds full-domain fit tolerance")
+        if correction>self.intent.correction_envelope.get("position_m",0.)+1e-12:
+            raise MotionInputError("INTENT_LOCK_VIOLATION","full insertion influence exceeds the original correction envelope")
+        self._validate_candidate_effect([{"id":key,"frame":int(frame),"position":value.tolist()}
+            for frame,value in zip(self.context.frames,self.context.positions_to_scene(prediction),strict=True)],local)
+        protected={int(frame) for frame in self.context.frames
+                   if not self.intent.editable_frames[0]<=frame<=self.intent.editable_frames[1]}
+        for role,object_id in self.profile.role_ids.items():
+            if object_id==key:
+                protected.update(self.intent.locked_roles_frames.get(role,()))
+        for contact in self.intent.contacts:
+            if self.profile.role_ids.get(contact.role)==key:
+                protected.update((contact.first_frame,contact.last_frame))
+        rows={int(frame):row for row,frame in enumerate(self.context.frames)}
+        if any(frame not in rows or np.linalg.norm(prediction[rows[frame]]-local.position_m[key][rows[frame]])>1e-8
+               for frame in protected):
+            raise MotionInputError("INTENT_LOCK_VIOLATION","native float32 prediction changes a protected sample")
+        target=replace(local,position_m={**local.position_m,key:prediction})
+        arguments={"object_id":key,"layer_id":driver.layer_id,
+            "additions":[{"frame":row.frame,"position":list(row.value),"mode":row.mode} for row in delta.additions],
+            "space":"local","allow_key_insertion":True,"max_added_keys":min(budget,8)}
+        self._key_layout_digest=layout_digest
+        self._key_insertion_plan={"delta_digest":canonical_digest(delta.model_dump(mode="json")),
+            "predicted_target_digest":canonical_digest(target.as_dict()),"original_capture_digest":canonical_digest(local.as_dict()),
+            "requested_target_digest":canonical_digest(goal)}
+        return {"status":"candidate","feature_id":"key_insert","operation_name":"motion.key_topology_insert",
+            "arguments":arguments,"source_binding":self._bind_source("motion.key_topology_insert",arguments),
+            "existing_writes":[],"chunks":[],"key_topology_delta":delta.model_dump(mode="json"),
+            "original_capture":local.as_dict(),"original_key_layout":observed.model_dump(mode="json"),
+            "predicted_target":target.as_dict(),"requested_target":canonical_data(goal),
+            "report":{**report,**refined.report,"native_float32_fit_residual_m":residual,
+                "predicted_cumulative_position_m":correction,"runtime_quality":"unverified"}}
+
+    def plan_pass(self, kind, parameters=None, *, generated_keys_budget=0):
         """Compute a whole-domain candidate, without preparing a token or changing a scene."""
         from scipy.spatial.transform import Rotation
         from .motion_solvers import solve_contacts_v2, repair_rotation_spikes, build_key_model, fit_keys, solve_arm_clearance_v2
@@ -469,6 +581,7 @@ class CleanupWorkflow:
             raise CleanupError("INVALID_POLICY: solver limits must be finite nonnegative numbers")
         self._planning_parameters=canonical_data(parameters)
         self._key_layout_digest=None
+        self._key_insertion_plan=None
         fit_limits={**limits,"position_correction_m":min(limits.get("position_correction_m",float("inf")),
                                                        self.intent.correction_envelope.get("position_m",0.))}
         requested = parameters.pop("object_ids", None)
@@ -493,6 +606,9 @@ class CleanupWorkflow:
                      if role in self.profile.role_ids}
             fitted = fit_keys(goal, batch, model, locks, fit_limits)
             if fitted.status != "candidate":
+                if "KEY_LAYOUT_INSUFFICIENT" in fitted.reason_codes and self.intent.allow_key_insertion and generated_keys_budget:
+                    return self._plan_sparse_insertion(batch,goal,locks,fit_limits,generated_keys_budget,
+                        {**solved.report,**fitted.report},requested_writes)
                 return fitted.as_dict()
             writes = []
             for key, value in fitted.values.items():
@@ -518,6 +634,9 @@ class CleanupWorkflow:
             locks={self.profile.role_ids[role]:{frame:value for frame,value in values.items() if len(value)==3} for role,values in self.intent.key_pose_locks.items() if role in self.profile.role_ids}
             fitted=fit_keys(solved.values["position_m"],batch,model,locks,fit_limits)
             if fitted.status!="candidate":
+                if "KEY_LAYOUT_INSUFFICIENT" in fitted.reason_codes and self.intent.allow_key_insertion and generated_keys_budget:
+                    return self._plan_sparse_insertion(batch,solved.values["position_m"],locks,fit_limits,generated_keys_budget,
+                        {**solved.report,**fitted.report},requested_writes)
                 return fitted.as_dict()
             writes=[]
             for key,value in fitted.values.items():

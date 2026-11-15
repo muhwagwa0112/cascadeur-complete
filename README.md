@@ -126,8 +126,8 @@ The additional explicit setup commands are:
   when a one-frame interval was introduced. Full native projection equality,
   one-use authorization and successor capture remain mandatory; explicit
   interpolation is a separate operation. Honest layer/frame locators do not
-  become persistent native key GUIDs. Recipe topology authorization, sparse
-  solver/stage integration and baseline quality remain gated.
+  become persistent native key GUIDs. Recipe topology authorization remains
+  gated by actual native capability; standalone registration does not open it.
   `position_keys_insertion_plan` reads a private prediction from an exact
   runtime-issued evaluated key layout and explicit `KeyAddition` rows. It
   preserves the original capture/source and uses the executor's full-projection
@@ -141,6 +141,21 @@ The additional explicit setup commands are:
   The actual one-frame commit remains `outcome_unknown`; the existing global
   unresolved-effect barrier blocks further host source capture. Public success,
   successor and evaluation receipts for the two-frame route are not yet observed.
+  The host cleanup path now falls back from insufficient existing-key fitting
+  to explicitly budgeted sparse refinement for one independent local position
+  driver. Original keys stay fixed. It retains the original evaluated capture,
+  exact topology delta and full prediction, converts solver metres to native
+  float32 scene units, then rechecks the entire influence interval. Recipes
+  predeclare separate insertion, evaluation and topology/readback stages; the
+  insertion consumes its generated-key allocation once and cannot continue
+  without the original successful receipt and actual baseline quality checks.
+  This first path has no following existing-key writes. General rigs, retarget
+  refinement and unbaking completion remain outside its qualified scope. The
+  new host integration has not been executed as a native recipe.
+  Opt-in plans must explicitly budget the numerical fit-iteration ceiling
+  across three axes and all bounded refinement attempts; the default run
+  budget is not expanded automatically. Solver memory limits are narrowed to
+  the approved run ceiling before computation.
 - `Cascadeur Complete.Qualify complete scene adapter`: shipped-file full reader,
   bootstrap, evaluation and checkpoint in disposable tabs.
 - `Cascadeur Complete.Qualify independent scene adapter`: finite LINEAR/STEP

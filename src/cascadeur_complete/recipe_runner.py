@@ -26,6 +26,7 @@ from .recipe_store import HOST_INSTANCE_ID, RecipeConflict, RecipeRunStore, TERM
 from .store_lock import store_lock
 from .stage_contracts import StageEffect
 from .capture import estimate_motion_resources, enforce_motion_budget
+from .motion_key_layout import KeyTopologyDelta, validate_key_topology_readback
 
 
 def _json(value):
@@ -70,7 +71,7 @@ class _PlanningService:
     def __getattr__(self, name):
         if name not in {"execute_readonly", "capture_source", "validate_source", "recipe_rebind_source", "batch", "observe_key_layout", "verify_key_layout", "observe_motion_capture", "recipe_verify_capture",
                         "observe_retarget_inputs", "verify_retarget_inputs", "motion_controller_adapter", "verify_controller_targets",
-                        "motion_rotation_adapter"}:
+                        "motion_rotation_adapter", "verify_key_insertion", "verify_key_topology"}:
             raise RecipeConflict("Solver attempted an effect outside read-only planning")
         return getattr(self._service, name)
 
@@ -364,12 +365,15 @@ class RecipeRunner:
         # immutable observation failed. Preserve that terminal record, but do
         # not allow resume (including its early publish branch) to skip it.
         for record in run.steps:
-            if not record.step_id.endswith("-actual_readback") or record.result is None:
+            if not record.step_id.endswith(("-actual_readback", "-insertion_readback")) or record.result is None:
                 continue
             ref = next((item for item in reversed(record.artifact_refs) if item.kind == record.step_id), None)
             if ref is None:
                 raise RecipeConflict("ACTUAL_READBACK_EVIDENCE_MISSING")
             observation = self.store.read_artifact(run.run_id, ref)
+            if (record.step_id.endswith("-insertion_readback") and record.state == "skipped"
+                    and observation.get("reason") == "candidate_has_no_key_insertion"):
+                continue
             verification = observation.get("verification")
             if not isinstance(verification, dict) or "status" not in verification:
                 raise RecipeConflict("ACTUAL_READBACK_EVIDENCE_MISSING")
@@ -436,10 +440,14 @@ class RecipeRunner:
                 self._check_plan(plan, run)
                 return self._persist_result(run, pending, {"reason": step.not_required_reason,
                                                            "verified_by": "live_preflight"}, step_state="skipped")
+            if step.stage in {"key_insert", "insertion_evaluation", "insertion_readback"}:
+                candidate = self._latest(run, "solve")
+                if candidate.get("key_topology_delta") is None:
+                    return self._persist_result(run, pending, {"reason": "candidate_has_no_key_insertion"}, step_state="skipped")
             if step.stage == "preflight":
                 self._check_plan(plan, run)
                 return self._persist_result(run, pending, {"supported": True})
-            if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "analyze", "solve", "quality", "host_retarget"}:
+            if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "insertion_readback", "analyze", "solve", "quality", "host_retarget"}:
                 return self._host_step(run, pending, step, plan)
             if step.stage in {"export_validate", "publish"}:
                 return self._export_host_step(run, pending, step, plan)
@@ -558,21 +566,40 @@ class RecipeRunner:
                 return self._persist_result(run, record, result, state="blocked", blocked_reason="HOST_RETARGET_UNVERIFIED")
             return self._persist_result(run, record, result)
         used = run.budgets_used.model_dump()
-        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback"}:
+        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "insertion_readback"}:
             # Upper bound covers compact read chunks, rotation/local capture,
             # and source certification before entering the capture helper.
             n = plan.spec.clip.last_frame - plan.spec.clip.first_frame + 1
             used["bridge_requests"] += 4 * ((n * len(plan.spec.character.object_ids) + 24) // 25) + 8
+            if step.stage == "insertion_readback":
+                used["bridge_requests"] += 4
             used["memory_bytes"] = max(used["memory_bytes"], n * len(plan.spec.character.object_ids) * 2048)
         if step.stage == "solve":
+            cleanup = plan.spec.cleanup[step.fixed_parameters["cleanup_index"]]
+            insertion_step = next((item for item in plan.steps if item.stage == "key_insert"
+                and item.fixed_parameters["cleanup_index"] == step.fixed_parameters["cleanup_index"]), None)
+            insertion_cap = 0 if insertion_step is None else insertion_step.max_effect_from_baseline.maximum_added_keys
             used["solve_iterations"] += sum(int(item.parameters.get("limits", {}).get("iterations", 8))
-                                             if plan.spec.cleanup[step.fixed_parameters["cleanup_index"]].kind == "foot_contacts"
+                                             if cleanup.kind == "foot_contacts"
                                              else 1 for item in step.candidate_variants)
             n = plan.spec.clip.last_frame - plan.spec.clip.first_frame + 1
-            used["bridge_requests"] += len(step.candidate_variants) * (2 * ((n + 24) // 25) + 8)
-            if plan.spec.cleanup[step.fixed_parameters["cleanup_index"]].kind == "foot_contacts":
-                estimate = estimate_motion_resources(n, {key: n for key in plan.spec.cleanup[step.fixed_parameters["cleanup_index"]].object_ids},
-                    retained_capture_bytes=n * len(plan.spec.character.object_ids) * 2048)
+            chunks = (n * len(plan.spec.character.object_ids) + 24) // 25
+            used["bridge_requests"] += len(step.candidate_variants) * (2 * chunks + 8)
+            positional = cleanup.kind in {"foot_contacts", "arm_clearance", "hand_rest", "wrist_accent"}
+            if positional and insertion_cap:
+                # Reserve the initial existing-key fits and the finite sparse
+                # refinement (initial grid plus at most one refit per added
+                # key), each with three scalar-axis solver invocations. These
+                # are maximum numerical iterations, never implicit new grants.
+                used["solve_iterations"] += sum(3 * int(item.parameters.get("limits", {}).get("fit_iterations", 10000))
+                    * (len(plan.spec.character.object_ids) + 1 + insertion_cap) for item in step.candidate_variants)
+                # A second local capture and its verification, both layout
+                # observations/authenticators, insertion proof and exact source
+                # binding all precede returning a candidate.
+                used["bridge_requests"] += len(step.candidate_variants) * (2 * chunks + 12)
+            if positional:
+                estimate = estimate_motion_resources(n, {key: n for key in cleanup.object_ids},
+                    retained_capture_bytes=n * len(plan.spec.character.object_ids) * (4096 if insertion_cap else 2048))
                 enforce_motion_budget(estimate, {"max_memory_bytes": plan.spec.budgets.memory_bytes})
                 used["memory_bytes"] = max(used["memory_bytes"], estimate["estimated_peak_bytes"])
         usage = BudgetUsage.model_validate(used)
@@ -581,7 +608,7 @@ class RecipeRunner:
         # or host solver. Pure compute may be repeated after a crash, never writes.
         record = record.model_copy(update={"state": "ready"})
         run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
-        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback"}:
+        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "insertion_readback"}:
             value = self._capture(plan.spec, source=run.current_binding)
             binding = SourceBinding.model_validate(value["global"]["source_binding"])
             if not binding.complete:
@@ -591,7 +618,30 @@ class RecipeRunner:
                 # before any solve/write; never invent a threshold at runtime.
                 validate_quality_policy(plan.spec.quality, self._profile(plan.spec), plan.spec.intent,
                     self._include_mesh(plan.spec,self._profile(plan.spec)),capture=_batch(value["global"]))
-            if step.stage == "actual_readback":
+            if step.stage == "insertion_readback":
+                candidate = self._latest(run, "solve")
+                delta = KeyTopologyDelta.model_validate(candidate["key_topology_delta"])
+                local = _batch(value["local"])
+                observed = self.service.observe_key_layout({"ids": [delta.additions[0].object_id],
+                    "space": "local", "channel": "position", "frames": local.context.frames.tolist(),
+                    "capture_digest": digest(local.as_dict()), "capture_object_ids": list(local.object_ids),
+                    "context": local.context.as_dict()})
+                if not observed.ok:
+                    raise RecipeConflict("KEY_TOPOLOGY_READBACK_UNVERIFIED")
+                topology = validate_key_topology_readback(delta, observed.result, verifier=lambda item, sha:
+                    self.service.verify_key_topology(item, sha, delta.adapter_evidence_ref))
+                index = step.fixed_parameters["cleanup_index"]
+                insertion_permit = next(permit for permit in plan.steps if permit.stage == "key_insert"
+                    and permit.fixed_parameters["cleanup_index"] == index)
+                insertion = next(item for item in run.steps if item.step_id == insertion_permit.step_id)
+                ref = next((item for item in insertion.artifact_refs if item.path == insertion.receipt_ref), None)
+                if ref is None or insertion.execution_outcome != "succeeded":
+                    raise RecipeConflict("KEY_INSERTION_RECEIPT_MISSING")
+                receipt = self.store.read_artifact(run.run_id, ref)
+                if topology["completion_receipt_digest"] != digest(receipt):
+                    raise RecipeConflict("KEY_INSERTION_RECEIPT_MISMATCH")
+                value.update(key_layout=observed.result, topology_verification=topology)
+            if step.stage in {"actual_readback", "insertion_readback"}:
                 verification = self._verify_actual(run, plan, value)
                 value["verification"] = verification
                 if verification["status"] != "pass":
@@ -612,8 +662,20 @@ class RecipeRunner:
             cleanup = plan.spec.cleanup[step.fixed_parameters["cleanup_index"]]
             workflow = self._workflow(plan.spec, run.current_binding, planning=True)
             candidates = []
+            insertion_step = next((item for item in plan.steps if item.stage == "key_insert"
+                and item.fixed_parameters["cleanup_index"] == step.fixed_parameters["cleanup_index"]), None)
             for variant in step.candidate_variants:
-                result = _json(workflow.plan_pass(cleanup.kind, {**variant.parameters, "object_ids": list(cleanup.object_ids)}))
+                parameters = {**variant.parameters, "object_ids": list(cleanup.object_ids)}
+                if cleanup.kind in {"foot_contacts", "arm_clearance", "hand_rest", "wrist_accent"}:
+                    # Runtime ceiling narrows a temporary invocation only. The
+                    # approved variant and its authorization digest stay fixed.
+                    limits = dict(parameters.get("limits", {}))
+                    limits["max_memory_bytes"] = min(limits.get("max_memory_bytes", plan.spec.budgets.memory_bytes),
+                                                     plan.spec.budgets.memory_bytes)
+                    parameters["limits"] = limits
+                result = _json(workflow.plan_pass(cleanup.kind, parameters,
+                    generated_keys_budget=insertion_step.max_effect_from_baseline.maximum_added_keys)
+                    if insertion_step is not None else workflow.plan_pass(cleanup.kind, parameters))
                 if result.get("status") == "no_change":
                     candidates.append({"variant_id": variant.variant_id, **result})
                     break
@@ -678,6 +740,34 @@ class RecipeRunner:
                                            self._profile(plan.spec), plan.spec.intent)
         reasons = self._original_constraints(plan, metrics)
         candidate = self._latest(run, "solve")
+        if candidate.get("key_topology_delta") is not None:
+            prediction = self._insertion_prediction(candidate, plan)
+            # The privately qualified contract is one parentless Transform.
+            # Check observed local/global equivalence rather than silently
+            # reinterpreting a general local trajectory as a world trajectory.
+            local, world = _batch(actual["local"]), _batch(actual["global"])
+            if (local.object_ids != world.object_ids or digest(local.context.as_dict()) != digest(world.context.as_dict())
+                    or any(not np.allclose(local.position_m[key], world.position_m[key], rtol=0, atol=1e-10)
+                           for key in local.object_ids)):
+                raise RecipeConflict("KEY_INSERTION_SCOPE_UNQUALIFIED: local/global readback differs")
+            full_policy = plan.spec.quality
+            policy = full_policy.model_copy(update={"required_metrics": tuple(name for name in full_policy.required_metrics
+                if not (plan.spec.export is not None and name in {"position_readback_m", "rotation_readback_rad"}))})
+            report = evaluate_actual_quality(_batch(original["global"]), world, self._profile(plan.spec), plan.spec.intent,
+                policy, supports=self._supports(plan.spec), prediction=prediction,
+                capture_verifier=self.service.recipe_verify_capture).as_dict()
+            from .motion_quality import compare_captures
+            readback = compare_captures(_batch(candidate["predicted_target"]), local)
+            for name, metric in readback.items():
+                limit = full_policy.limits_si.get(name, 1e-12 if name == "duration_error_s" else 1e-8)
+                if metric.get("status") != "measured" or metric.get("sample_count", 0) <= 0 or metric["max"] > limit:
+                    reasons.append("INSERTION_PREDICTION_READBACK_MISMATCH:" + name)
+            if reasons:
+                report["status"] = "fail"
+                report["reason_codes"].extend(reasons)
+            report.update(quality_scope="insertion_native", approved_quality_policy_digest=digest(full_policy),
+                candidate_digest=digest(candidate), predicted_readback=readback, original_metrics=metrics)
+            return report
         arguments = candidate.get("arguments", {})
         batch = _batch(actual[arguments.get("space", "global")])
         rows = {int(frame): index for index, frame in enumerate(batch.context.frames)}
@@ -703,19 +793,103 @@ class RecipeRunner:
                 "original_metrics": metrics, "position_errors_m": positions, "rotation_errors_rad": rotations,
                 "capture_digest": digest(actual), "candidate_digest": digest(candidate)}
 
+    def _insertion_prediction(self, candidate, plan):
+        delta = KeyTopologyDelta.model_validate(candidate["key_topology_delta"])
+        original, predicted = _batch(candidate["original_capture"]), _batch(candidate["predicted_target"])
+        proof = delta.locator_insertion
+        if (proof is None or candidate.get("existing_writes") != []
+                or not delta.additions
+                or candidate.get("feature_id") != "key_insert"
+                or candidate.get("operation_name") != "motion.key_topology_insert"
+                or original.space != "local" or predicted.space != "local"
+                or len(original.object_ids) != 1 or predicted.object_ids != original.object_ids
+                or set(original.object_ids) != set(plan.spec.character.object_ids)
+                or digest(original.context.as_dict()) != digest(predicted.context.as_dict())
+                or digest(original.context.as_dict()) != proof.context_digest
+                or digest(original.as_dict()) != proof.capture_digest
+                or digest(original.source_binding) != proof.source_binding_digest
+                or digest(predicted.source_binding) != digest(original.source_binding)
+                or digest(candidate["original_key_layout"]) != delta.key_layout_digest
+                or delta.additions[0].object_id != original.object_ids[0]):
+            raise RecipeConflict("KEY_INSERTION_CANDIDATE_SCOPE_MISMATCH")
+        validate_samples(predicted, {key: ("position",) for key in predicted.object_ids})
+        driver = proof.expected_driver
+        if (driver.object_id != original.object_ids[0] or driver.channel != "position" or driver.space != "local"
+                or len(driver.values) != len(driver.frames)
+                or set(driver.segment_modes) - {"LINEAR", "STEP"}
+                or original.context.frames[0] < driver.frames[0] or original.context.frames[-1] > driver.frames[-1]
+                or set(predicted.position_m) != set(original.position_m)
+                or set(original.position_m) != set(original.object_ids)):
+            raise RecipeConflict("KEY_INSERTION_PREDICTION_SCOPE_MISMATCH")
+        values = original.context.positions_to_solver(driver.values)
+        if not np.isfinite(values).all():
+            raise RecipeConflict("KEY_INSERTION_PREDICTION_NONFINITE")
+        expected = []
+        for frame in original.context.frames:
+            left = max(0, min(len(driver.frames) - 1, int(np.searchsorted(driver.frames, frame, side="right") - 1)))
+            if left == len(driver.frames) - 1 or frame <= driver.frames[0] or driver.segment_modes[left] == "STEP":
+                expected.append(values[left])
+            else:
+                alpha = (int(frame) - driver.frames[left]) / (driver.frames[left + 1] - driver.frames[left])
+                expected.append(values[left] * (1 - alpha) + values[left + 1] * alpha)
+        if not np.array_equal(predicted.position_m[driver.object_id], np.asarray(expected)):
+            raise RecipeConflict("KEY_INSERTION_TARGET_DIFFERS_FROM_AUTHENTICATED_PREDICTION")
+        if (set(original.rotation_wxyz) != set(predicted.rotation_wxyz)
+                or any(not np.array_equal(original.rotation_wxyz[key], predicted.rotation_wxyz[key]) for key in original.rotation_wxyz)
+                or set(original.channel_valid) != set(predicted.channel_valid)
+                or any(not np.array_equal(original.channel_valid[key], predicted.channel_valid[key]) for key in original.channel_valid)):
+            raise RecipeConflict("KEY_INSERTION_CANDIDATE_ROTATION_OR_COVERAGE_CHANGED")
+        # This conversion is restricted by the authenticated independent,
+        # parentless locator contract and is checked against actual captures.
+        return SampleBatch(predicted.context, predicted.object_ids, "global", predicted.position_m,
+                           predicted.rotation_wxyz, predicted.channel_valid, predicted.source_binding)
+
     def _prepare(self, run, record, step, plan):
         context = {}
+        topology_delta = None
         if step.stage == "correction":
             candidate = self._latest(run, "solve")
+            if candidate.get("key_topology_delta") is not None:
+                verified = self._latest(run, "insertion_readback")
+                if verified.get("verification", {}).get("status") != "pass" or verified.get("verification", {}).get("candidate_digest") != digest(candidate):
+                    raise RecipeConflict("KEY_INSERTION_READBACK_REQUIRED")
+                return self._persist_result(run, record, {"reason": "standalone_insertion_has_no_existing_writes",
+                    "candidate_digest": digest(candidate)}, step_state="skipped")
             if candidate.get("status") == "no_change":
                 return self._persist_result(run, record, candidate, step_state="no_change")
             if candidate.get("operation_name") != step.operation_name or candidate.get("feature_id") != step.feature_id:
                 raise RecipeConflict("Solver candidate operation differs from the exact permit")
             context["candidate"] = candidate
             context["source_binding"] = candidate["source_binding"]
+            if plan.spec.intent.allow_key_insertion:
+                run = self._reserve_layout_reads(run, record, plan, candidate["arguments"])
             measured = self._measured_effect(run, plan, candidate["arguments"])
         else:
             measured = None
+        if step.stage == "key_insert":
+            candidate = self._latest(run, "solve")
+            prediction = self._insertion_prediction(candidate, plan)
+            topology_delta = KeyTopologyDelta.model_validate(candidate["key_topology_delta"])
+            used = run.budgets_used.model_dump()
+            used["bridge_requests"] += 1
+            usage = BudgetUsage.model_validate(used)
+            validate_usage(plan, usage, run.deadline)
+            run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
+            verified = self.service.verify_key_insertion({"key_layout_digest": topology_delta.key_layout_digest,
+                "additions": [row.model_dump(mode="json") for row in topology_delta.additions]},
+                topology_delta.locator_insertion.request_digest)
+            if (not verified.ok or verified.result.get("locator_insertion") != topology_delta.locator_insertion.model_dump(mode="json")
+                    or verified.result.get("adapter_evidence_ref") != topology_delta.adapter_evidence_ref):
+                raise RecipeConflict("KEY_INSERTION_PREDICTION_UNVERIFIED")
+            baseline = _batch(self._latest(run, "baseline_capture")["global"])
+            if digest(baseline.context.as_dict()) != digest(prediction.context.as_dict()):
+                raise RecipeConflict("KEY_INSERTION_CONTEXT_CHANGED")
+            metrics = original_intent_metrics(baseline, prediction, self._profile(plan.spec), plan.spec.intent)
+            if self._original_constraints(plan, metrics):
+                raise RecipeConflict("KEY_INSERTION_ORIGINAL_INTENT_VIOLATION")
+            measured = {"position_m": metrics["position_correction_m"]["max"],
+                        "rotation_rad": metrics["rotation_correction_rad"]["max"] if "rotation_correction_rad" in metrics else 0}
+            context.update(candidate=candidate, source_binding=candidate["source_binding"])
         if step.stage == "motion" and plan.spec.motion.mode == "retarget" and plan.spec.motion.route == "host":
             candidate = self._latest(run, "host_retarget")
             if candidate.get("status") == "no_change":
@@ -724,6 +898,8 @@ class RecipeRunner:
                 raise RecipeConflict("RETARGET_CANDIDATE_OPERATION_MISMATCH")
             context["candidate"] = candidate
             context["source_binding"] = candidate["source_binding"]
+            if plan.spec.intent.allow_key_insertion:
+                run = self._reserve_layout_reads(run, record, plan, candidate["arguments"])
             measured = self._measured_effect(run, plan, candidate["arguments"], baseline_prefix="retarget_capture")
         if step.stage == "export_stage":
             from .export_workflow import create_export_stage
@@ -746,13 +922,14 @@ class RecipeRunner:
         arguments, source = effect.arguments, effect.source_binding
         grant = self.store.read_grant(run.authorization_id)
         validate_step_authorization(self.store, grant, plan, run, step, source=source, arguments=arguments,
-                                    measured_effect=measured, stage_effect=effect)
+                                    measured_effect=measured, stage_effect=effect, topology_delta=topology_delta)
         attempt_id, request_id = str(uuid.uuid4()), str(uuid.uuid4())
         usage = run.budgets_used.model_dump()
         usage["bridge_requests"] += 8
-        usage["written_keys"] += len(arguments.get("writes", []))
-        usage["generated_keys"] += int((measured or {}).get("added_keys", 0))
-        usage["correction_passes"] += int(step.stage == "correction")
+        added = 0 if topology_delta is None else len(topology_delta.additions)
+        usage["written_keys"] += len(arguments.get("writes", [])) + added
+        usage["generated_keys"] += added + int((measured or {}).get("added_keys", 0))
+        usage["correction_passes"] += int(step.stage in {"correction", "key_insert"})
         usage = BudgetUsage.model_validate(usage)
         validate_usage(plan, usage, run.deadline)
         record = record.model_copy(update={"state": "preparing", "attempt_id": attempt_id, "request_id": request_id,
@@ -784,6 +961,16 @@ class RecipeRunner:
         record = record.model_copy(update={"state": "prepared", "token_ref": prepared["confirmation_token"]})
         return self._step_update(self.store.read(run.run_id), record)
 
+    def _reserve_layout_reads(self, run, record, plan, arguments):
+        channels = {field for row in arguments.get("writes", []) for field in ("position", "rotation_euler_xyz_radians") if field in row}
+        n = plan.spec.clip.last_frame - plan.spec.clip.first_frame + 1
+        used = run.budgets_used.model_dump()
+        used["bridge_requests"] += len(channels) * (4 * ((n * len(plan.spec.character.object_ids) + 24) // 25) + 12)
+        used["memory_bytes"] = max(used["memory_bytes"], n * len(plan.spec.character.object_ids) * 2048)
+        usage = BudgetUsage.model_validate(used)
+        validate_usage(plan, usage, run.deadline)
+        return self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
+
     def _measured_effect(self, run, plan, arguments, baseline_prefix="baseline_capture"):
         baseline = self._latest(run, baseline_prefix)
         space = arguments.get("space", "local" if "rotation" in arguments.get("channel", "") else "global")
@@ -803,10 +990,28 @@ class RecipeRunner:
                 new = Rotation.from_matrix(batch.context.rotations_to_solver(matrix))
                 old = Rotation.from_quat(batch.rotation_wxyz[object_id][index][[1, 2, 3, 0]])
                 rotations.append(float((old.inv() * new).magnitude()))
-        # Key insertion must be established against exact captured key topology.
-        # Until that adapter exists, only plans forbidding insertion can dispatch.
+        # Opt-in alone never authorizes an ordinary writer to create a key.
         if plan.spec.intent.allow_key_insertion:
-            raise RecipeConflict("KEY_TOPOLOGY_ADAPTER_UNAVAILABLE")
+            # Existing-key candidates still have zero topology effect. Reject
+            # any unobserved frame rather than treating opt-in as authority.
+            from .motion_key_layout import verify_key_layout
+            for channel, field in (("position", "position"), ("rotation", "rotation_euler_xyz_radians")):
+                writes = [row for row in arguments.get("writes", []) if field in row]
+                if not writes:
+                    continue
+                current = self._workflow(plan.spec, run.current_binding).capture_batch(
+                    list(batch.object_ids), space=space,
+                    required_rotation_ids=sorted({row["id"] for row in writes}) if channel == "rotation" else ())
+                observed = self.service.observe_key_layout({"ids": sorted({row["id"] for row in writes}),
+                    "space": space, "channel": channel, "frames": current.context.frames.tolist(),
+                    "capture_digest": digest(current.as_dict()), "capture_object_ids": list(current.object_ids),
+                    "context": current.context.as_dict()})
+                if not observed.ok:
+                    raise RecipeConflict("KEY_TOPOLOGY_ADAPTER_UNAVAILABLE")
+                layout, _ = verify_key_layout(observed.result, current, self.service.verify_key_layout)
+                keys = {(driver.object_id, frame) for driver in layout.drivers for frame in driver.frames}
+                if any((row["id"], row["frame"]) not in keys for row in writes):
+                    raise RecipeConflict("KEY_TOPOLOGY_INSERTION_STAGE_REQUIRED")
         return {"position_m": max(positions), "rotation_rad": max(rotations), "added_keys": 0}
 
     def _commit(self, run, record, step, plan):
@@ -861,7 +1066,7 @@ class RecipeRunner:
             if outcome == "succeeded":
                 host_result = (record.result or {}).get("host_commit_result")
                 repeatable_evidence = (record.stage_effect is not None and record.stage_effect.operation_name
-                                       in {"safety.bootstrap", "safety.checkpoint", "io.export_fbx"})
+                                       in {"safety.bootstrap", "safety.checkpoint", "io.export_fbx", "motion.key_topology_insert"})
                 recoverable_observation = repeatable_evidence and (host_result is None or (
                     host_result.get("outcome") == "outcome_unknown" and host_result.get("error_code") != "POSTCONDITION_FAILED"))
                 if not recoverable_observation and (host_result is None or not host_result.get("ok")):

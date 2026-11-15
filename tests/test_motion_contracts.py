@@ -491,3 +491,124 @@ def test_locator_insertion_rejects_unbound_or_rewritten_predictions(change):
     with pytest.raises(MotionInputError,match="KEY_(INSERTION_ADAPTER_UNVERIFIED|TOPOLOGY_MISMATCH)"):
         plan_key_insertion(observed,capture,rig,intent,[addition],verifier=verifier,
             insertion_verifier=insertion_verifier,generated_keys_budget=2)
+
+
+def _sparse_refinement_case():
+    from copy import deepcopy
+    from cascadeur_complete.motion_context import IntentConstraints
+    capture,rig,_,observed,_,_,_,verifier,_=_locator_insertion_domain_case()
+    observed=deepcopy(observed)
+    driver=observed["drivers"][0]
+    driver["values"]=[[0.,0.,0.]]*3
+    driver["segment_modes"]=["LINEAR","LINEAR"]
+    driver["native_model"]="linear_position_independent_v1"
+    for section in driver["sections"]:
+        section["interval_mode"]="LINEAR"
+    observed["qualified_models"]=[driver["native_model"]]
+    observed["raw_sample_projection"]={"space":"local","frames":list(range(9)),
+        "samples":[{"frame":frame,"id":"a","position":[0.,0.,0.]} for frame in range(9)]}
+    intent=IntentConstraints(editable_frames=(0,8),allow_key_insertion=True,
+        correction_envelope={"added_keys":1,"position_m":.03})
+    wanted=np.zeros((9,3));wanted[:,0]=[0,.005,.01,.005,0,0,0,0,0]
+    return capture,rig,intent,observed,verifier,{"a":wanted}
+
+
+def test_sparse_refinement_fits_interior_motion_without_moving_original_keys():
+    from cascadeur_complete.motion_solvers import refine_sparse_keys
+    capture,rig,intent,observed,verifier,goal=_sparse_refinement_case()
+    result=refine_sparse_keys(goal,capture,rig,intent,{},
+        {"velocity_weight":0,"acceleration_weight":0,"fit_error_m":1e-7},
+        key_layout=observed,verifier=verifier,allow_key_insertion=True,max_added_keys=1)
+    assert result.status=="candidate",result.as_dict()
+    assert result.values["existing_writes"]==[]
+    assert [row["frame"] for row in result.values["additions"]]==[2]
+    predicted=np.asarray(result.values["predicted_position_m"]["a"])
+    assert predicted==pytest.approx(goal["a"],abs=1e-7)
+    assert np.array_equal(predicted[[0,4,8]],capture.position_m["a"][[0,4,8]])
+
+
+def test_sparse_refinement_requires_optin_and_reserves_budget_before_matrices(monkeypatch):
+    import cascadeur_complete.motion_solvers as solvers
+    capture,rig,intent,observed,verifier,goal=_sparse_refinement_case()
+    assert solvers.refine_sparse_keys(goal,capture,rig,intent,{}, {},key_layout=observed,
+        verifier=verifier,max_added_keys=1).reason_codes==["KEY_INSERTION_NOT_AUTHORIZED"]
+    def forbidden(*args,**kwargs):
+        raise AssertionError("interpolation allocation preceded resource reservation")
+    monkeypatch.setattr(solvers,"_refinement_interpolant",forbidden)
+    result=solvers.refine_sparse_keys(goal,capture,rig,intent,{}, {"max_variables":0},
+        key_layout=observed,verifier=verifier,allow_key_insertion=True,max_added_keys=1)
+    assert result.reason_codes==["RESOURCE_BUDGET_EXCEEDED"]
+
+
+def test_sparse_refinement_cannot_spend_a_contact_boundary_or_locked_frame():
+    from cascadeur_complete.motion_context import ContactSegment
+    from cascadeur_complete.motion_solvers import refine_sparse_keys
+    capture,rig,intent,observed,verifier,goal=_sparse_refinement_case()
+    for protection in ({"locked_roles_frames":{"a":(2,)}},
+                       {"contacts":(ContactSegment(role="a",support_id="floor",first_frame=2,last_frame=4,
+                            mode="planted",provenance="explicit"),)}):
+        protected=intent.model_copy(update=protection)
+        result=refine_sparse_keys(goal,capture,rig,protected,{},
+            {"velocity_weight":0,"acceleration_weight":0,"fit_error_m":1e-7},
+            key_layout=observed,verifier=verifier,allow_key_insertion=True,max_added_keys=1)
+        assert result.status=="failed"
+        assert result.reason_codes==["KEY_LAYOUT_INSUFFICIENT"]
+
+
+def test_sparse_workflow_authenticates_native_units_and_keeps_original_capture(monkeypatch):
+    from copy import deepcopy
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from cascadeur_complete.capture import canonical_digest
+    from cascadeur_complete.cleanup_workflow import CleanupWorkflow
+    capture,rig,intent,observed,verifier,goal=_sparse_refinement_case()
+    observed["native_source_scope"]={"objects":[{"id":"a","parent_id":None}]}
+    _,_,_,_,_,proof,_,_,_=_locator_insertion_domain_case()
+    before_digest=canonical_digest(capture.as_dict())
+    requests=[]
+    def insertion_verifier(request,sha):
+        requests.append(deepcopy(request))
+        row=request["additions"][0]
+        expected=deepcopy(observed["drivers"][0])
+        new_section={"frame":row["frame"],"is_key":True,"interval_mode":row["mode"],
+            "interval_common":{"ik_fk":"FK","fixation":"Free"},
+            "tangent":{key:value for key,value in row["tangent"].items() if key not in {"key_common","label"}},
+            "key_common":row["tangent"]["key_common"],"label":None}
+        expected.update(frames=[0,2,4,8],key_ids=["layer:0","layer:2","layer:4","layer:8"],
+            values=[[0.,0.,0.],row["value"],[0.,0.,0.],[0.,0.,0.]],segment_modes=["LINEAR"]*3,
+            sections=[expected["sections"][0],new_section,*expected["sections"][1:]],
+            tangents=[expected["tangents"][0],row["tangent"],*expected["tangents"][1:]],
+            boundary_keys=[expected["boundary_keys"][0],{"frame":2,"key_id":"layer:2",
+                "key_id_kind":"layer_frame_locator","locked":False,"event":False,"label":None},
+                *expected["boundary_keys"][1:]])
+        issued={**proof,"request_digest":sha,"key_layout_digest":canonical_digest(observed),
+            "original_topology_digest":canonical_digest(observed["drivers"]),"capture_digest":before_digest,
+            "expected_driver":expected}
+        return SimpleNamespace(ok=True,result={"request_digest":sha,"shared_layer_effects_observed":True,
+            "non_target_effects":[],"adapter_evidence_ref":"domain-only-private-proof","locator_insertion":issued})
+    service=SimpleNamespace(observe_key_layout=lambda request:SimpleNamespace(ok=True,result=observed),
+        verify_key_layout=verifier,verify_key_insertion=insertion_verifier)
+    workflow=CleanupWorkflow(service,profile=rig,context=capture.context,intent=intent,source_binding=capture.source_binding)
+    monkeypatch.setattr(workflow,"capture_batch",lambda *args,**kwargs:capture)
+    bound=[]
+    monkeypatch.setattr(workflow,"_bind_source",lambda op,args:(bound.append((op,args)) or capture.source_binding))
+    result=workflow._plan_sparse_insertion(replace(capture,space="global"),goal,{},
+        {"velocity_weight":0,"acceleration_weight":0,"fit_error_m":1e-7},1,{},frozenset(("a",)))
+    assert result["operation_name"]=="motion.key_topology_insert"
+    assert result["existing_writes"]==[]
+    assert requests[0]["additions"][0]["value"]==pytest.approx([1.,0.,0.],abs=1e-6)
+    assert result["arguments"]["additions"][0]["position"]==requests[0]["additions"][0]["value"]
+    assert canonical_digest(result["original_capture"])==before_digest
+    assert canonical_digest(capture.as_dict())==before_digest
+    assert np.asarray(result["predicted_target"]["position_m"]["a"])==pytest.approx(goal["a"],abs=1e-7)
+    assert bound[0][0]==result["operation_name"]
+    from cascadeur_complete.recipe_runner import RecipeRunner
+    from cascadeur_complete.recipe_store import RecipeConflict
+    plan=SimpleNamespace(spec=SimpleNamespace(character=SimpleNamespace(object_ids=("a",))))
+    runner=RecipeRunner.__new__(RecipeRunner)
+    prediction=runner._insertion_prediction(result,plan)
+    assert prediction.space=="global"
+    tampered=deepcopy(result)
+    tampered["predicted_target"]["position_m"]["a"][2][0]+=.001
+    with pytest.raises(RecipeConflict,match="KEY_INSERTION_.*PREDICTION|KEY_INSERTION_.*TARGET"):
+        runner._insertion_prediction(tampered,plan)

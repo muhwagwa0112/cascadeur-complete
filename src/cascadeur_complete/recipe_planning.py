@@ -114,10 +114,23 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
     add("source_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("baseline_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("analyze", "motion_analysis", "motion.analyze", "host_compute", postconditions=("required_metric_eligibility",))
+    insertion_budget = min(spec.budgets.generated_keys, int(envelope.get("added_keys", 0)), 8 * len(spec.cleanup))
     for index, cleanup in enumerate(spec.cleanup):
         variants = cleanup.variants or (VariantEnvelope(variant_id="requested", parameters=cleanup.parameters),)
         add("solve", "motion_cleanup", "motion.solve", "host_compute", {"cleanup_index": index}, variants=variants,
             postconditions=("finite_feasible_candidate", "original_intent_preserved"))
+        if spec.intent.allow_key_insertion:
+            cap = insertion_budget // len(spec.cleanup) + int(index < insertion_budget % len(spec.cleanup))
+            add("key_insert", "key_insert", "motion.key_topology_insert", "scene_mutation",
+                {"cleanup_index": index, "max_added_keys": cap}, ("position", "scene"),
+                postconditions=("key_topology_inserted", "successor_binding"), objects=cleanup.object_ids,
+                lowering="cleanup-key-insertion-v1")
+            steps[-1] = steps[-1].model_copy(update={"max_effect_from_baseline": bounds.model_copy(
+                update={"maximum_added_keys": cap})})
+            add("insertion_evaluation", "interpolation_refresh", "animation.interpolation_refresh", "evaluation",
+                {"cleanup_index": index}, ("evaluation",), postconditions=("evaluation_settled",))
+            add("insertion_readback", "transform_get", "motion.capture", "read", {"cleanup_index": index},
+                postconditions=("completed_exact_topology", "original_intent_preserved", "predicted_target_readback"))
         rotations = cleanup.kind in {"fingers", "finger_fan", "hand_pose", "wrist_soften"}
         add("correction", "rotation_keys" if rotations else "position_keys",
             "animation.rotation_keys_set" if rotations else "animation.position_keys_set", "scene_mutation",
