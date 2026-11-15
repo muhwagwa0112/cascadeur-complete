@@ -68,7 +68,7 @@ class _PlanningService:
                 "arguments": arguments, "source_binding": _json(kwargs.get("source_binding"))}
 
     def __getattr__(self, name):
-        if name not in {"execute_readonly", "capture_source", "validate_source", "batch", "observe_key_layout", "verify_key_layout",
+        if name not in {"execute_readonly", "capture_source", "validate_source", "batch", "observe_key_layout", "verify_key_layout", "observe_motion_capture", "recipe_verify_capture",
                         "observe_retarget_inputs", "verify_retarget_inputs", "motion_controller_adapter", "verify_controller_targets"}:
             raise RecipeConflict("Solver attempted an effect outside read-only planning")
         return getattr(self._service, name)
@@ -120,7 +120,13 @@ class RecipeRunner:
 
     def plan(self, spec):
         spec = RecipeSpec.model_validate(spec)
-        reasons = self._preflight(spec, compile_steps(spec))
+        binding_reasons = []
+        if spec.input.kind != "active_scene":
+            try:
+                spec = self.service.recipe_bind_input(spec)
+            except (ValueError, OSError) as exc:
+                binding_reasons.append({"code": "FILE_BOOTSTRAP_SOURCE_UNVERIFIED", "detail": str(exc)})
+        reasons = binding_reasons + self._preflight(spec, compile_steps(spec))
         plan = build_plan(spec, reasons, self._runtime_fingerprints())
         self.store.save_plan(plan)
         return {"ok": False, "accepted": not plan.blocked_reasons,

@@ -170,25 +170,38 @@ class TransformAdapter:
 
 def _save_observed(scene, path):
     from events import event_message_manager
-    messages = []
-    subscription = event_message_manager.subscribe(lambda _s, full, level, simple: messages.append(str(full)))
+    messages, capture_errors = [], []
+    domain = scene.domain_scene()
+    def message(emitter, full, level, simple):
+        if emitter is scene or emitter is domain:
+            if len(messages) >= 128 or len(str(full)) + len(str(simple)) > 8192:
+                capture_errors.append("native_save_event_budget_exceeded")
+                return
+            messages.append({"full": str(full), "simple": str(simple), "level": str(getattr(level, "name", level))})
+    subscription = event_message_manager.subscribe(message)
     try:
         scene.save(str(path))
     finally:
         event_message_manager.unsubscribe(subscription)
-    if not any("Saving is completed" in message for message in messages):
+    completed = [row for row in messages if row["full"].strip() == "Saving is completed"]
+    errors = [row for row in messages if row["level"] in {"2", "3", "Warning", "Error"}]
+    if len(completed) != 1 or completed[0]["level"] not in {"1", "Info"} or errors or capture_errors:
         raise ValueError("NATIVE_COMPLETION_UNKNOWN: save completion event absent")
-    content = path.read_bytes()
-    if not content:
+    with _locked_input(path) as manifest:
+        pass
+    if not manifest["length"]:
         raise ValueError("NATIVE_COMPLETION_UNKNOWN: empty checkpoint")
-    return {"schema_version": 1, "path": str(path), "sha256": hashlib.sha256(content).hexdigest(), "length": len(content)}
+    return {"schema_version": 1, **manifest}
 
 
 def checkpoint(scene, arguments, request, adapter):
     from . import runtime as rt
     name = request["operations"][0]["name"]
+    reader = getattr(adapter, "read_scene", read_scene)
+    file_input = name == "safety.bootstrap" and arguments.get("input_kind", "active_scene") == "casc_file"
     if name == "safety.bootstrap" and arguments.get("input_kind", "active_scene") != "active_scene":
-        raise ValueError("RIG_ADAPTER_UNVERIFIED: file bootstrap has no qualified loader")
+        if not file_input or not getattr(adapter, "file_bootstrap", False):
+            raise ValueError("RIG_ADAPTER_UNVERIFIED: file bootstrap has no qualified loader")
     backup = Path(arguments["checkpoint_path"]).resolve()
     working = Path(arguments["working_path"]).resolve()
     if backup == working or any(p.exists() for p in (backup, working)):
@@ -203,7 +216,8 @@ def checkpoint(scene, arguments, request, adapter):
     if not all((p.is_relative_to(root) or (run_root is not None and p.parent in (run_root / "workspace", run_root / "checkpoints")))
                and p.suffix.lower() == ".casc" for p in (backup, working)):
         raise ValueError("Checkpoint paths must be owned .casc snapshot paths")
-    original = read_scene(scene)
+    original = reader(scene)
+    expected_target = original
     original_path = str(scene.get_path_name())
     before = dict(guards.scene_instance(scene))
     source = request.get("source_binding")
@@ -213,16 +227,21 @@ def checkpoint(scene, arguments, request, adapter):
         # Never save the original document just to obtain a clone. A persisted
         # source is usable only after native reload proves its complete content
         # equals the captured live source (unsaved edits therefore block).
-        path = Path(original_path)
-        if not original_path or not path.is_file():
+        path = Path(arguments["input_path"]) if file_input else Path(original_path)
+        if (not file_input and not original_path) or not path.is_file():
             raise ValueError("CHECKPOINT_UNAVAILABLE: save the initial document before bootstrap")
         guards.before_write()
         target = manager.create_application_scene()
         with _locked_input(path) as manifest:
+            if file_input and (manifest["sha256"] != arguments.get("input_sha256")
+                    or manifest["length"] != arguments.get("input_length")):
+                raise ValueError("INPUT_DIGEST_MISMATCH: locked bootstrap bytes changed")
             csc.app.ProjectLoader.load_from(str(path), target.domain_scene())
-            if read_scene(target) != original:
+            expected_target = reader(target)
+            if not file_input and expected_target != original:
                 raise ValueError("CHECKPOINT_UNAVAILABLE: persisted source differs from live source")
-        guards.link_clone(scene, target)
+        if not file_input:
+            guards.link_clone(scene, target)
         manager.set_current_scene(target)
     else:
         if before["scene_instance_id"] not in _WORKSPACES:
@@ -232,7 +251,7 @@ def checkpoint(scene, arguments, request, adapter):
     working.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_file = _save_observed(target, backup)
     working_file = _save_observed(target, working)
-    if read_scene(target) != original or (target is not scene and (read_scene(scene) != original or str(scene.get_path_name()) != original_path)):
+    if reader(target) != expected_target or (target is not scene and (reader(scene) != original or str(scene.get_path_name()) != original_path)):
         raise ValueError("NATIVE_COMPLETION_UNKNOWN: clone or source changed during checkpoint")
     identity = dict(guards.scene_instance(target))
     snapshot = {"schema_version": 1, "snapshot_id": str(uuid.uuid4()), "path": str(backup),
@@ -271,14 +290,23 @@ class _locked_input:
         if handle == ctypes.c_void_p(-1).value:
             raise OSError("Input file cannot be locked against replacement")
         self.stream = os.fdopen(msvcrt.open_osfhandle(handle, os.O_RDONLY), "rb")
-        self.content = self.stream.read()
-        return {"path": str(self.path), "sha256": hashlib.sha256(self.content).hexdigest(), "length": len(self.content)}
+        digest, count = hashlib.sha256(), 0
+        try:
+            while block := self.stream.read(1024 * 1024):
+                count += len(block)
+                if count > 512 * 1024 * 1024:
+                    raise ValueError("RESOURCE_BUDGET_EXCEEDED: bootstrap file exceeds 512 MiB")
+                digest.update(block)
+        except Exception:
+            self.stream.close()
+            raise
+        return {"path": str(self.path), "sha256": digest.hexdigest(), "length": count}
 
     def __exit__(self, *args):
         self.stream.close()
 
 
-def qualify_disposable():
+def qualify_disposable(*, include_scene_adapter=False):
     """Explicit native setup action; never reachable as an unguarded wire op."""
     global _ERROR
     guards.assert_loaded_package()
@@ -335,12 +363,24 @@ def qualify_disposable():
             "checkpoint": checkpoint_result, "successor_checkpoint": repeated_checkpoint,
             "operations": ["animation.transform_set", "safety.bootstrap", "safety.checkpoint"]}
         adapter = TransformAdapter(evidence)
+        evidence_path = folder / "qualification.json"
+        with evidence_path.open("xb") as stream:
+            stream.write(adapter.evidence_bytes)
+        adapter.verification["evidence_path"] = str(evidence_path)
         for name in ("animation.transform_set", "safety.bootstrap", "safety.checkpoint"):
             guards.register_adapter(name, adapter)
+        scene_qualification = {"status": "not_requested", "reason": "Complete-scene qualification is an explicit separate setup action"}
+        if include_scene_adapter:
+            from .native_scene_adapter import qualify_scene_adapter
+            try:
+                scene_qualification = qualify_scene_adapter()
+            except Exception as exc:
+                _ERROR = "Scene adapter qualification failed; only independent Transform is qualified: " + str(exc)
+                raise
         _ERROR = None
         return {"adapter_id": "independent-transform-key0-v1", "installed_build": installed_build(),
                 "evidence_sha256": adapter.verification["evidence_sha256"], "qualified_operations": evidence["operations"],
-                "checkpoint_completion": "observed_native_save_and_clone_equivalence"}
+                "checkpoint_completion": "observed_native_save_and_clone_equivalence", "scene_adapter": scene_qualification}
     finally:
         if previous is not None:
             manager.set_current_scene(previous)
@@ -371,6 +411,11 @@ def status():
 def verify_observation(observation, digest, kind):
     if digest != guards.digest(observation) or _OBSERVATIONS.get((kind, digest)) != observation:
         raise ValueError("RIG_ADAPTER_UNVERIFIED: observation not issued by this runtime")
+    if kind == "motion_capture":
+        from .native_motion_capture import lookup_capture
+        if lookup_capture(digest) is None:
+            raise ValueError("RIG_ADAPTER_UNVERIFIED: evaluated capture no longer matches the native scene")
+        return {"capture_digest": digest}
     return {"key_layout_digest" if kind == "key_layout" else "observation_digest": digest}
 
 
@@ -382,4 +427,26 @@ def observe_motion_inputs(scene, arguments):
     key = guards.digest(value)
     # A wire object can only authenticate bytes actually read in this epoch.
     _OBSERVATIONS[("motion_inputs", key)] = json.loads(json.dumps(value, allow_nan=False))
+    return value
+
+
+def observe_key_layout(scene, arguments):
+    from .native_key_layout import read_key_layout
+    from .native_motion_capture import lookup_capture
+    guards.assert_loaded_package()
+    value = read_key_layout(scene, arguments, capture_lookup=lambda key: lookup_capture(key, arguments))
+    value["evidence_ref"] = "native-key-layout:" + guards.RUNTIME_EPOCH + ":" + value["source_fingerprint"]
+    key = guards.digest(value)
+    _OBSERVATIONS[("key_layout", key)] = json.loads(json.dumps(value, allow_nan=False))
+    return value
+
+
+def observe_motion_capture(scene, arguments):
+    from .native_motion_capture import observe_motion_capture as read_capture
+    guards.assert_loaded_package()
+    value = read_capture(scene, arguments)
+    batch, key = value["canonical_batch"], value["capture_digest"]
+    if guards.digest(batch) != key:
+        raise ValueError("INCOMPLETE_CAPTURE: native canonical digest differs")
+    _OBSERVATIONS[("motion_capture", key)] = json.loads(json.dumps(batch, allow_nan=False))
     return value

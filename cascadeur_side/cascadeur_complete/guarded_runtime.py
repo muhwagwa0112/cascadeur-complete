@@ -57,6 +57,7 @@ def register_adapter(operation_name, adapter):
     proof = adapter.verification
     evidence = getattr(adapter, "evidence_bytes", None)
     executor = getattr(adapter, "execute", None)
+    evidence_path = proof.get("evidence_path")
     if (proof.get("runtime_fingerprint") != LOADED_FINGERPRINT
             or _loaded_fingerprint() != LOADED_FINGERPRINT
             or proof.get("dispatch_semantics") != "synchronous_no_yield"
@@ -67,13 +68,20 @@ def register_adapter(operation_name, adapter):
             or operation_name not in proof.get("operations", ())
             or proof.get("installed_build") != adapter.observed_build()):
         raise ValueError("RIG_ADAPTER_UNVERIFIED")
+    if evidence_path is not None and Path(evidence_path).read_bytes() != evidence:
+        raise ValueError("RIG_ADAPTER_UNVERIFIED: persisted evidence bytes differ")
     _ADAPTERS[operation_name] = adapter
 
 
 def capabilities():
-    return {"guarded_mutation": bool(_ADAPTERS), "source_binding": bool(_ADAPTERS),
+    result = {"guarded_mutation": bool(_ADAPTERS), "source_binding": bool(_ADAPTERS),
             "identity_verified": bool(_ADAPTERS), "dispatch_semantics": "unverified" if not _ADAPTERS else "synchronous_no_yield",
             "operations": sorted(_ADAPTERS), "protocols": ["3.0"], "legacy_read_protocols": ["2.0"]}
+    bootstrap = _ADAPTERS.get("safety.bootstrap")
+    extra = getattr(bootstrap, "qualified_capabilities", {})
+    if "file_bootstrap" in extra:
+        result["file_bootstrap"] = extra["file_bootstrap"]
+    return result
 
 
 def capture_source(scene, scope, inputs_digest, sample_digest=None, selection_digest=None):

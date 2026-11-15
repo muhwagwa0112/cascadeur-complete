@@ -14,7 +14,66 @@ from .recipe_store import RecipeConflict, file_sha256
 from .stage_contracts import BootstrapGrant, CheckpointObservation, DerivedTargetMapping, FileManifest, StageEffect
 
 
+def _file_bootstrap_supported(capabilities, kind, mode):
+    """A live typed capability names the exact observed loader and scene policy."""
+    capability = capabilities.get("file_bootstrap")
+    return (kind == "casc_file" and mode == "new_working_scene" and isinstance(capability, dict)
+            and isinstance(capability.get("kinds"), list) and kind in capability["kinds"]
+            and isinstance(capability.get("modes"), list) and mode in capability["modes"])
+
+
+def _bootstrap_file_arguments(input_spec, manifest):
+    return {"input_kind": input_spec.kind, "input_mode": input_spec.mode,
+            "input_path": manifest.path, "input_sha256": manifest.sha256, "input_length": manifest.length}
+
+
+def _assert_file_source(source, manifest, arguments):
+    if (source is None or not source.complete or source.scope.get("operation_name") != "safety.bootstrap"
+            or source.scope.get("operation_arguments_digest") != digest(arguments)
+            or source.scope.get("input_files") != [manifest.model_dump(mode="json")]):
+        raise RecipeConflict("FILE_BOOTSTRAP_SOURCE_UNVERIFIED: exact current scene and input manifest are required")
+
+
 class RecipeNativeServiceMixin:
+    def recipe_bind_input(self, spec):
+        """Bind a file plan to a real current scene and runtime-read file bytes.
+
+        Capability absence remains an ordinary displayed preflight blocker. A
+        claimed capability cannot replace a successful capture/validation call.
+        """
+        if spec.input.kind == "active_scene":
+            return spec
+        status = self._checked_status(self.refresh_live())
+        if not status.ok or not _file_bootstrap_supported(status.result.get("guarded_capabilities", {}), spec.input.kind, spec.input.mode):
+            return spec
+        path = Path(spec.input.path).resolve()
+        if path.suffix.lower() != ".casc":
+            return spec
+        if path.stat().st_size > spec.budgets.disk_bytes:
+            raise RecipeConflict("RESOURCE_BUDGET_EXCEEDED: bootstrap input bytes")
+        sha, length = file_sha256(path)
+        if sha != spec.input.sha256 or length > spec.budgets.disk_bytes:
+            raise RecipeConflict("INPUT_DIGEST_MISMATCH_OR_BUDGET_EXCEEDED")
+        manifest = FileManifest(path=str(path), sha256=sha, length=length)
+        if spec.input.source_binding is not None and not self.validate_source(spec.input.source_binding).ok:
+            raise RecipeConflict("INITIAL_SOURCE_CHANGED")
+        arguments = _bootstrap_file_arguments(spec.input, manifest)
+        source = self.capture_source({"operation_name": "safety.bootstrap", "operation_arguments": arguments},
+            digest({"input": manifest.model_dump(mode="json"), "input_mode": spec.input.mode}), None)
+        source = SourceBinding.model_validate(source)
+        _assert_file_source(source, manifest, arguments)
+        checked = self.validate_source(source, operation_name="safety.bootstrap", arguments=arguments)
+        if not checked.ok:
+            raise RecipeConflict("FILE_BOOTSTRAP_SOURCE_UNVERIFIED: " + str(checked.error_message))
+        prior = spec.input.binding
+        if prior is not None and (prior.scene_instance_id != source.binding.scene_instance_id
+                or prior.runtime_epoch != source.binding.runtime_epoch or prior.document_lineage_id != source.binding.document_lineage_id):
+            raise RecipeConflict("INITIAL_SOURCE_CHANGED")
+        value = spec.model_dump(mode="json")
+        value["input"].update(path=manifest.path, binding=source.binding.model_dump(mode="json"),
+                              source_binding=source.model_dump(mode="json"))
+        return type(spec).model_validate(value)
+
     def recipe_preflight(self, spec, steps, *, mode="initial", current_binding=None, predecessor_receipt=None):
         status = self._checked_status(self.refresh_live())
         if not status.ok:
@@ -34,9 +93,9 @@ class RecipeNativeServiceMixin:
             if (not checked.ok or not source.complete or source.binding.scene_instance_id != live.get("scene_id")
                     or source.binding.runtime_epoch != live.get("runtime_epoch")):
                 reasons.append({"code": "SCENE_CHANGED", "detail": checked.error_message})
-            if mode == "initial" and spec.input.kind == "active_scene" and source.binding != spec.input.binding:
+            if mode == "initial" and source.binding != spec.input.binding:
                 reasons.append({"code": "INITIAL_SOURCE_MISMATCH"})
-            if spec.character.derived_target is None:
+            if spec.character.derived_target is None and (mode == "continuation" or spec.input.kind == "active_scene"):
                 profile, ownership = source.scope.get("profile", {}), source.scope.get("ownership", {})
                 if (digest(profile) != spec.character.rig_profile_digest
                         or profile.get("character_id") != spec.character.character_id
@@ -53,8 +112,19 @@ class RecipeNativeServiceMixin:
                 reasons.append({"code": "NATIVE_ADAPTER_UNVERIFIED", "step_id": step.step_id, "operation": step.operation_name})
         if spec.character.derived_target is not None and not capabilities.get("derived_target_observation"):
             reasons.append({"code": "DERIVED_TARGET_ADAPTER_UNVERIFIED"})
-        if spec.input.kind != "active_scene" and not capabilities.get("file_bootstrap"):
-            reasons.append({"code": "FILE_BOOTSTRAP_READER_UNVERIFIED"})
+        if spec.input.kind != "active_scene":
+            if not _file_bootstrap_supported(capabilities, spec.input.kind, spec.input.mode):
+                reasons.append({"code": "FILE_BOOTSTRAP_READER_UNVERIFIED", "kind": spec.input.kind, "mode": spec.input.mode})
+            elif mode == "initial":
+                try:
+                    path = Path(spec.input.path)
+                    sha, length = file_sha256(path)
+                    manifest = FileManifest(path=str(path), sha256=sha, length=length)
+                    if path.suffix.lower() != ".casc" or sha != spec.input.sha256:
+                        raise RecipeConflict("INPUT_DIGEST_MISMATCH_OR_FORMAT_UNSUPPORTED")
+                    _assert_file_source(source, manifest, _bootstrap_file_arguments(spec.input, manifest))
+                except (ValueError, OSError) as exc:
+                    reasons.append({"code": "FILE_BOOTSTRAP_SOURCE_UNVERIFIED", "detail": str(exc)})
         if spec.rig.mode == "explicit_mapping":
             reasons.append({"code": "EXPLICIT_RIG_CREATION_ADAPTER_UNVERIFIED"})
         if spec.motion.mode == "keyposes" and any(item.rotation_euler_xyz_radians is not None for item in spec.motion.keyposes):
@@ -86,6 +156,9 @@ class RecipeNativeServiceMixin:
             raise RecipeConflict("KEY_LAYOUT_UNVERIFIED: " + str(result.error_message))
         KeyLayoutObservation.model_validate(result.result)
         return result
+
+    def observe_motion_capture(self, request):
+        return self.client.execute("transform_get", [Operation(name="system.observe_motion_capture", arguments=request)])
 
     def verify_key_layout(self, observation, observation_digest):
         value = observation.as_dict() if hasattr(observation, "as_dict") else observation.model_dump(mode="json") if hasattr(observation, "model_dump") else observation
@@ -129,8 +202,10 @@ class RecipeNativeServiceMixin:
                 inputs.append(FileManifest(path=spec.input.path, sha256=sha, length=length))
                 args["input_path"] = spec.input.path
                 args["input_sha256"] = sha
+                args["input_length"] = length
             source = spec.input.source_binding
-            outputs, successor = [str(backup), str(working)], "working_clone"
+            outputs = [str(backup), str(working)]
+            successor = "working_clone" if spec.input.kind == "active_scene" else "new_instance"
         elif stage == "checkpoint":
             manifest = {} if source is None else source.scope.get("snapshot_manifest", {})
             if not manifest.get("working_path"):
@@ -182,7 +257,7 @@ class RecipeNativeServiceMixin:
             # This strict profile is consumed only by a registered export adapter;
             # it must observe actual native settings/closure before dispatch.
             args = {"path": export["raw_path"], "export_profile": spec.export.model_dump(mode="json"),
-                    "export_profile_digest": digest(spec.export)}
+                    "export_profile_digest": digest(spec.export), "max_output_bytes": min(spec.budgets.output_bytes, spec.budgets.disk_bytes, 2 * 1024**3)}
             outputs = [export["raw_path"], export["sealed_path"]]
         else:
             raise RecipeConflict("STAGE_LOWERING_UNSUPPORTED")
@@ -191,6 +266,8 @@ class RecipeNativeServiceMixin:
             if source is None:
                 raise RecipeConflict("BINDING_UNAVAILABLE")
             source = self.recipe_rebind_source(source, step.operation_name, args, plan=plan, run=run, step=step)
+        if stage == "initial_checkpoint" and inputs:
+            _assert_file_source(source, inputs[0], args)
         ids = step.target.object_ids if mapping is None else tuple(mapping.role_ids[key] for key in step.target.object_ids) if step.target.object_ids else mapping.object_ids
         layers = step.target.layer_ids if mapping is None else mapping.layer_ids
         return StageEffect(step_id=step.step_id, declaration_digest=step.fixed_parameters_digest,
@@ -215,6 +292,14 @@ class RecipeNativeServiceMixin:
             # File bootstrap needs a runtime-issued file reader identity. It may
             # not invent a SceneBinding from a pathname.
             raise RecipeConflict("FILE_BOOTSTRAP_READER_UNVERIFIED")
+        if grant.input_file is not None:
+            capability = self.client.runtime_status.get("guarded_capabilities", {})
+            if not _file_bootstrap_supported(capability, effect.arguments.get("input_kind"), effect.arguments.get("input_mode")):
+                raise RecipeConflict("FILE_BOOTSTRAP_READER_UNVERIFIED")
+            sha, length = file_sha256(Path(grant.input_file.path))
+            if sha != grant.input_file.sha256 or length != grant.input_file.length:
+                raise RecipeConflict("INPUT_DIGEST_MISMATCH")
+            _assert_file_source(grant.source_binding, grant.input_file, effect.arguments)
         checked = self.validate_source(grant.source_binding, operation_name=effect.operation_name, arguments=effect.arguments)
         if not checked.ok:
             raise RecipeConflict("BOOTSTRAP_SOURCE_CHANGED")

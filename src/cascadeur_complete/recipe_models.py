@@ -70,13 +70,14 @@ class InputSpec(RecipeModel):
 
     @model_validator(mode="after")
     def validate_input(self):
+        if (self.source_binding is not None and self.binding is not None
+                and self.source_binding.binding != self.binding):
+            raise ValueError("source binding does not identify the input scene")
         if self.kind == "active_scene":
             if self.binding is None:
                 raise ValueError("active_scene requires an exact SceneBinding")
             if self.path is not None or self.sha256 is not None:
                 raise ValueError("active_scene cannot silently select a file")
-            if self.source_binding is not None and self.source_binding.binding != self.binding:
-                raise ValueError("source binding does not identify the input scene")
         elif self.path is None or self.sha256 is None or not Path(self.path).is_absolute():
             raise ValueError("File inputs require an absolute path and content SHA256")
         return self

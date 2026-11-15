@@ -24,7 +24,7 @@ from .handler_registry import dispatch as dispatch_registered
 PROTOCOL_VERSION = "3.0"
 READ_ONLY_OPERATIONS = {
     "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
-    "system.observe_motion_inputs", "system.observe_key_layout",
+    "system.observe_motion_inputs", "system.observe_key_layout", "system.observe_motion_capture",
     "system.status",
     "system.logs",
     "system.view_mode_get",
@@ -1025,7 +1025,11 @@ def _run_operation_legacy(scene, operation, request):
         from .native_adapters import observe_motion_inputs
         return observe_motion_inputs(scene, args), []
     if name == "system.observe_key_layout":
-        raise ValueError("RIG_ADAPTER_UNVERIFIED: current native adapter does not attest a character key/rig domain")
+        from .native_adapters import observe_key_layout
+        return observe_key_layout(scene, args), []
+    if name == "system.observe_motion_capture":
+        from .native_adapters import observe_motion_capture
+        return observe_motion_capture(scene, args), []
     if name == "system.capture_source":
         scope = args["scope"]
         if set(scope) == {"operation_name", "operation_arguments"}:
@@ -1616,8 +1620,10 @@ def execute_request(scene, request):
     result["scene_revision_before"] = state.get("revision")
     # Terminal durability precedes response publication. Failure propagates and
     # leaves the claim unresolved; a later host must never redispatch it.
-    guards.receipt_event(runtime_root(), request, "terminal", outcome=outcome, result=result,
-                         effect_class=effect, dispatched=dispatched)
+    receipt = guards.receipt_event(runtime_root(), request, "terminal", outcome=outcome, result=result,
+                                  effect_class=effect, dispatched=dispatched)
+    from .native_scene_adapter import finalize_evaluation
+    finalize_evaluation(_scene_view() or scene, request, result, receipt)
     return result
 
 

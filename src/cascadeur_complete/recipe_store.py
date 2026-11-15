@@ -112,6 +112,15 @@ class RecipeRunStore:
         self.verify_grant(grant, plan)
         if step.stage != "initial_checkpoint" or effect.step_id != step.step_id:
             raise RecipeConflict("BOOTSTRAP_SCOPE_MISMATCH")
+        if effect.source_binding is None or not effect.source_binding.complete:
+            raise RecipeConflict("BOOTSTRAP_SOURCE_UNVERIFIED")
+        if effect.source_binding.scope.get("operation_arguments_digest") != effect.arguments_digest:
+            raise RecipeConflict("BOOTSTRAP_SOURCE_ARGUMENTS_MISMATCH")
+        if plan.spec.input.kind != "active_scene":
+            if (len(effect.input_files) != 1 or effect.input_files[0].path != plan.spec.input.path
+                    or effect.input_files[0].sha256 != plan.spec.input.sha256
+                    or effect.source_binding.scope.get("input_files") != [effect.input_files[0].model_dump(mode="json")]):
+                raise RecipeConflict("BOOTSTRAP_INPUT_MANIFEST_MISMATCH")
         runtime = plan.runtime_fingerprints
         value = dict(grant_id=str(uuid.uuid4()), authorization_id=grant.authorization_id,
             authorization_digest=digest(grant), plan_digest=plan.plan_digest,
@@ -139,7 +148,12 @@ class RecipeRunStore:
         self.verify_grant(self.read_grant(run.authorization_id), plan)
         if (run.cancel_requested or run.lease_epoch != value.lease_epoch or record.request_id != value.request_id
                 or record.attempt_id != value.attempt_id or record.stage_effect is None
-                or record.stage_effect.arguments_digest != value.arguments_digest or plan.plan_digest != value.plan_digest):
+                or record.stage_effect.arguments_digest != value.arguments_digest or plan.plan_digest != value.plan_digest
+                or record.stage_effect.source_binding != value.source_binding
+                or record.stage_effect.output_paths != value.output_paths
+                or record.stage_effect.operation_name != value.operation_name
+                or record.stage_effect.declaration_digest != value.declaration_digest
+                or (None if not record.stage_effect.input_files else record.stage_effect.input_files[0]) != value.input_file):
             raise RecipeConflict("BOOTSTRAP_GRANT_SCOPE_CHANGED")
         return stored
 

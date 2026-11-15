@@ -1,6 +1,8 @@
 """Observed interpolation and opt-in key-topology plans, without native effects."""
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, StrictInt, model_validator
 
 from .capture import canonical_digest, validate_write_scope
@@ -19,11 +21,19 @@ class DriverKeyLayout(MotionModel):
     tangents: tuple[dict, ...] = ()
     boundary_keys: tuple[dict, ...] = ()
     influences: dict
+    key_id_kind: Literal["native_id","layer_frame_locator"] = "native_id"
+    data_id: str | None = None
+    data_mode: str | None = None
+    layer_objects: tuple[str,...] = ()
+    sections: tuple[dict,...] = ()
+    native_model: str | None = None
+    reason_codes: tuple[str,...] = ()
 
     @model_validator(mode="after")
     def valid(self):
         if (self.channel not in ("position","rotation") or self.space not in ("local","global")
                 or not self.layer_id or not self.frames or len(self.frames)!=len(self.key_ids)
+                or any(frame<0 for frame in self.frames)
                 or len(set(self.key_ids))!=len(self.key_ids)
                 or any(b<=a for a,b in zip(self.frames,self.frames[1:]))
                 or len(self.segment_modes)!=max(len(self.frames)-1,0)):
@@ -40,6 +50,13 @@ class KeyLayoutObservation(MotionModel):
     capture_digest: str
     drivers: tuple[DriverKeyLayout, ...]
     evidence_ref: str
+    support_status: Literal["supported","unverified","unsupported"] = "unverified"
+    reason_codes: tuple[str,...] = ()
+    candidate_models: tuple[str,...] = ()
+    qualified_models: tuple[str,...] = ()
+    native_source_scope: dict = Field(default_factory=dict)
+    raw_sample_projection: dict = Field(default_factory=dict)
+    capture_binding: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def valid(self):
@@ -62,6 +79,8 @@ def verify_key_layout(observation, capture, verifier):
     if not (getattr(receipt,"ok",False) and isinstance(result,dict)
             and result.get("key_layout_digest")==digest):
         raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native key-layout evidence could not be authenticated")
+    if observed.support_status!="supported" or observed.reason_codes:
+        raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED",", ".join(observed.reason_codes) or "native model is not qualified")
     return observed,digest
 
 
@@ -119,6 +138,8 @@ def plan_key_insertion(observation, capture, rig, intent, additions, *, verifier
             raise MotionInputError("KEY_LAYOUT_INSUFFICIENT","insertion must stay within captured existing-key influence boundaries")
         if len(layout.values)!=len(layout.frames) or len(layout.tangents)!=len(layout.frames):
             raise MotionInputError("KEY_LAYOUT_INSUFFICIENT","insertion requires complete original values and tangents")
+        if layout.key_id_kind!="native_id":
+            raise MotionInputError("PERSISTENT_KEY_ID_UNAVAILABLE","layer/frame locators cannot attest inserted-key identity")
         if any(row.get("event") or row.get("locked") for row in layout.boundary_keys
                if row.get("frame")==value.frame):
             raise MotionInputError("INTENT_LOCK_VIOLATION","event or boundary key is protected")

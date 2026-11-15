@@ -72,6 +72,32 @@ rechecks that observation before resolving semantic overrides. Missing physical
 FPS, units, basis, rest data or ownership remains a blocker; object names and
 caller-provided evidence strings cannot establish those facts.
 
+An additional `native-model-assets-v1` reader and explicit scene qualification
+path cover model properties/references, data/settings, layers/sections, clusters
+and supported embedded mesh assets for checkpoint and evaluation. A shipped
+`Cascy.casc` was loaded into a new document lineage, checkpointed and evaluated;
+an authenticated capture then read one actual RigInfo-owned joint at frame 0.
+This was observed at an earlier bridge fingerprint, not certified for every
+subsequent bridge revision. File bootstrap planning now binds the exact `.casc`
+bytes and native capability before authorization. FBX input remains gated.
+
+Evaluated captures require the current issued source and durable native
+evaluation receipt. Their FPS, length scale and basis are an explicit conversion
+policy; they do not establish missing native physical metadata. Authored-key
+inspection is separate and optional. Existing keys use layer/frame locators
+because the SDK exposes no persistent key ID. No interpolation model or key
+insertion route is qualified by these observations.
+
+Complete-scene qualification is separate from the default independent-transform
+command. A later diagnostic with the character scene open caused native memory
+growth before its first export artifact; its exact failing SDK call is unknown.
+The process was stopped and recovered with an empty scene. The export diagnostic
+now rejects a populated current scene before scanning it and records native
+call phases. This is not a hard bound on native allocation. An empty-scene static
+fixture produced a real FBX, but structural parser compatibility, animated
+export and target roundtrip remain unqualified. No production export route is
+registered by the diagnostic.
+
 ## Mocap cleanup
 
 Production preparation requires an explicit stable-ID rig profile, rational FPS,

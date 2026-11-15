@@ -205,3 +205,28 @@ def test_host_retarget_observes_target_and_blocks_an_absent_controller_adapter()
     result=workflow.plan_retarget(source,{"root":"root"},{"root_role":"root","scale":1,"target_channels":["position"]})
     assert requests[0]["role_ids"]=={"root":"r"}
     assert result["reason_codes"]==["RIG_ADAPTER_UNVERIFIED"]
+
+
+def test_observed_piecewise_keys_fit_the_native_segment_schedule_without_invented_ids():
+    from types import SimpleNamespace
+    from cascadeur_complete.capture import canonical_digest
+    from cascadeur_complete.motion_key_layout import KeyLayoutObservation
+    capture=batch({"a":np.zeros((5,3))},5)
+    rig=RigProfile("p","c",{"a":"a"},frozenset(("a",)))
+    model_id="piecewise_linear_step_position_independent_v1"
+    observed={"build_fingerprint":"actual-test-build","evaluator_fingerprint":"test-evaluator",
+        "source_fingerprint":"test-source","capture_digest":canonical_digest(capture.as_dict()),"evidence_ref":"test-runtime-record",
+        "support_status":"supported","qualified_models":[model_id],"drivers":[{"object_id":"a","channel":"position",
+        "space":"global","layer_id":"layer","key_ids":["layer:0","layer:2","layer:4"],
+        "key_id_kind":"layer_frame_locator","frames":[0,2,4],"segment_modes":["STEP","LINEAR"],
+        "influences":{"controllers":[],"blend":[],"cycle":[]},"native_model":model_id}]}
+    verifier=lambda _,digest:SimpleNamespace(ok=True,result={"key_layout_digest":digest})
+    model=build_key_model(capture,rig,key_layout=observed,verifier=verifier)
+    goal=np.zeros((5,3));goal[:,0]=[0,0,.01,.015,.02]
+    result=fit_keys({"a":goal},capture,model,{}, {"velocity_weight":0,"acceleration_weight":0,"position_correction_m":.03})
+    assert result.status=="candidate"
+    assert result.values["a"]["position_m"][:,0]==pytest.approx([0,.01,.02],abs=1e-7)
+    assert result.report["key_layout_digest"]==canonical_digest(KeyLayoutObservation.model_validate(observed).model_dump(mode="json"))
+    observed["support_status"]="unverified"
+    with pytest.raises(MotionInputError,match="INTERPOLATION_MODEL_UNVERIFIED"):
+        build_key_model(capture,rig,key_layout=observed,verifier=verifier)

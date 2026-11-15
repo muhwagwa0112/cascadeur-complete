@@ -40,6 +40,24 @@ rig ownership, mesh capture, native export or the full cleanup recipe. Missing
 observed adapters remain explicit preflight blockers. Host math and orchestration
 checks do not establish successful live motion cleanup or FBX delivery.
 
+The additional complete-scene reader is limited to checkpoint/evaluation closure
+over readable native model data and supported embedded assets. File bootstrap
+binds the exact `.casc` bytes and creates a new document lineage. A shipped Cascy
+sample and one evaluated joint/frame were observed at an earlier bridge
+fingerprint; a changed bridge or process needs its own explicit qualification.
+The default qualification command continues to use the independent-transform
+fixture. A character-scene diagnostic later caused native memory growth, so
+complete-scene qualification is not run implicitly.
+
+Runtime-issued evaluated capture uses independent native reads tied to the
+successful evaluation receipt and current active source. Explicit FPS/scale/basis
+remain declared policy until independently observed as physical metadata.
+Authored-key readers expose actual sections/tangents and layer/frame locators;
+they do not grant key insertion or a verified interpolation model. The static FBX
+diagnostic has produced bytes, but has not established animated export, consumer
+import, roundtrip quality or publication. See the
+[current issue memo](KNOWN_ISSUES_2026-11-15.md) before selecting a native route.
+
 Generated target identities may be declared with `DerivedTargetRef` role paths.
 They cannot include invented concrete IDs or profiles. After the exact producer
 receipt, the runtime resolves ownership and topology once and the run preserves

@@ -275,10 +275,64 @@ class CleanupWorkflow:
 
     def capture_batch(self, ids, frames=None, space="global", required_rotation_ids=()):
         self._require_contract("capture", ids)
-        from scipy.spatial.transform import Rotation
         grid = self.context.frames if frames is None else np.asarray(frames)
         if not np.array_equal(grid, self.context.frames):
             raise CleanupError("INCOMPLETE_CAPTURE: capture must cover the exact context time grid")
+        ids=list(ids)
+        required_rotation_ids=list(required_rotation_ids)
+        if (not ids or len(set(ids))!=len(ids) or not set(required_rotation_ids)<=set(ids)
+                or space not in ("local","global")):
+            raise CleanupError("INVALID_POLICY: exact unique capture IDs, rotation subset and space required")
+        observer=getattr(self.service,"observe_motion_capture",None)
+        if callable(observer):
+            if self.source_binding is None:
+                raise CleanupError("BINDING_UNAVAILABLE: native evaluated capture requires an issued source binding")
+            source=(self.source_binding.model_dump(mode="json") if hasattr(self.source_binding,"model_dump")
+                    else canonical_data(self.source_binding))
+            receipt=observer({"ids":ids,"space":space,"context":self.context.as_dict(),
+                              "required_rotation_ids":required_rotation_ids,"source_binding":source})
+            if not getattr(receipt,"ok",False):
+                raise CleanupError("CAPTURE_UNVERIFIED: "+str(getattr(receipt,"error_message","native capture failed")))
+            issued=receipt.result
+            if not isinstance(issued,dict) or not isinstance(issued.get("canonical_batch"),dict):
+                raise CleanupError("CAPTURE_UNVERIFIED: canonical native batch was not returned")
+            value=issued["canonical_batch"]
+            expected_fields={"context","object_ids","space","position_m","rotation_wxyz","channel_valid","source_binding"}
+            if (set(value)!=expected_fields or value["context"]!=self.context.as_dict() or value["object_ids"]!=ids
+                    or value["space"]!=space or value["source_binding"]!=source
+                    or issued.get("capture_digest")!=canonical_digest(value)):
+                raise CleanupError("CAPTURE_SCOPE_MISMATCH: issued canonical batch differs from exact requested scope")
+            batch=SampleBatch.from_dict(value)
+            required={key:("position","rotation") if key in required_rotation_ids else ("position",) for key in ids}
+            validate_samples(batch,required)
+            if (set(batch.position_m)!=set(ids) or set(batch.channel_valid)!=set(ids)
+                    or not set(batch.rotation_wxyz)<=set(ids)):
+                raise CleanupError("INCOMPLETE_CAPTURE: canonical channel map escapes exact capture IDs")
+            verifier=getattr(self.service,"recipe_verify_capture",None)
+            if not callable(verifier):
+                raise CleanupError("CAPTURE_UNVERIFIED: runtime-issued capture authenticator unavailable")
+            verified=verifier(batch,issued["capture_digest"])
+            if (not getattr(verified,"ok",False) or not isinstance(verified.result,dict)
+                    or verified.result.get("capture_digest")!=issued["capture_digest"]):
+                raise CleanupError("CAPTURE_UNVERIFIED: current native capture provenance could not be authenticated")
+            if not issued.get("evaluation_receipt_digest"):
+                raise CleanupError("EVALUATION_RECEIPT_UNAVAILABLE: native capture has no durable evaluation receipt")
+            observed_scene=issued.get("scene_instance_id")
+            if not observed_scene or (self.scene_id is not None and self.scene_id!=observed_scene):
+                raise CleanupError("SCENE_CHANGED: native capture scene instance differs")
+            self.scene_id=observed_scene
+            raw=issued.get("sample_projection")
+            if (not isinstance(raw,dict) or raw.get("space")!=space or raw.get("frames")!=grid.tolist()
+                    or [(row.get("frame"),row.get("id")) for row in raw.get("samples",[])]
+                       !=[(int(frame),key) for frame in grid for key in sorted(ids)]):
+                raise CleanupError("INCOMPLETE_CAPTURE: native raw projection coverage differs")
+            self._captures.append(canonical_data(raw))
+            self._capture_scopes.append({"space":space,"frames":grid.tolist(),"ids":sorted(ids),
+                "channels":{key:["position"]+(["rotation"] if key in batch.rotation_wxyz else []) for key in sorted(ids)}})
+            return batch
+        # Legacy read-only clients without the private native observation hook
+        # can still analyze samples; this path issues no evaluated-capture proof.
+        from scipy.spatial.transform import Rotation
         raw = self.sample(list(ids), self.frame_count(), space=space, only=grid.tolist())
         positions = {key: self.context.positions_to_solver(value) for key, value in raw["position"].items()}
         rotations, valid = {}, {}
@@ -306,7 +360,8 @@ class CleanupWorkflow:
             if not callable(reader):
                 raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native key-layout reader unavailable")
             receipt=reader({"ids":sorted(goal),"space":batch.space,"channel":"position",
-                            "frames":batch.context.frames.tolist(),"capture_digest":canonical_digest(batch.as_dict())})
+                            "frames":batch.context.frames.tolist(),"capture_digest":canonical_digest(batch.as_dict()),
+                            "capture_object_ids":list(batch.object_ids),"context":batch.context.as_dict()})
             if not getattr(receipt,"ok",False):
                 raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native key-layout observation failed")
             descriptor=receipt.result

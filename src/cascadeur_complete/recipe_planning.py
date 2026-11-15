@@ -49,7 +49,7 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
     target = ExactTarget(
         character_id=spec.character.character_id, object_ids=spec.character.object_ids,
         layer_ids=spec.character.layer_ids,
-        lineage_id=None if spec.input.binding is None else spec.input.binding.document_lineage_id,
+        lineage_id=spec.input.binding.document_lineage_id if spec.input.kind == "active_scene" and spec.input.binding is not None else None,
         derived_ref=spec.character.derived_target,
     )
     envelope = spec.intent.correction_envelope

@@ -66,10 +66,13 @@ def build_key_model(capture, rig, *, interpolation_capabilities=None, key_layout
             # Explicit observation of *no* controller/blend/cycle influence is
             # required; an absent influence entry is not proof of independence.
             if (set(driver.influences)!={"controllers","blend","cycle"}
-                    or any(driver.influences.values()) or len(modes)>1
+                    or any(driver.influences.values()) or driver.reason_codes
                     or modes-set(("LINEAR","STEP"))):
                 raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native evaluator for nonlinear or influenced keys is unavailable")
-            interpolation_capabilities[driver.object_id]={"frames":driver.frames,"mode":next(iter(modes),"LINEAR")}
+            if driver.native_model not in observed.qualified_models:
+                raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","driver model is not in the authenticated evaluator qualification")
+            interpolation_capabilities[driver.object_id]={"frames":driver.frames,"segment_modes":driver.segment_modes,
+                                                          "mode":"CONSTANT" if len(driver.frames)==1 else None}
         capability="verified"
     interpolation_capabilities=interpolation_capabilities or {}
     keys, modes = {}, {}
@@ -82,8 +85,12 @@ def build_key_model(capture, rig, *, interpolation_capabilities=None, key_layout
             raise MotionInputError("INVALID_POLICY", "key grids must be unique increasing integers")
         if np.any(grid<capture.context.frames[0]) or np.any(grid>capture.context.frames[-1]):
             raise MotionInputError("KEY_LAYOUT_INSUFFICIENT","key influence extends outside the captured impact interval")
-        keys[object_id], modes[object_id] = grid, str(spec.get("mode", "unknown"))
-    if any(m not in ("LINEAR","STEP") for m in modes.values()):
+        keys[object_id]=grid
+        modes[object_id]=(tuple(spec["segment_modes"]) if len(grid)>1 and "segment_modes" in spec
+                          else str(spec.get("mode","unknown")))
+    if any((isinstance(mode,tuple) and (len(mode)!=len(keys[key])-1 or set(mode)-{"LINEAR","STEP"}))
+           or (not isinstance(mode,tuple) and mode not in ("LINEAR","STEP","CONSTANT"))
+           for key,mode in modes.items()):
         raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","unsupported declared interpolation")
     return KeyModel(capture.context.frames, keys, modes, capability,descriptor_digest,source_fingerprint)
 
@@ -123,9 +130,16 @@ def fit_keys(goal, original, key_model, constraints, limits):
             return SolverResult("failed",["KEY_LAYOUT_INSUFFICIENT"],report={"detail":"original authored key values were not captured"})
         mode = key_model.mode_by_id[object_id]
         b = linear_interpolation(original.context.frames, keys)
-        if mode == "STEP":
+        if mode == "STEP" or isinstance(mode,tuple):
             index = np.clip(np.searchsorted(keys, original.context.frames, side="right") - 1, 0, len(keys) - 1)
-            b = sp.csr_matrix((np.ones(len(index)), (np.arange(len(index)), index)), shape=b.shape)
+            if mode=="STEP":
+                b = sp.csr_matrix((np.ones(len(index)), (np.arange(len(index)), index)), shape=b.shape)
+            else:
+                b=b.tolil()
+                for row,key_index in enumerate(index):
+                    if key_index<len(mode) and mode[key_index]=="STEP":
+                        b.rows[row]=[int(key_index)];b.data[row]=[1.]
+                b=b.tocsr()
         base = np.asarray(original.position_m[object_id])
         original_keys = np.column_stack([np.interp(keys, original.context.frames, base[:, axis]) for axis in range(3)])
         smooth = float(limits.get("velocity_weight", 0.01)) * (d1 @ b).T @ (d1 @ b)
@@ -154,7 +168,7 @@ def fit_keys(goal, original, key_model, constraints, limits):
             output[:, axis] = result.x
         residual = np.linalg.norm(b @ output - wanted, axis=1)
         residuals[object_id] = float(residual.max())
-        if mode in ("LINEAR", "STEP") and residual.max() > float(limits.get("fit_error_m", 0.0005)):
+        if residual.max() > float(limits.get("fit_error_m", 0.0005)):
             return SolverResult("failed", ["KEY_LAYOUT_INSUFFICIENT"], report={"fit_residual_m": residuals})
         targets[object_id] = {"frames": keys.tolist(), "position_m": output}
     return SolverResult("candidate", values=targets, report={"fit_residual_m": residuals,

@@ -85,8 +85,7 @@ def validate_step_authorization(
             sha, length = file_sha256(Path(manifest.path))
             if sha != manifest.sha256 or length != manifest.length:
                 raise RecipeConflict("LOWERED_INPUT_BYTES_CHANGED")
-            if (step.stage != "initial_checkpoint" and (source is None
-                    or manifest.model_dump(mode="json") not in source.scope.get("input_files", []))):
+            if source is None or manifest.model_dump(mode="json") not in source.scope.get("input_files", []):
                 raise RecipeConflict("INPUT_MANIFEST_UNATTESTED")
         for output in stage_effect.output_paths:
             path = Path(output).resolve()
