@@ -132,7 +132,11 @@ class RecipeRunStore:
             output_paths=effect.output_paths, runtime_epoch=runtime.get("runtime_epoch"),
             adapter_fingerprint=runtime.get("loaded_adapter_fingerprint"),
             application_build=runtime.get("installation_version"), expires_at=min(grant.expires_at, run.deadline), mac="")
-        result = BootstrapGrant.model_validate(self._signed("bootstrap", value))
+        # Sign the exact typed bytes that will be persisted. Model defaults
+        # (notably schema_version) must be present before authentication, or a
+        # freshly issued grant fails its own subsequent verification.
+        candidate = BootstrapGrant.model_validate(value)
+        result = BootstrapGrant.model_validate(self._signed("bootstrap", candidate.model_dump(mode="json")))
         with store_lock(self.lock_path):
             write_immutable(self.run_dir(run.run_id) / "bootstrap" / f"{result.grant_id}.json", result.model_dump(mode="json"))
         return result
@@ -257,7 +261,12 @@ class RecipeRunStore:
             return self.read(run_id)
 
     def read(self, run_id: str) -> RecipeRunRecord:
-        value = self._verified(self.run_dir(run_id) / "manifest.json", "run")
+        # Coordinate with manifest replacement on Windows. An unlocked status
+        # reader can race os.replace and get sharing-violation PermissionError,
+        # interrupting observation while the worker still owns a prepared step.
+        # The store lock is process-shared and reentrant for writer transactions.
+        with store_lock(self.lock_path):
+            value = self._verified(self.run_dir(run_id) / "manifest.json", "run")
         run = RecipeRunRecord.model_validate(value)
         if run.run_id != run_id:
             raise RecipeConflict("Run identity mismatch")

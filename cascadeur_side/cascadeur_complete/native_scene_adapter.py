@@ -35,6 +35,7 @@ def finalize_evaluation(scene, request, result, receipt):
 
 class NativeSceneAdapter:
     read_scene = staticmethod(read_scene)
+    adapter_id = "native-model-assets-v1"
     file_bootstrap = True
 
     def __init__(self, evidence_bytes, evidence_path=None):
@@ -61,7 +62,7 @@ class NativeSceneAdapter:
             raise ValueError("RIG_ADAPTER_UNVERIFIED: native qualification evidence changed")
         if not isinstance(arguments, dict) or operation not in {"safety.bootstrap", "safety.checkpoint", "animation.interpolation_refresh"}:
             raise ValueError("BINDING_UNAVAILABLE: unsupported native scene operation")
-        projection = read_scene(scene)
+        projection = self.read_scene(scene)
         files = []
         if operation == "safety.bootstrap":
             allowed = {"input_kind", "input_mode", "input_path", "input_sha256", "input_length", "checkpoint_path", "working_path"}
@@ -83,7 +84,7 @@ class NativeSceneAdapter:
         elif operation == "animation.interpolation_refresh" and arguments:
             raise ValueError("INVALID_POLICY: evaluation refresh has no arbitrary settings")
         required = {"operation_name": operation, "operation_arguments": arguments,
-            "operation_arguments_digest": guards.digest(arguments), "adapter_id": "native-model-assets-v1",
+            "operation_arguments_digest": guards.digest(arguments), "adapter_id": self.adapter_id,
             "object_ids": [row["id"] for row in projection["objects"]],
             "layer_ids": [row["id"] for row in projection["layers"]], "frames": [0, projection["frames"] - 1],
             "input_files": files}
@@ -93,7 +94,7 @@ class NativeSceneAdapter:
         return required
 
     def capture(self, scene, scope):
-        projection = read_scene(scene)
+        projection = self.read_scene(scene)
         return {"coverage_complete": True, "authored_projection": projection, "sample_projection": projection}
 
     def prepare_recovery_binding(self, scene, request, result):
@@ -117,7 +118,7 @@ class NativeSceneAdapter:
         transact(rt._domain_scene(scene).modify_update, "Cascadeur Complete: observed evaluation", refresh)
         if callbacks != ["interpolation_returned"]:
             raise ValueError("NATIVE_COMPLETION_UNKNOWN: evaluation callback did not complete exactly once")
-        projection = read_scene(scene)
+        projection = self.read_scene(scene)
         _EVALUATIONS[before["scene_instance_id"]] = {"projection_digest": guards.digest(projection),
             "runtime_epoch": guards.RUNTIME_EPOCH, "request_id": request.get("request_id"),
             "frames": [0, projection["frames"] - 1], "native_completion": "observed"}

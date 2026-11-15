@@ -95,6 +95,12 @@ The additional explicit setup commands are:
   Transform. It requires an empty current tab and never enables key insertion.
 - `Cascadeur Complete.Qualify complete scene adapter`: shipped-file full reader,
   bootstrap, evaluation and checkpoint in disposable tabs.
+- `Cascadeur Complete.Qualify independent scene adapter`: finite LINEAR/STEP
+  observations followed by complete-projection file bootstrap, evaluation and
+  checkpoint for one parentless Transform, optionally with observed `FbxExport`
+  metadata, at most 33 frames and no assets, controllers, cycles or additive
+  layers. This separate profile preserves exact save equality; it does not
+  qualify the character route when Cascy's first save changes data channels.
 - `Cascadeur Complete.Qualify checkpoint restore adapter`: exact new-tab restore
   of the active owned checkpoint. Computed readback differences block it.
   Restoring a real failed request additionally requires its authenticated
@@ -194,6 +200,16 @@ source, actual ownership, declared layer membership, parents and supplied native
 bind rest; role names and constraints remain explicit declarations. A private
 verifier re-reads that target before accepting it. This observation grants no
 write capability and does not establish complete recipe support.
+
+A five-frame independent Transform preservation recipe has now completed the
+real host plan/authorization/runner, authenticated bootstrap and evaluation,
+global/local source and baseline capture, sampled preservation quality and final
+checkpoint. It preserves existing rig/motion, uses an explicit conversion policy
+and includes no correction or export. The six required preservation metrics had
+zero measured error. This does not establish humanoid cleanup or consumer
+roundtrip/publication. Preflight now includes required rotation quality, and
+export rejects missing original-intent target dependencies and changed rig/rest
+context before accepting roundtrip quality.
 
 See [the r4 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
 the limits of checks performed, and the next implementation steps.

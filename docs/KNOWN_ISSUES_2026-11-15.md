@@ -87,6 +87,45 @@ r4의 16개 항목을 대상으로 source/완료/receipt, 입력 수집, recipe 
 
 남은 문제는 일반 character의 writer qualification, native root/joint/axis/물리 메타데이터, Cascy 첫 저장의 정확한 수치 차이, 실제 실패 후 조건부 복구, 원본 intent에 결합한 consumer quality·최종 게시다. 새 target 발급의 실앱 확인은 독립 객체에 한정되며 Cascy의 supplied rest/mesh target 발급과 full recipe 성공은 아직 확인하지 않았다. 앱 재시작 중 한 번 발생한 `Error syncing with master instance`는 오류 창 종료 후 정상 실행했으며 원인을 확정하거나 제품 수정으로 해결했다고 주장하지 않는다.
 
+### 독립 complete-scene와 실제 recipe 실행 — 11월 16일 추가
+
+원격 개선안 branch를 다시 fetch/ls-remote 했으며 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4` 그대로다. r4의 16개 연결 전체 목표는 활성 상태로 유지한다. 아래 독립 객체 실행은 전체 character/consumer 목표 완료가 아니다.
+
+- `native-independent-complete-scene-v1`을 별도 profile로 구현했다. 현재 프로세스의 실제 finite interpolation proof와 build/epoch/fingerprint를 요구하고, 부모 없는 단일 Basic/Node3d/Transform, 관측된 선택적 FbxExport metadata, 최대 33 frame, asset/controller/cycle/additive 없는 전체 closure만 읽는다. 파일 bootstrap의 원래 빈 탭만 예외이며 새로 load한 대상은 이 domain을 만족해야 한다. 전체 data/settings/sections projection의 exact save equality는 유지한다. Cascy의 차이가 나는 채널을 제외하거나 수치 허용 오차를 추가하지 않았다.
+- 명시적인 `Cascadeur Complete.Qualify independent scene adapter` 명령을 추가했다. import나 wire 요청으로 자동 실행하지 않는다. 실제 40개 LINEAR/STEP perturbation, 새 source 저장, full-project file bootstrap, 평가, 후속 checkpoint와 원본 탭 복원이 끝난 뒤에만 세 operation을 등록한다. source/packaged installer는 bridge 전체를 복사하므로 이 command도 함께 배포한다. 실제 전역 설치 교체는 실행하지 않았다.
+- recipe preflight가 실제 capture의 필수 회전 ID와 같은 함수를 사용한다. root quaternion이 필요한 recipe의 `rotation_correction_rad` 누락을 native 효과 전에 거절한다.
+- 실제 queue 실행에서 새 bootstrap grant가 자체 인증에 실패했다. 서명 후 Pydantic이 `schema_version` 기본값을 넣던 순서가 원인이었으며, 저장할 typed model을 먼저 완성한 뒤 전체를 서명하도록 수정했다. 잘못 발급된 이전 grant/run은 재서명하거나 교체하지 않는다.
+- 실제 상태 polling과 worker의 manifest 교체가 경합해 Windows `PermissionError`가 발생했다. 상태 read도 기존 process-shared reentrant store lock을 사용하도록 고쳤다. 이 오류로 중단된 run의 bootstrap 성공과 evaluation prepared/not_dispatched를 보존했다. 취소는 이전 host lease가 종료됐음을 확인한 뒤 원 intent/request/token을 유지하며 실행 전 취소 또는 원 receipt 관측으로 이어지도록 연결했다.
+- export expectation은 원본 intent의 모든 role 및 비수정 dependency의 실제 target 관측을 요구한다. 현재 skeleton map에 표현할 수 없는 dependency를 source 값으로 채우지 않고 `EXPORT_INTENT_TARGET_COVERAGE_UNAVAILABLE`로 차단한다. source/baseline 시간 격자와 정확한 RigProfile digest도 고정하여 뒤늦은 rest/limits 변경을 거절한다.
+- installed SDK의 정확한 `ProtoRootConstraint.root → TechnicalLinks.joint` 타입/owner 연결을 읽고 actual local/global quaternion 채널까지 확인할 때만 root orientation 후보를 낸다. `BehaviourType`/`BehaviourRangeType`의 실제 참조 ID·이름·owner도 보존한다. final rig graph나 이름, 회전 상수로 대체하지 않는다. native 3축 AngleConstraints를 canonical 단일 unsigned hinge 범위로 바꿀 근거가 없어 joint axis/limit은 계속 미확인이다.
+
+실제 설치 앱의 bridge fingerprint `641a8dcf12f985978b0c472cb5b62bdf1e3c69032f776cc799fceae9f0f60ba9`, epoch `33bcc094-f065-4ad5-996a-66f5b12382e4`에서 다음 실행을 관찰했다. 아래 결과는 얇은 independent-scene command wrapper 추가 전 bytes이며 이후 fingerprint의 자격으로 승계하지 않는다.
+
+| 관찰 | 실제 결과 |
+|---|---|
+| independent model + scene qualification | 40 trial 및 source→file load/save→evaluation→checkpoint exact projection 통과. `independent-scene-qualification-0cb390ac-52fe-4649-a6ac-e080904775ad/qualification.json`, SHA-256 `8462f71eece4b4d26ac7d445062276d4418015cc16d164ea7537d0ecc30db032` |
+| 전체 preservation runner | run `0676eb0e-61a8-4842-b9d7-45b28c5a5dc7`, `succeeded`, quality `pass`, export `not_requested`. 실제 0..4 dense global/local position+quaternion capture. existing rig/motion 단계는 live preflight 후 skip |
+| bootstrap terminal | `454ca4b7-28b4-4cfa-88d0-d3c9e2012f22`, `succeeded` |
+| evaluation terminal | `65aea564-9275-4106-8284-3a1b323d2054`, `succeeded` 및 durable 평가 receipt를 capture에서 재인증 |
+| preservation quality | required 6개 metric의 measured max 0, sampled_frames, runtime_verified=true. 품질 artifact SHA-256 `23007131e6dabc5a152878d42bf8642f95debbaef93ac04b33218cf61cb372fb`. acceleration/jerk 등 진단 수치의 품질 기준을 추가로 통과했다는 의미는 아님 |
+| final checkpoint terminal | `08f8ab91-af33-4caa-a167-181d6ea510e0`, `succeeded`. manifest SHA-256 `70ac2a445b302860006273822fe2be2ab12e8a40c2a0d9e86d5886571ef5ed75` |
+
+host와 native 응답은 double로 대체하지 않았다. `CascadeurService.recipes.plan/authorize/start/status`와 실제 BridgeClient 인증 queue를 사용하고 공식 localhost script server는 drain trigger로만 사용했다. FPS 30·cm·identity basis는 명시적 진단 conversion policy이며 native 물리 메타데이터 인증이 아니다. local 산출물은 `artifacts/native-r4/isolated-runtime` 아래 ignored 파일이고 키·state·receipt는 Git에 포함하지 않는다. 변경된 host 경계의 직접 확인은 topology·품질 정책·target coverage/rest mutation에 한정했으며 broad suite/build/CI는 실행하지 않았다.
+
+별도 Cascy 읽기 진단은 288 selected 객체, behaviour 참조 property 540개를 오류 없이 관찰했다. 이 final rig에는 ProtoRootConstraint 연결이 없어 root는 `PROTO_ROOT_TOPOLOGY_UNOBSERVED`로 남는다. `motion-input-topology-ee0700f7-04f0-4cac-809d-0a560a1e20e7/observed.json`, SHA-256 `d567851efc847d46d715ecb0dc699383f7658701bb64576ef288355f1eebb5b3`. 원본 Cascy SHA-256 `0d6ae171db831e4738fddc86014fd0a0b77e9991c74308972603810ee34fc723`은 동일하다. 해당 호출은 복사본을 읽고 원래 빈 탭을 복원했으나 이후 PID 11060이 종료됐다. Windows Application Error는 `Qt6Core.dll`, `0xc0000005`, offset `0x779f8`, report `2de514bc-73c7-4300-bfc7-655a6d91f33a`를 기록했다. 특정 reader/탭 제거/native API를 원인으로 확정하지 않는다. 새 PID 35576에서는 Cascy를 다시 열지 않고 위 independent recipe를 완료했다.
+
+### 현재 command qualification과 중단 run 취소
+
+얇은 command wrapper까지 포함한 최종 native fingerprint `41ab505eb77812733a04396b220c26200a7007a74fd18fac79dd0efa17137f46`, epoch `ff08eddc-f8f4-4b4d-a762-917198b349b0`, 설치 앱 PID 34604에서 새 명령을 직접 호출했다. 공식 command가 받는 `csc.domain.Scene`을 전달했고 실제 Success 메시지와 반환값을 확인했다. 40 model trials, full-project file bootstrap, 평가, exact checkpoint 및 최초 빈 탭 복원이 완료됐다. 증거는 `artifacts/native-r4/isolated-runtime/snapshots/independent-scene-qualification-856b5b7d-d58b-4838-b473-04c4413466b8/qualification.json`, SHA-256 `faddca1fefaef29506cde890d4175117bc83aacb9a67c36730b9d03565d81b8f`다. 이 프로세스는 bootstrap/checkpoint/interpolation 세 operation만 해당 좁은 domain으로 등록했다. 전체 preservation recipe를 새 fingerprint에서 다시 실행한 결과는 아니다.
+
+직전 command 호출에서는 내가 `csc.view.Scene`을 전달해 qualification 자체와 탭 정리가 끝난 뒤 마지막 `scene.success`에서 AttributeError가 났다. 원인 확인 후 올바른 command 인자를 사용한 새 소유 fixture 실행으로 위 명령 성공을 관찰했다. 이전 증거를 수정하거나 실패한 bridge 요청을 재전송하지 않았다.
+
+중단된 실제 run `dba7d928-ea96-4318-b9e4-185b88276695`를 새 host에서 취소했다. 종료된 이전 host의 lease를 1→2로 인수하고 prepared/not_dispatched `005-evaluation`만 `canceled_pre_dispatch`로 종료했다. 원래 request `ad954145-d365-4fa8-b786-87e8832d5cc6`, token, attempt, dispatch lease, grant, source binding, artifact와 budget은 그대로다. run 상태는 `blocked`→`canceled`이며 기존 bootstrap 성공도 보존했다. 이 취소에는 앱 호출이나 native dispatch가 필요하지 않았다. 별도 실제 자식 host/임시 store 재현에서도 살아 있는 owner 인수를 거부하고 종료 후 인수, 취소 intent가 있는 resume, unknown 유지와 원 terminal receipt에 의한 종료를 확인했다.
+
+Windows에서는 종료된 프로세스의 handle이 남아 있으면 OpenProcess/GetProcessTimes가 성공할 수 있었다. 생성 시각만으로 live owner라 판정하던 코드를 `SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION`과 `WaitForSingleObject(handle, 0)`의 실제 종료 상태 확인으로 고쳤다. 접근 거부·상태 불명은 인수를 허용하지 않는다. 손상된 bootstrap grant가 남은 이전 run `585e3fb7-9375-426b-8208-0ae39144fb97`와 전역 runtime의 기존 unknown 요청은 재서명·삭제·재실행하지 않았다.
+
+여전히 일반 character의 exact checkpoint/restore, final root graph/해부학적 joint/물리 메타데이터, 실제 실패 attestation→조건부 복구, source-rest가 결합된 consumer roundtrip·최종 게시, 실제 설치 교체는 미완료다. preservation recipe의 성공을 correction writer, 일반 휴머노이드, continuous coverage, export 성공으로 확대하지 않는다.
+
 ## P0: 남아 있는 실행 제한
 
 ### 전체 project 로딩에서 발견한 설정 손실

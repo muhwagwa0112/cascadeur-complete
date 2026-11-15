@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -36,6 +36,26 @@ def _rotation(q):
 
 def _wxyz(rotation):
     return rotation.as_quat()[..., [3,0,1,2]]
+
+
+def _require_roundtrip_coverage(before, original, rig, profile):
+    """Require target observations for every channel used by original intent.
+
+    A source dependency is not a target observation. In particular, do not fill
+    an omitted target role from the immutable source just to complete a metric.
+    """
+    mapped = {item.source_id for item in profile.skeleton_map}
+    required = (set(rig.role_ids.values())
+                | (set(original.object_ids) - set(rig.writable_ids)))
+    missing = required - mapped
+    if missing:
+        raise ValueError('EXPORT_INTENT_TARGET_COVERAGE_UNAVAILABLE: '+', '.join(sorted(missing)))
+    if (before.space != 'global' or original.space != 'global'
+            or not np.array_equal(before.context.frames, original.context.frames)
+            or not np.array_equal(before.context.time_s, original.context.time_s)):
+        raise ValueError('EXPORT_ORIGINAL_REFERENCE_GRID_MISMATCH')
+    for batch in (before, original):
+        validate_samples(batch, {key: ('position', 'rotation') for key in required})
 
 
 def _rest_globals(rig, before, supplied=None):
@@ -80,6 +100,7 @@ def make_export_expectation(before_export, profile, rig, *, original_reference, 
     validate_samples(before_export,{key:('position','rotation') for key in before_export.object_ids})
     if before_export.space!="global" or original_reference is None or not before_export.source_binding:
         raise ValueError("EXPORT_ACTUAL_GLOBAL_REFERENCE_UNAVAILABLE")
+    _require_roundtrip_coverage(before_export, original_reference, rig, profile)
     validate_quality_policy(policy,rig,intent,profile.include_mesh,capture=before_export)
     frames=before_export.context.frames
     if (frames[0]!=profile.first_frame or frames[-1]!=profile.last_frame
@@ -108,6 +129,7 @@ def make_export_expectation(before_export, profile, rig, *, original_reference, 
         parents[path]=item.parent_path
     refs=dict(reference_digests or {})
     refs['original_reference']=capture_digest(original_reference.as_dict())
+    refs['rig_profile']=capture_digest(asdict(rig))
     roundtrip={'position_readback_m','rotation_readback_rad','duration_error_s'}
     if not roundtrip <= set(policy.required_metrics):
         raise ValueError('EXPORT_ROUNDTRIP_METRICS_REQUIRED: '+', '.join(sorted(roundtrip)))
@@ -238,8 +260,10 @@ def evaluate_target_capture(raw,expected,profile,quality_context,*,directory,key
     if not isinstance(quality_context,RoundtripQualityContext):
         raise ValueError('ROUNDTRIP_QUALITY_CONTEXT_UNAVAILABLE')
     ctx=quality_context
+    _require_roundtrip_coverage(ctx.before_export, ctx.original_reference, ctx.rig, profile)
     if (expected.source_capture_digest!=capture_digest(ctx.before_export.as_dict())
             or expected.reference_digests.get('original_reference')!=capture_digest(ctx.original_reference.as_dict())
+            or expected.reference_digests.get('rig_profile')!=capture_digest(asdict(ctx.rig))
             or expected.intent_digest!=canonical_digest(ctx.intent) or expected.quality_policy_digest!=canonical_digest(ctx.policy)):
         raise ValueError('ROUNDTRIP_QUALITY_CONTEXT_STALE')
     if (canonical_digest(manifest['profile'])!=canonical_digest(profile)

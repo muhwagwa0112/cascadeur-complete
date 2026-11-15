@@ -9,11 +9,62 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 
 
 def _digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(",",":"),
                                      ensure_ascii=False,allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def _resolve_proto_root(topology,objects,selected_owner):
+    """Resolve only the installed SDK's explicit proto constraint links.
+
+    The topology is native-observed data, not a declaration of anatomical roles.
+    Final-rig graph outputs and Root_T_Rotation constants are not substitutes.
+    """
+    evidence={"reader":"native_proto_root_links_v1","authority":"native_typed_topology",
+              "status":"unobserved","declared":False,"reasons":[],"topology":topology}
+    if selected_owner is None:
+        evidence["reasons"]=["CHARACTER_OWNERSHIP_UNVERIFIED"]
+        return None,evidence
+    by_id={row["id"]:row for row in objects}
+    relevant=[row for row in topology if selected_owner in row.get("related_ownership_candidates",[])]
+    if not relevant:
+        evidence["reasons"]=["PROTO_ROOT_TOPOLOGY_UNOBSERVED:final rig graph is not qualified by this reader"]
+        return None,evidence
+    if len(relevant)!=1:
+        evidence["status"]="ambiguous"
+        evidence["reasons"]=["PROTO_ROOT_TOPOLOGY_AMBIGUOUS:expected one selected-rig constraint"]
+        return None,evidence
+    row=relevant[0]
+    if row.get("unobserved_reason"):
+        evidence["reasons"]=["PROTO_ROOT_TOPOLOGY_INCOMPLETE:"+row["unobserved_reason"]]
+        return None,evidence
+    linked=(row.get("owner_id"),row.get("root_id"),row.get("rig_element_owner_id"),row.get("joint_owner_id"))
+    if any(key not in by_id or by_id[key].get("ownership_candidates")!=[selected_owner] for key in linked):
+        evidence["reasons"]=["PROTO_ROOT_OWNERSHIP_UNVERIFIED:constraint/root/TechnicalLinks/Joint must share one RigInfo owner"]
+        return None,evidence
+    root=by_id[row["root_id"]]
+    transforms=[item for item in root.get("behaviors",[]) if item.get("name")=="Transform"]
+    if len(transforms)!=1:
+        evidence["reasons"]=["ROOT_ROTATION_UNAVAILABLE:expected one observed Transform"]
+        return None,evidence
+    channels={item["name"]:item for item in transforms[0]["properties"]}
+    rotation_data={}
+    for name in ("local_rotation","global_rotation"):
+        item=channels.get(name,{})
+        value=item.get("current_value")
+        if (item.get("type")!="DataType" or not item.get("data_id") or item.get("unobserved_reason")
+                or not isinstance(value,list) or len(value)!=4
+                or any(type(x) not in (int,float) or not math.isfinite(x) for x in value)
+                or sum(x*x for x in value)<1e-20):
+            evidence["reasons"]=["ROOT_ROTATION_UNAVAILABLE:unobserved quaternion channel "+name]
+            return None,evidence
+        rotation_data[name]=item["data_id"]
+    evidence.update(status="observed",root_object_id=root["id"],
+        constraint_behaviour_id=row["behaviour_id"],rotation_data_ids=rotation_data)
+    return root["id"],evidence
 
 
 def read_motion_inputs(scene,arguments):
@@ -36,6 +87,12 @@ def read_motion_inputs(scene,arguments):
     if requested is not None and requested not in all_objects:
         raise ValueError("INVALID_WRITE_SCOPE: character reference is not an observed stable object ID")
     warnings=[];ownership={};rig_rows=[]
+
+    def behaviour_reference(link):
+        if link.is_null():return {"value":None}
+        return {"value":rt._id_string(link),
+                "referenced_owner_id":rt._id_string(bv.get_behaviour_owner(link)),
+                "referenced_behaviour_name":str(bv.get_behaviour_name(link))}
 
     def read_value(data_id,frame):
         data=dv.get_data(data_id)
@@ -84,6 +141,47 @@ def read_motion_inputs(scene,arguments):
     if unknown:
         warnings.append("DANGLING_RIG_MEMBERSHIP:"+",".join(sorted(unknown)))
         selected-=unknown
+    # Enumerate the complete typed proto-constraint inventory, including links
+    # outside the selected scope, so competing/foreign links cannot be hidden.
+    proto_constraints=list(bv.get_behaviours("ProtoRootConstraint"))
+    if len(proto_constraints)>1024:
+        raise ValueError("RESOURCE_BUDGET_EXCEEDED: native proto root inventory exceeds 1024 constraints")
+    root_topology=[]
+    for behaviour in sorted(proto_constraints,key=rt._id_string):
+        row={"behaviour_id":rt._id_string(behaviour),
+             "owner_id":rt._id_string(bv.get_behaviour_owner(behaviour))}
+        linked=[row["owner_id"]]
+        try:
+            fields=set(map(str,bv.get_behaviour_property_names(behaviour)))
+            if not {"root","rig_element"}<=fields:
+                raise ValueError("missing ProtoRootConstraint.root/rig_element")
+            if str(rt._read_member(bv.get_property_type(behaviour,"root"),"name"))!="ObjectType":
+                raise ValueError("ProtoRootConstraint.root is not ObjectType")
+            root=bv.get_behaviour_object(behaviour,"root")
+            if root.is_null():raise ValueError("null ProtoRootConstraint.root")
+            row["root_id"]=rt._id_string(root);linked.append(row["root_id"])
+            if str(rt._read_member(bv.get_property_type(behaviour,"rig_element"),"name"))!="BehaviourType":
+                raise ValueError("ProtoRootConstraint.rig_element is not BehaviourType")
+            technical=bv.get_behaviour_reference(behaviour,"rig_element")
+            ref=behaviour_reference(technical)
+            row["rig_element_reference"]=ref
+            if ref.get("referenced_owner_id"):linked.append(ref["referenced_owner_id"])
+            if ref.get("referenced_behaviour_name")!="TechnicalLinks":
+                raise ValueError("rig_element does not reference TechnicalLinks")
+            row["rig_element_owner_id"]=ref["referenced_owner_id"]
+            if ("joint" not in set(map(str,bv.get_behaviour_property_names(technical)))
+                    or str(rt._read_member(bv.get_property_type(technical,"joint"),"name"))!="BehaviourType"):
+                raise ValueError("TechnicalLinks.joint is not an observed BehaviourType")
+            joint=behaviour_reference(bv.get_behaviour_reference(technical,"joint"))
+            row["joint_reference"]=joint
+            if joint.get("referenced_owner_id"):linked.append(joint["referenced_owner_id"])
+            if joint.get("referenced_behaviour_name")!="Joint":
+                raise ValueError("TechnicalLinks.joint does not reference Joint")
+            row["joint_owner_id"]=joint["referenced_owner_id"]
+        except (RuntimeError,ValueError,TypeError,AttributeError) as exc:
+            row["unobserved_reason"]=type(exc).__name__+":"+str(exc)[:300]
+        row["related_ownership_candidates"]=sorted({owner for key in linked for owner in ownership.get(key,[])})
+        root_topology.append(row)
     first,last=frame_range
     frame=int(domain.get_current_frame(False))
     objects=[];layers={};source_rows=[];read_count=0
@@ -123,6 +221,13 @@ def read_motion_inputs(scene,arguments):
                         # MeshObject.linked_objects is indexed by inverse-bind
                         # matrices; sorting an SDK range destroys that mapping.
                         field["value"]=[rt._id_string(x) for x in bv.get_behaviour_objects_range(behaviour,prop)]
+                    elif kind=="BehaviourType":
+                        field.update(behaviour_reference(bv.get_behaviour_reference(behaviour,prop)))
+                    elif kind=="BehaviourRangeType":
+                        references=list(bv.get_behaviour_reference_range(behaviour,prop))
+                        if len(references)>10000:
+                            raise ValueError("RESOURCE_BUDGET_EXCEEDED: behaviour reference range exceeds 10000")
+                        field["references"]=[behaviour_reference(link) for link in references]
                     elif kind=="AssetType":
                         link=bv.get_behaviour_asset(behaviour,prop)
                         field["asset_id"]=None if link.is_null() else rt._id_string(link)
@@ -153,6 +258,10 @@ def read_motion_inputs(scene,arguments):
                 entry["properties"].append(field)
             row["behaviors"].append(entry)
         objects.append(row);source_rows.append(row)
+    root_rotation_id,root_evidence=_resolve_proto_root(root_topology,objects,
+        selected_owners[0] if len(selected_owners)==1 else None)
+    if root_rotation_id is None:
+        warnings.extend(root_evidence["reasons"])
     # Description values are native metadata, but no undocumented name is
     # treated as physical FPS/units or a canonical coordinate convention.
     descriptions={}
@@ -178,7 +287,9 @@ def read_motion_inputs(scene,arguments):
         behaviors=[]
         for behavior in obj["behaviors"]:
             properties=[{key:value for key,value in prop.items()
-                         if key in ("name","type","data_id","setting_id","asset_id")}
+                         if key in ("name","type","data_id","setting_id","asset_id",
+                                    "referenced_owner_id","referenced_behaviour_name","references")
+                         or key=="value" and prop.get("type")=="BehaviourType"}
                         for prop in behavior["properties"]]
             behaviors.append({"id":behavior["id"],"name":behavior["name"],"properties":properties})
         structure_objects.append({"id":obj["id"],"parent_id":obj.get("parent_id"),
@@ -192,12 +303,14 @@ def read_motion_inputs(scene,arguments):
             "inverse_bind_matrices","bind_shape_data_id")}
             for mesh in bind_rest["raw_evidence"].get("meshes",[])]}
     structure={"objects":structure_objects,"rig_membership":rig_rows,
-               "bind_rest_evidence":bind_structure}
+               "bind_rest_evidence":bind_structure,"proto_root_topology":root_topology}
     source={"objects":source_rows,"layers":list(layers.values()),"descriptions":descriptions,
             "frame_range":list(frame_range),"current_frame":frame,"support_refs":arguments.get("support_refs",[]),
-            "bind_rest_observation":bind_rest}
-    values={"context":{"frames":list(range(first,last+1))},"objects":objects,"role_candidates":{},
-            "root_rotation_id":None,"layers":list(layers.values()),"native_descriptions":descriptions,
+            "bind_rest_observation":bind_rest,"proto_root_topology":root_topology}
+    values={"context":{"frames":list(range(first,last+1))},"objects":objects,
+            "role_candidates":({"root_orientation":[root_rotation_id]} if root_rotation_id else {}),
+            "root_rotation_id":root_rotation_id,"root_orientation_observation":root_evidence,
+            "layers":list(layers.values()),"native_descriptions":descriptions,
             "native_bind_rest":bind_rest,
             "rig_metadata":rig_rows,"mesh_ids":[x["id"] for x in objects if any(b["name"]=="MeshObject" for b in x["behaviors"])],
             "name_candidates":[{"id":x["id"],"name":x["name"]} for x in objects],
@@ -207,6 +320,8 @@ def read_motion_inputs(scene,arguments):
             "observation_warnings":sorted(set(warnings))}
     if objects and all("rest_local_transform" in obj for obj in objects):
         values["unobserved_fields"].remove("rest_local_transforms")
+    if root_rotation_id is not None:
+        values["unobserved_fields"].remove("root_rotation_role")
     build=installed_build()
     provenance={"objects":{"reader":"csc.model.ModelViewer/BehaviourViewer/DataViewer","build":build,
                             "ownership":"RigInfo object ranges; absent/overlap stays unresolved"},
@@ -214,8 +329,10 @@ def read_motion_inputs(scene,arguments):
                 "rest_local_transforms":{**bind_rest["provenance"],"build":build,
                     "status":bind_rest["status"],"unobserved":bind_rest["unobserved"]},
                 "context":{"frames":"requested integer interval; physical metadata unobserved"},
-                "role_candidates":{"status":"unobserved","reason":"names and raw QRT JSON are not semantic authority"},
-                "root_rotation_id":{"status":"unobserved","reason":"rotation channel existence does not identify root orientation role"}}
+                "role_candidates":{"status":"partial" if root_rotation_id else "unobserved",
+                    "observed_roles":["root_orientation"] if root_rotation_id else [],
+                    "reason":"only explicit typed proto root links are supported; anatomical roles remain unobserved"},
+                "root_rotation_id":{**root_evidence,"build":build}}
     return {"values":values,"provenance":provenance,"source_fingerprint":_digest(source),
             "rig_structure_fingerprint":_digest(structure),"evidence_ref":"pending-native-registry:"+_digest(source)}
 

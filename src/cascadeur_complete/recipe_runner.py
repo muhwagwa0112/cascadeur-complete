@@ -101,8 +101,15 @@ class RecipeRunner:
         except (ValueError, TypeError, KeyError) as exc:
             reasons.append({"code": "RIG_MAPPING_AMBIGUOUS", "detail": str(exc)})
         else:
+            required = set(required_motion_metrics(rig, spec.intent, self._include_mesh(spec, rig)))
+            if self._required_rotation_ids(spec, rig):
+                required.add("rotation_correction_rad")
             try:
                 validate_quality_policy(spec.quality, rig, spec.intent, self._include_mesh(spec, rig))
+                missing = required - set(spec.quality.required_metrics)
+                if missing:
+                    raise MotionInputError("QUALITY_POLICY_INCOMPLETE",
+                        "required recipe capture metrics omitted: " + ", ".join(sorted(missing)))
                 if spec.export is not None:
                     roundtrip = {"position_readback_m", "rotation_readback_rad", "duration_error_s"}
                     missing = roundtrip - set(spec.quality.required_metrics)
@@ -110,7 +117,7 @@ class RecipeRunner:
                         reasons.append({"code": "EXPORT_ROUNDTRIP_METRICS_REQUIRED", "metrics": sorted(missing)})
             except MotionInputError as exc:
                 reasons.append({"code": exc.code, "detail": str(exc),
-                                "required_metrics": sorted(required_motion_metrics(rig, spec.intent, self._include_mesh(spec, rig)))})
+                                "required_metrics": sorted(required)})
         return reasons
 
     @staticmethod
@@ -188,18 +195,60 @@ class RecipeRunner:
 
     def cancel(self, run_id):
         run = self.store.record_cancel_intent(run_id)
-        # No native abort and no implicit rollback. An in-flight request remains
-        # unknown until its immutable terminal receipt arrives.
-        for record in run.steps:
-            if record.request_id and record.state in {"dispatching", "awaiting_result", "blocked"}:
-                self.service.client.cancel_request(record.request_id)
-        self._schedule(run_id)
-        return run_view(self.store.read(run_id))
+        if run.state in TERMINAL_RUNS:
+            return run_view(run)
+        # Adoption proves that a previous process has exited; recording intent
+        # alone cannot give this host permission to advance its lease.
+        self.store.adopt(run_id)
+        return self._continue_cancellation(run_id)
+
+    def _continue_cancellation(self, run_id):
+        with store_lock(self.store.run_dir(run_id) / ".execution.lock"):
+            run = self.store.read(run_id)
+            if run.state in TERMINAL_RUNS:
+                return run_view(run)
+            if run.owner_host_instance_id != HOST_INSTANCE_ID:
+                raise RecipeConflict("Only the active host lease can advance this run")
+            if not run.cancel_requested:
+                raise RecipeConflict("Cancellation intent is required")
+            record = next((item for item in run.steps if item.state not in TERMINAL_STEPS), None)
+            if record is None:
+                return run_view(self._update(run, state="canceled", blocked_reason=None))
+            published_intent = (record.step_id.endswith("-publish") and record.stage_data
+                                and Path(record.stage_data["intent_path"]).exists())
+            # A completed preparation has not dispatched its mutation. Preserve
+            # the original token, request, grant and usage; no live scene or
+            # still-current implementation/authorization is needed to stop it.
+            if (not published_intent and record.execution_outcome == "not_dispatched"
+                    and record.receipt_ref is None
+                    and (record.state in {"pending", "ready", "prepared"}
+                         or record.state == "blocked" and record.request_id is None)):
+                canceled = record.model_copy(update={"state": "canceled", "execution_outcome": "canceled_pre_dispatch"})
+                return run_view(self._step_update(run, canceled, state="canceled", blocked_reason=None))
+            if run.state == "blocked":
+                run = self._update(run, state="cancel_requested", blocked_reason=None)
+            # Already issued native work and journaled publication must finish
+            # their original observation path. A queue cancellation is only a
+            # hint; it never establishes that an unknown effect did not occur.
+            if not published_intent and record.state not in {"verifying", "checkpointing"}:
+                if record.request_id:
+                    try:
+                        self.service.client.cancel_request(record.request_id)
+                    except (ValueError, FileNotFoundError):
+                        pass  # Reconciliation retains an unavailable receipt as unknown.
+                if record.state not in {"preparing", "dispatching", "awaiting_result", "blocked"}:
+                    run = self._step_update(run, record.model_copy(update={"state": "blocked"}))
+                run = self.reconcile(run_id)
+            if run.state not in TERMINAL_RUNS and run.state != "blocked":
+                self._schedule(run_id)
+            return run_view(run)
 
     def resume(self, run_id, authorization_id=None):
         run = self.store.adopt(run_id)
         if run.state in TERMINAL_RUNS:
             return run_view(run)
+        if run.cancel_requested:
+            return self._continue_cancellation(run_id)
         if authorization_id is not None and authorization_id != run.authorization_id:
             run = self.store.renew_authorization(run_id, self.store.read_grant(authorization_id))
         publish = next((item for item in run.steps if item.step_id.endswith("-publish")
@@ -404,15 +453,19 @@ class RecipeRunner:
                                profile=self._profile(spec), context=context, intent=spec.intent,
                                source_binding=source, supports=self._supports(spec))
 
-    def _capture(self, spec, source=None):
-        workflow = self._workflow(spec, source)
+    @staticmethod
+    def _required_rotation_ids(spec, rig):
         ids = spec.character.object_ids
-        rig = self._profile(spec)
         roles = {"root", *spec.intent.key_pose_locks, *spec.intent.locked_roles_frames}
-        rotation_ids = tuple(sorted(set(ids) if spec.export is not None or (spec.motion.mode == "retarget" and spec.motion.host_channel == "rotation") else
+        return tuple(sorted(set(ids) if spec.export is not None or (spec.motion.mode == "retarget" and spec.motion.host_channel == "rotation") else
             {rig.role_ids[role] for role in roles if role in rig.role_ids}
             | {obj for cleanup in spec.cleanup if cleanup.kind in {"fingers", "finger_fan", "wrist_soften", "hand_pose"}
                for obj in cleanup.object_ids}))
+
+    def _capture(self, spec, source=None):
+        workflow = self._workflow(spec, source)
+        ids = spec.character.object_ids
+        rotation_ids = self._required_rotation_ids(spec, self._profile(spec))
         global_batch = workflow.capture_batch(ids, space="global", required_rotation_ids=rotation_ids)
         local_batch = workflow.capture_batch(ids, space="local", required_rotation_ids=rotation_ids)
         # The native observation registry authenticates these exact canonical

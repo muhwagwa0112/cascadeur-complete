@@ -50,30 +50,50 @@ def store_lock(path: Path):
                     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-def process_start_identity(process_id: int) -> str | None:
-    """A creation-time identity, so PID reuse never proves store ownership."""
-    if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
+def _windows_process_status(process_id: int) -> tuple[bool | None, str | None]:
+    """An open process handle can outlive exit; only its wait state proves life."""
+    if type(process_id) is not int or process_id <= 0:
+        return None, None
+    import ctypes
+    from ctypes import wintypes
 
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        kernel.OpenProcess.restype = wintypes.HANDLE
-        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
-        kernel.GetProcessTimes.argtypes = (
-            wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
-            ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
-        )
-        handle = kernel.OpenProcess(0x1000, False, process_id)
-        if not handle:
-            return None
-        try:
-            times = [wintypes.FILETIME() for _ in range(4)]
-            if not kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
-                return None
-            return f"win32:{(times[0].dwHighDateTime << 32) | times[0].dwLowDateTime}"
-        finally:
-            kernel.CloseHandle(handle)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.GetProcessTimes.argtypes = (
+        wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
+    )
+    # Waiting requires SYNCHRONIZE in addition to QUERY_LIMITED_INFORMATION.
+    handle = kernel.OpenProcess(0x100000 | 0x1000, False, process_id)
+    if not handle:
+        return (False if ctypes.get_last_error() == 87 else None), None
+    try:
+        state = kernel.WaitForSingleObject(handle, 0)
+        if state == 0:
+            return False, None
+        if state != 258:  # WAIT_TIMEOUT is the only observed running state.
+            return None, None
+        times = [wintypes.FILETIME() for _ in range(4)]
+        identity = None
+        if kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
+            identity = f"win32:{(times[0].dwHighDateTime << 32) | times[0].dwLowDateTime}"
+        # Do not return a creation identity if the process exited during capture.
+        state = kernel.WaitForSingleObject(handle, 0)
+        if state == 0:
+            return False, None
+        return (True, identity) if state == 258 else (None, None)
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def process_start_identity(process_id: int) -> str | None:
+    """A creation-time identity of a live process, so PID reuse cannot own a store."""
+    if os.name == "nt":
+        return _windows_process_status(process_id)[1]
     try:
         text = Path(f"/proc/{process_id}/stat").read_text()
         fields = text[text.rfind(")") + 2:].split()
@@ -87,18 +107,7 @@ def process_is_alive(process_id: int) -> bool | None:
     if type(process_id) is not int or process_id <= 0:
         return None
     if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        kernel.OpenProcess.restype = wintypes.HANDLE
-        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
-        handle = kernel.OpenProcess(0x1000, False, process_id)
-        if handle:
-            kernel.CloseHandle(handle)
-            return True
-        error = ctypes.get_last_error()
-        return False if error == 87 else None
+        return _windows_process_status(process_id)[0]
     try:
         os.kill(process_id, 0)
         return True
