@@ -7,7 +7,30 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 실제 export 선택 복원과 소비자 좌표 연결
+### 최신 추가: 설치 상태 이관과 보관 자료 삭제 범위
+
+이전 turn은 실제 export 왕복·게시 성공과 commit `ff1f2b8` 푸시로 진행됐다. 기존 16개 r4 목표를 유지하며 R4-16의 source/frozen 상태 연속성 경로를 이어 확인했다. 이번 변경은 native bridge bytes를 바꾸지 않으며 전역 설치·인증키·기존 unknown을 교체하지 않았다.
+
+- source installer는 의존성 준비 전 old state를 미리 staging에 복사하고, 이후 hook에서 최신 backup을 다시 병합했다. 준비 중 바뀐 mutable 파일은 conflict로 설치를 중단했고, 삭제된 파일은 초기 사본에서 부활할 수 있었다. 초기 복사를 없애고 최종 idle 확인 뒤 이동한 old runtime backup을 authoritative state로 한 번 이관한다. 기존 policy가 없을 때만 default policy를 넣고 새 runtime import보다 먼저 완료한다.
+- frozen installer는 persistent state와 policy를 제자리에 보존하는데 hook이 과거 backup을 다시 병합했다. 이 병합을 제거했다. source도 activation 전 이관을 마쳤으므로 hook은 상태 복사를 반복하지 않는다. transaction backup은 rollback 용도로 남긴다.
+- state copier는 같은 root뿐 아니라 서로 중첩된 source/target도 거부한다. 기존 키·receipt·unknown·claim bytes를 해석하거나 재서명하지 않는 원칙과 reparse/conflict/hash 검사를 유지한다.
+- `build-release.ps1`의 `artifacts` 전체 재귀 삭제는 retained native runtime·receipt·증거도 지울 수 있었다. 소유한 빌드 폴더 7개와 생성 파일 4개만 정리한다. 삭제 전 workspace/artifacts의 직접 하위 절대 경로·타입·reparse 경로를 확인하고 `native-r4` 같은 무관 sibling을 보존한다. 빌드 자체는 실행하지 않았다.
+
+필요한 직접 확인은 Windows PowerShell 5.1의 임시 root 복사/이동과 새 host 코드의 인증 조회로 제한했다. 증거는 ignored `artifacts/native-r4/upgrade-continuity-f59ee4b4-7bfe-448e-9a0b-0f167f8b9bc2/observation.json` 및 같은 폴더의 backup/이관 자료다.
+
+| 확인 | 결과와 한계 |
+|---|---|
+| 실제 과거 요청 복사 | 전역 root의 원본을 읽어 복사본에서만 실행. terminal `0309765d-8bf5-4f5f-99df-20480cc075af`의 원 인증 receipt 동일, unknown `ffb7fc8e-417c-454c-a669-48625a086eda`는 새 코드에서도 `outcome_unknown` 유지. native dispatch `0` |
+| 이관 bytes·삭제 상태 | backup의 persistent bytes와 이관본 동일. 준비 중 삭제한 임시 token은 부활하지 않고 이후 생성한 상태와 사용자 policy는 보존. 두 키 내용은 출력하지 않음 |
+| one-attempt | 별도 새 UUID의 명시적 `isolated_upgrade_copy_reproduction` marker/서명 관측을 복사. 소비 후 `claim()`은 이관 뒤에도 false. 실제 native 실패·복구 permit·eligibility를 관측한 증거는 아님 |
+| 실제 recipe 기록 | 성공 run `11fb359a-c07a-408a-bb87-09dd1200dc62`와 그 원 confirmation key를 별도 인증 도메인의 임시 root로 copier를 통해 이관. 새 `RecipeRunStore.read`에서 인증 및 `succeeded/published` 유지. 원 run을 재개·dispatch하지 않음 |
+| 빌드 정리 | 실제 cleanup 함수 정의만 로드해 임시 `stage` 삭제와 `native-r4/receipt.json` sentinel 보존 확인. release build·installer·CI 미실행 |
+
+첫 재현은 Codex PS7 모듈 경로를 Python 경유로 PS5에 상속하면서 호환되지 않는 Utility 모듈이 선택되어 `Get-FileHash`를 찾지 못했다. 임시 복사 단계에서 중단됐으며 원본은 수정하지 않았다. PS5 child에 기본 PS5 module 경로를 지정한 별도 재현이 위 결과다. 제품 전역 환경이나 Codex 설정은 변경하지 않았다.
+
+R4-16을 전체 완료로 표시하지 않는다. 실제 source/frozen 설치 교체·재시작/loaded manifest는 이번에 실행하지 않았다. idle PID scan은 독점 잠금이 아니며 검사 직후 이전/새 process가 재시작하는 경합과 환경변수로 root를 지정한 외부 host의 식별은 남아 있다. 안정된 maintenance gate와 installer single-writer 연계가 후속 구현 대상이다. 기존 unknown을 삭제·재분류하거나 source/token을 새 권한으로 재서명하지 않았다. 전체 suite/build/CI도 실행하지 않았다.
+
+### 이전 추가: 실제 export 선택 복원과 소비자 좌표 연결
 
 원격 개선안은 다시 fetch했으며 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`다. r4의 기존 16개 목표를 유지한다. 이번에는 독립 Transform의 저장된 원본 → 작업 복제 → 실제 평가·품질 → FBX → Blender → 게시 연결을 진행했다. 일반 리그와 설치 교체까지 완료한 것으로 보지 않는다.
 

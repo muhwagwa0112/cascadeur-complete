@@ -23,7 +23,10 @@ function Assert-CascadeurUpgradeIdle([string] $RuntimeRoot) {
 function Copy-CascadeurPersistentState([string] $PreviousRuntime, [string] $NextRuntime) {
     $previous = [IO.Path]::GetFullPath($PreviousRuntime).TrimEnd('\')
     $next = [IO.Path]::GetFullPath($NextRuntime).TrimEnd('\')
-    if ($previous -ieq $next) { throw 'State migration needs separate runtime directories.' }
+    if ($previous -ieq $next -or $previous.StartsWith($next + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        $next.StartsWith($previous + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'State migration needs separate, non-nested runtime directories.'
+    }
     if (-not (Test-Path -LiteralPath $previous)) { return }
     foreach ($root in @($previous, $next)) {
         $ancestor = $root

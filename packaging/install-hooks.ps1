@@ -10,10 +10,10 @@ $RuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot)
 . (Join-Path $PSScriptRoot 'upgrade-state.ps1')
 $InstallLocalAppData = Get-CascadeurLocalAppData
 Assert-CascadeurUpgradeIdle $RuntimeRoot
-if ($TransactionManifest -and (Test-Path -LiteralPath $TransactionManifest)) {
-    $upgradeTransaction = Get-Content -LiteralPath $TransactionManifest -Raw | ConvertFrom-Json
-    Copy-CascadeurPersistentState (Join-Path $upgradeTransaction.backup_root 'runtime') $RuntimeRoot
-}
+# Source installation already migrated the final old runtime before activation.
+# The frozen installer keeps persistent directories and policy in place. Never
+# merge a historical backup here: it can resurrect deleted tokens/claims or
+# conflict with newer state. Backups are for explicit transaction rollback only.
 $BackupRoot = Join-Path $InstallLocalAppData ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-installer')
 $SettingsPath = Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\settings.json'
 $UserScriptsRoot = [IO.Path]::GetFullPath((Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\user_scripts')).TrimEnd('\')

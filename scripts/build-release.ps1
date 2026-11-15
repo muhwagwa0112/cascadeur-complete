@@ -22,8 +22,45 @@ function Assert-ValidSignature([string] $Path) {
     if ($signature.Status -ne 'Valid') { throw "Authenticode signature is not valid for ${Path}: $($signature.Status)" }
 }
 
+function Remove-CascadeurBuildArtifact([string] $Name, [bool] $Directory) {
+    $target = [IO.Path]::GetFullPath((Join-Path $ArtifactsRoot $Name))
+    if ((Split-Path -Parent $target) -ine $ArtifactsRoot -or
+        -not $target.StartsWith($ProjectRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean a build path outside workspace artifacts: $target"
+    }
+    # Reject redirected ancestors before resolving or recursively deleting a
+    # build output. Retained runtime/evidence siblings are never cleanup roots.
+    $ancestor = $target
+    while ($ancestor) {
+        $entry = Get-Item -LiteralPath $ancestor -Force -ErrorAction SilentlyContinue
+        if ($entry -and ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing to clean a redirected build path: $ancestor"
+        }
+        $parent = Split-Path -Parent $ancestor
+        if ($parent -eq $ancestor) { break }
+        $ancestor = $parent
+    }
+    if (-not (Test-Path -LiteralPath $target)) { return }
+    $entry = Get-Item -LiteralPath $target -Force
+    if ([bool]$entry.PSIsContainer -ne $Directory) { throw "Unexpected build output type: $target" }
+    if ($Directory) {
+        $redirected = Get-ChildItem -LiteralPath $target -Recurse -Force |
+            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint } | Select-Object -First 1
+        if ($redirected) { throw "Build output contains a redirected entry: $($redirected.FullName)" }
+        Remove-Item -LiteralPath $target -Recurse -Force
+    } else {
+        Remove-Item -LiteralPath $target -Force
+    }
+}
+
 if (-not $InstallerOnly) {
-    if (Test-Path -LiteralPath $ArtifactsRoot) { Remove-Item -LiteralPath $ArtifactsRoot -Recurse -Force }
+    foreach ($directory in @('stage', 'installer', 'build-venv', 'pyinstaller-dist', 'pyinstaller-work',
+                             'raw-dist-smoke-state', 'smoke-state')) {
+        Remove-CascadeurBuildArtifact $directory $true
+    }
+    foreach ($file in @('runtime-requirements.txt', 'cascadeur-complete.spec', 'cascadeur-mcp.cdx.json', 'SHA256SUMS.json')) {
+        Remove-CascadeurBuildArtifact $file $false
+    }
     New-Item -ItemType Directory -Path $ArtifactsRoot, $StageRoot, $InstallerRoot -Force | Out-Null
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required to build from source' }
 

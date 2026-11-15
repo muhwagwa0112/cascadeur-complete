@@ -34,10 +34,9 @@ foreach ($directory in @('src', 'inventory')) {
 }
 Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete\*') -Destination $StageBridge -Recurse -Force
 Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete_events\*') -Destination $StageEvents -Recurse -Force
-Copy-CascadeurPersistentState $RuntimeRoot $StageRuntime
-if (-not (Test-Path -LiteralPath (Join-Path $StageRuntime 'policy.json'))) {
-    Copy-Item -LiteralPath (Join-Path $ProjectRoot 'policy.default.json') -Destination (Join-Path $StageRuntime 'policy.json')
-}
+# Dependency preparation must not take an early snapshot of mutable state.
+# The authoritative state is copied from the final pre-activation backup below,
+# before any incoming runtime imports can create replacement authentication keys.
 
 Push-Location $StageRuntime
 try {
@@ -80,6 +79,13 @@ try {
             $backup = Join-Path $BackupRoot $pair.BackupName
             Move-Item -LiteralPath $pair.Target -Destination $backup
             $movedOld.Add([pscustomobject]@{ Target = $pair.Target; Backup = $backup })
+        }
+        if ($pair.BackupName -eq 'runtime') {
+            Copy-CascadeurPersistentState (Join-Path $BackupRoot 'runtime') $StageRuntime
+            if (-not (Test-Path -LiteralPath (Join-Path $StageRuntime 'policy.json'))) {
+                Copy-Item -LiteralPath (Join-Path $ProjectRoot 'policy.default.json') -Destination (Join-Path $StageRuntime 'policy.json')
+            }
+            Assert-CascadeurUpgradeIdle $RuntimeRoot
         }
         Move-Item -LiteralPath $pair.Stage -Destination $pair.Target
         $activatedTargets.Add($pair.Target)

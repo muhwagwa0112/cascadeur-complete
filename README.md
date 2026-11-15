@@ -305,6 +305,16 @@ uv run pytest
 The source install script is for contributors. Public releases use the signed
 Inno Setup installer and bundled runtime.
 
+Close Cascadeur and the installed MCP before upgrading. Source installation
+prepares dependencies without copying mutable state, then migrates the final
+pre-activation backup before importing the incoming runtime. It preserves
+authentication keys, request/receipt/unknown history, consumed recovery claims,
+recipe records, snapshots, logs and user policy. Frozen upgrades retain that
+state in place; post-install hooks never merge a stale backup into it. Temporary
+Windows roots confirmed authenticated history and one-attempt consumption after
+copying. Full installer replacement/restart has not been observed; process idle
+scans do not provide an exclusive maintenance lease.
+
 ## Build an unsigned local package
 
 ```powershell
@@ -315,6 +325,8 @@ This creates a PyInstaller onedir application, installer when Inno Setup is
 available, SBOM, and SHA-256 manifest under `artifacts/`. Unsigned output is
 explicitly marked development-only. Tag releases use OIDC signing and provenance
 gates defined in `.github/workflows/release.yml`.
+Rebuilding cleans only named build outputs under `artifacts/`; independent
+runtime and retained evidence directories such as `artifacts/native-r4/` survive.
 
 ## Runtime locations
 
