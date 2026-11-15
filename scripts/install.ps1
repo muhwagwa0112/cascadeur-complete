@@ -25,46 +25,49 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required
 
 Assert-CascadeurUpgradeIdle $RuntimeRoot
 
-New-Item -ItemType Directory -Path $StageRuntime, $StageBridge, $StageEvents, $BackupRoot -Force | Out-Null
-foreach ($name in @('pyproject.toml', 'uv.lock', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'policy.default.json')) {
-    Copy-Item -LiteralPath (Join-Path $ProjectRoot $name) -Destination $StageRuntime
-}
-foreach ($directory in @('src', 'inventory')) {
-    Copy-Item -LiteralPath (Join-Path $ProjectRoot $directory) -Destination $StageRuntime -Recurse
-}
-Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete\*') -Destination $StageBridge -Recurse -Force
-Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete_events\*') -Destination $StageEvents -Recurse -Force
-# Dependency preparation must not take an early snapshot of mutable state.
-# The authoritative state is copied from the final pre-activation backup below,
-# before any incoming runtime imports can create replacement authentication keys.
-
-Push-Location $StageRuntime
-try {
-    & uv sync --frozen
-    if ($LASTEXITCODE -ne 0) { throw 'Staged dependency installation failed' }
-    & uv run --frozen python -m cascadeur_complete.package_fingerprint --bridge-root $StageBridge --output (Join-Path $StageRuntime 'bridge-package.json')
-    if ($LASTEXITCODE -ne 0) { throw 'Bridge package fingerprint failed' }
-} finally {
-    Pop-Location
-}
-$Executable = Join-Path $StageRuntime '.venv\Scripts\cascadeur-complete.exe'
-if (-not (Test-Path -LiteralPath $Executable)) { throw "Staged MCP executable is missing: $Executable" }
-$previousSmokeRoot = $env:CASCADEUR_MCP_ROOT
-$env:CASCADEUR_MCP_ROOT = Join-Path $StagingRoot 'smoke-state'
-& uv run --project $StageRuntime python (Join-Path $ProjectRoot 'scripts\mcp-smoke.py') --server $Executable --timeout 30
-if ($null -eq $previousSmokeRoot) { Remove-Item Env:CASCADEUR_MCP_ROOT -ErrorAction SilentlyContinue }
-else { $env:CASCADEUR_MCP_ROOT = $previousSmokeRoot }
-if ($LASTEXITCODE -ne 0) { throw 'Staged MCP smoke failed' }
-# Windows virtual environments and their console-script launchers are not
-# relocatable. Keep the staged smoke as a dependency/installability check, but
-# recreate the environment after the runtime directory reaches its final path.
-Remove-Item -LiteralPath (Join-Path $StageRuntime '.venv') -Recurse -Force
-
 $movedOld = [System.Collections.Generic.List[object]]::new()
 $activatedTargets = [System.Collections.Generic.List[string]]::new()
 $targetState = [ordered]@{}
 $maintenanceLease = $null
 try {
+    New-Item -ItemType Directory -Path $StageRuntime, $StageBridge, $StageEvents, $BackupRoot -Force | Out-Null
+    foreach ($name in @('pyproject.toml', 'uv.lock', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'policy.default.json')) {
+        Copy-Item -LiteralPath (Join-Path $ProjectRoot $name) -Destination $StageRuntime
+    }
+    foreach ($directory in @('src', 'inventory')) {
+        Copy-Item -LiteralPath (Join-Path $ProjectRoot $directory) -Destination $StageRuntime -Recurse
+    }
+    Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete\*') -Destination $StageBridge -Recurse -Force
+    Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete_events\*') -Destination $StageEvents -Recurse -Force
+    # Dependency preparation must not take an early snapshot of mutable state.
+    # The authoritative state is copied from the final pre-activation backup below,
+    # before any incoming runtime imports can create replacement authentication keys.
+
+    Push-Location $StageRuntime
+    try {
+        & uv sync --frozen
+        if ($LASTEXITCODE -ne 0) { throw 'Staged dependency installation failed' }
+        & uv run --frozen python -m cascadeur_complete.package_fingerprint --bridge-root $StageBridge --output (Join-Path $StageRuntime 'bridge-package.json')
+        if ($LASTEXITCODE -ne 0) { throw 'Bridge package fingerprint failed' }
+    } finally {
+        Pop-Location
+    }
+    $Executable = Join-Path $StageRuntime '.venv\Scripts\cascadeur-complete.exe'
+    if (-not (Test-Path -LiteralPath $Executable)) { throw "Staged MCP executable is missing: $Executable" }
+    $previousSmokeRoot = $env:CASCADEUR_MCP_ROOT
+    try {
+        $env:CASCADEUR_MCP_ROOT = Join-Path $StagingRoot 'smoke-state'
+        & uv run --project $StageRuntime python (Join-Path $ProjectRoot 'scripts\mcp-smoke.py') --server $Executable --timeout 30
+        if ($LASTEXITCODE -ne 0) { throw 'Staged MCP smoke failed' }
+    } finally {
+        if ($null -eq $previousSmokeRoot) { Remove-Item Env:CASCADEUR_MCP_ROOT -ErrorAction SilentlyContinue }
+        else { $env:CASCADEUR_MCP_ROOT = $previousSmokeRoot }
+    }
+    # Windows virtual environments and their console-script launchers are not
+    # relocatable. Keep the staged smoke as a dependency/installability check, but
+    # recreate the environment after the runtime directory reaches its final path.
+    Remove-Item -LiteralPath (Join-Path $StageRuntime '.venv') -Recurse -Force
+
     # Staging above uses a disposable root. From this final idle check through
     # activation, hooks and rollback, block new installed runtime readers and
     # competing installers at the stable sibling gate, not the moved runtime.

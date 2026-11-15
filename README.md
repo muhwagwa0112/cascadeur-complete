@@ -395,6 +395,20 @@ Verification uses disposable state and the shared source/frozen stdio smoke clie
 Windows subprocess checks and a clean restart of the installed Cascadeur build
 confirmed handle exclusion; full source/frozen installer replacement has not been
 observed. Older clients without the gate still require the process idle scan.
+Source installation now also cleans staging after dependency/fingerprint/smoke
+failure and restores `CASCADEUR_MCP_ROOT` if the staged smoke raises an exception.
+Installation verification compares every installed bridge Python file with the
+host's exact `bridge-package.json` map and fingerprint, reports missing, changed
+and unexpected files, and checks Cascadeur's command/event import path. These
+disk checks do not establish the bytes already loaded in a running app or grant
+native capabilities. A source upgrade attempt on 2026-11-16 was refused before
+replacement because Cascadeur PID `2328` was still running; all 59 existing
+persistent files remained byte-identical. The installed build is
+`2026.2.3.0.16863`; the verifier's pinned baseline remains `2026.1.3.0.15619`.
+The subsequent installed-file diagnostic returned failure: the global runtime
+has no `bridge-package.json`, Cascadeur command/event/Python-path registration
+and Codex registration were absent, and stdio smoke did not run. This is an
+incomplete global MCP installation, distinct from the running test bridge.
 Native restore/cleanup and exit probes encountered `Qt6Core.dll` access
 violations and an interpolator `bad allocation` fatal exit. The qualifier now
 retains its restored tab and verifies it on a later source idle; that bounded

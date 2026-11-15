@@ -7,9 +7,21 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: sparse refinement와 별도 recipe 삽입 단계 연결
+### 최신 추가: 설치 실패 정리와 설치 진단 연결
 
-원격을 다시 fetch했으며 개선 문서 최신 커밋은 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하다. 전체 16개 목표를 유지한다. 설치 파일 `C:\Program Files\Cascadeur\cascadeur.exe`의 ProductVersion은 `2026.2.3.0.16863`으로 다시 확인했다. 이번 확인 시 실행 중인 `cascadeur` 프로세스는 없었다. 이전 PID `2328`의 관측을 현재 실행 상태로 승계하지 않으며, 프로세스 부재만으로 종료 원인을 확정하지 않는다.
+원격 개선 문서 branch의 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하며 기존 16개 목표를 유지한다. 실제 설치 파일의 ProductVersion은 `2026.2.3.0.16863`이다. **이전 턴의 "실행 중 프로세스 없음" 기록을 정정한다.** `Win32_Process`와 `Get-Process -Id 2328`에서 `2026-11-16 06:14:42 KST`부터 실행 중인 Cascadeur를 확인했고, UI에서도 `guarded-spaced-key-insertion-8e409ec0-0054-4982-a654-ce04d572c37c/working.casc`와 기존 retained 탭들이 열려 있음을 확인했다. 앱은 응답했다. 해당 프로세스에 새 bridge bytes를 hot reload하지 않았다.
+
+- 실제 `scripts/install.ps1 -SkipCodexRegistration`을 실행했으나 초기 idle 검사에서 PID `2328` 때문에 교체 전 거절됐다. 강제 종료·우회 설치·전역 MCP 재등록을 하지 않았다. 전역 런타임의 인증된 요청 7건(성공 6건, `outcome_unknown` 1건)을 읽었으며 기존 unknown ID는 `ffb7fc8e-417c-454c-a669-48625a086eda`다. 거절 전후 state/snapshots/logs/policy의 파일 59개 hash가 모두 같았고 추가 파일도 없었다. 아래 isolated-runtime의 삽입 unknown과는 별도 원 기록이다.
+- source installer의 dependency/fingerprint/smoke 준비를 기존 실패 정리 범위 안으로 옮겼다. 준비 중 실패해도 staging 정리를 거치며, staged smoke가 예외로 끝나도 `CASCADEUR_MCP_ROOT`를 `finally`에서 복원한다. 활성화 후 rollback과 maintenance lease 수명은 기존 경로를 유지한다.
+- `verify-install.ps1`은 installer와 같은 canonical Local AppData를 사용한다. host manifest의 schema·전체 Python 파일 map·fingerprint를 확인하고 실제 bridge의 누락/변경/추가 파일을 개별 보고한다. command/event import 파일과 `settings.Python.Path` 등록도 확인한다. event package는 import 파일 존재만 확인하며 그 bytes는 기존 bridge manifest 범위 밖이다. 디스크 일치는 running process의 loaded bytes나 qualification 증거가 아니다. 2026.1 고정 버전 조건과 명시적 `SkipCascadeurVersion`을 유지하며 capability는 열지 않는다.
+
+두 설치 스크립트의 PowerShell 구문 확인은 오류 0건이었다. 저장소 bridge Python 파일 56개의 실제 map으로 호스트 Python과 새 PowerShell verifier의 fingerprint가 모두 `d8eee3b8ed61fe1f2ebad9c3cbaa19e8182c800f2467593c5361b261b5f9a71e`임을 확인했다. **실제 `verify-install.ps1`은 exit 1**이었다. 전역 runtime의 `bridge-package.json`이 없고 Cascadeur command/event/Python.Path 등록과 Codex 등록이 모두 false였다. 설치 build도 2026.1 고정 baseline과 다르며 stdio smoke는 실행되지 않았다. 이 진단으로 전역 MCP 설치 완료를 주장하지 않는다. 현재 실행 중인 시험용 bridge와 전역 설치 등록은 구분한다.
+
+임시 fixture에서 staged-smoke 예외를 주입하는 확인 명령은 자동 승인 정책이 `blocked by policy`로 거부해 실행되지 않았다. 우회 재시도하지 않았으므로 실제 실패 정리·환경 복원을 실행 검증했다고 주장하지 않는다. 실제 설치 교체·clean restart·새 manifest의 loaded 일치와 이전 receipt의 업그레이드 후 조회는 미완료다. 기존 unknown/global barrier·native 종료 crash와 일반 rig/recipe의 남은 요구도 유지한다. 전체 suite/build/CI는 실행하지 않았다.
+
+### 이전 추가: sparse refinement와 별도 recipe 삽입 단계 연결
+
+원격을 다시 fetch했으며 개선 문서 최신 커밋은 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하다. 전체 16개 목표를 유지한다. 설치 파일 `C:\Program Files\Cascadeur\cascadeur.exe`의 ProductVersion은 `2026.2.3.0.16863`으로 다시 확인했다. 당시 기록한 프로세스 부재 진술은 위 설치 진단 절에서 현재 PID를 직접 재확인해 정정했다.
 
 - 기존 key fitting이 `KEY_LAYOUT_INSUFFICIENT`일 때만, 원 intent의 명시적 opt-in과 별도 승인 생성 키 예산으로 sparse refinement를 호출한다. 실제 발급된 local layout/capture, 0부터 시작하는 전체 3–33 frame grid, 한 독립 position driver, LINEAR/STEP 구간을 요구한다. 원 키 값은 변수에서 제거해 고정하고 기존 mode를 보존한다. 잔차가 큰 frame부터 같은 잔차면 이른 frame을 택하며 기존/새 key와 최소 2 frame 간격, 원 key/section 부재, lock/contact/event/편집 구간을 지킨다. 새 키 8개·전체 16개 상한, full-grid QP·sparse/메모리 예산을 적용한다.
 - workflow는 실제 global/local capture의 일치와 parentless 관측을 확인한 제한된 경우만 global 목표를 local로 사용한다. solver metre 값을 정확한 context로 native scene units에 변환하고 float32로 제한한 뒤 native-private 예측을 인증한다. 그 예측으로 전체 frame의 fit 잔차·correction envelope·role/pose/root/lock/contact 보호를 다시 확인한다. 원 capture/source/layout와 요청 목표·예측·delta는 별도로 보존하며 발급된 capture의 binding을 덮어쓰지 않는다.
@@ -515,6 +527,7 @@ Cascy 작업 복제본이 열린 상태에서 export 확인 helper를 실행하�
 
 - upgrade-state helper를 source install/packaged installer에 연결했다. 첫 새 host import보다 앞서 기존 state·snapshots·logs·policy와 인증키·request/receipt/unknown·recipe/resume·publish 상태를 보존한다. 실행 중 Cascadeur에는 교체를 거부한다.
 - 별도 fixture의 10개 상태 파일 byte 보존, 반복 호출과 충돌 거부 및 PowerShell parse를 확인했다. 실제 설치 교체·frozen build·전역 MCP 재등록은 실행하지 않았다. 설치 시 host/bridge를 함께 갱신하고 앱을 깨끗이 재시작해야 한다.
+- 이후 실제 source 설치 시도는 실행 중 PID `2328` 때문에 첫 idle 검사에서 거절됐고, 기존 persistent 파일 59개와 인증된 unknown은 보존됐다. 실패 준비의 staging/환경 복원을 연결하고 verifier에 정확한 host/bridge 디스크 map 및 Python import 경로 진단을 추가했다. 실제 교체 후 연속성·새 loaded fingerprint는 아직 관측하지 않았다.
 
 ## 수행한 좁은 확인과 미확인 범위
 
