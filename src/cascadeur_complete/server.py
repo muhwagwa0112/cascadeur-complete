@@ -15,7 +15,8 @@ from .ui_file_flow import dialog_flow_arguments, ui_file_flow_arguments
 mcp = MCPServer(
     "cascadeur-complete",
     instructions=(
-        f"Cascadeur {SUPPORTED_BUILD} automation only. Read capabilities first. Every scene or file change is "
+        f"Cascadeur baseline {SUPPORTED_BUILD}; build 2026.2.3.0.16863 permits only its live-qualified native subset. "
+        "Read capabilities first. Every scene or file change is "
         "prepared by a *_prepare tool (or change_prepare) and runs only through change_commit. "
         "Never assume a gated feature ran."
     ),
@@ -49,6 +50,25 @@ def _dump(value: Any) -> str:
     if hasattr(value, "model_dump"):
         value = value.model_dump(mode="json")
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def inspect_motion_inputs(character_ref: str, frame_range: list[int], support_refs: list[str] | None = None,
+                          purpose: str = "repair") -> dict[str, Any]:
+    """Read native rig/context metadata into a provenance-bound input draft."""
+    try:
+        return service().inspect_motion_inputs(character_ref, frame_range, support_refs or (), purpose).model_dump(mode="json")
+    except (ValueError, TypeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def resolve_motion_inputs(draft_ref: str, overrides: dict[str, Any], intent_policy: dict[str, Any]) -> dict[str, Any]:
+    """Resolve semantic role choices against the unchanged native input draft."""
+    try:
+        return service().resolve_motion_inputs(draft_ref, overrides, intent_policy).model_dump(mode="json")
+    except (ValueError, TypeError) as exc:
+        return _invalid(str(exc))
 
 
 @mcp.resource("cascadeur://capabilities")
@@ -356,7 +376,7 @@ def change_prepare(
     feature_id: str, operation_name: str, arguments: dict[str, Any], ttl_seconds: float = 300,
     source_binding: SourceBinding | None = None,
 ) -> dict[str, Any]:
-    """Dry-run a destructive change, save a CASC snapshot, and return an expiring token."""
+    """Prepare an exact change against an issued source and existing checkpoint; return an expiring token without editing."""
     try:
         return service().prepare_change(feature_id, operation_name, arguments, ttl_seconds, source_binding=source_binding)
     except (KeyError, ValueError) as exc:
@@ -368,7 +388,7 @@ def feature_prepare(
     feature_id: str, arguments: dict[str, Any] | None = None, ttl_seconds: float = 300,
     source_binding: SourceBinding | None = None,
 ) -> dict[str, Any]:
-    """Snapshot and prepare any adapter-bound feature by id; see feature_describe for its arguments."""
+    """Prepare an adapter-bound feature against its issued source and checkpoint; see feature_describe for arguments."""
     svc = service()
     try:
         feature = svc.feature(feature_id)

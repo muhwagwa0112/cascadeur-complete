@@ -127,11 +127,21 @@ def retarget_pose(source_local, source_rest, target_rest, role_mapping, axis_ali
                         report={"scale": float(scale), "runtime_quality": "unverified", "coverage": "sampled_frames"})
 
 
-def controller_targets(retarget_result, target_profile, adapter, *, planned_world=None):
+def controller_targets(retarget_result, target_profile, adapter, *, planned_world=None,adapter_verifier=None):
     if retarget_result.status != "candidate":
         return retarget_result
-    if not target_profile.controller_adapter_id or adapter is None or not getattr(adapter, "verified", False):
+    if not target_profile.controller_adapter_id or adapter is None or not callable(adapter_verifier):
         return SolverResult("unsupported", ["RIG_ADAPTER_UNVERIFIED"])
+    from dataclasses import asdict
+    from .capture import canonical_data,canonical_digest
+    request=canonical_data({"adapter_id":target_profile.controller_adapter_id,"profile":asdict(target_profile),
+                            "targets":retarget_result.values,"planned_world":planned_world})
+    digest=canonical_digest(request)
+    receipt=adapter_verifier(request,digest)
+    observed=getattr(receipt,"result",None)
+    if not (getattr(receipt,"ok",False) and isinstance(observed,dict)
+            and observed.get("controller_request_digest")==digest):
+        return SolverResult("unsupported",["RIG_ADAPTER_UNVERIFIED"])
     result = adapter.controller_targets(retarget_result.values, target_profile, planned_world=planned_world)
     if not isinstance(result, SolverResult):
         raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "adapter did not return an explicit solver outcome")

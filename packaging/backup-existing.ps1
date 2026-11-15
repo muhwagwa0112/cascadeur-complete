@@ -7,7 +7,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$backupRoot = Join-Path $env:LOCALAPPDATA ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-pre-upgrade')
+. (Join-Path $PSScriptRoot 'upgrade-state.ps1')
+$InstallLocalAppData = Get-CascadeurLocalAppData
+Assert-CascadeurUpgradeIdle $RuntimeRoot
+$backupRoot = Join-Path $InstallLocalAppData ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-pre-upgrade')
 New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
 $runtimeOwnership = Join-Path $RuntimeRoot 'state\install-ownership.json'
 if ((Test-Path -LiteralPath $RuntimeRoot) -and -not (Test-Path -LiteralPath $runtimeOwnership)) {
@@ -23,7 +26,7 @@ foreach ($entry in $targets.GetEnumerator()) {
         Copy-Item -LiteralPath $source -Destination (Join-Path $backupRoot $entry.Key) -Recurse -Force
     }
 }
-$settings = Join-Path $env:LOCALAPPDATA 'Nekki Limited\Cascadeur\settings.json'
+$settings = Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\settings.json'
 $settingsExisted = Test-Path -LiteralPath $settings
 if ($settingsExisted) {
     Copy-Item -LiteralPath $settings -Destination (Join-Path $backupRoot 'cascadeur-settings.json')

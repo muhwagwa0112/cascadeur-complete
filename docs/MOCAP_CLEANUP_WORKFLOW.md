@@ -10,7 +10,12 @@ and displays the exact permit sequence and blockers. Authorize its plan and scop
 digests before `recipe_start`; a grant allocates one run, with idempotent retries of
 the same start key. Status and artifacts are persisted under `state/runs`.
 
-Each native mutation uses `prepare_change` and a single-use `commit_change` token.
+Each ordinary native mutation uses `prepare_change` and a single-use `commit_change` token.
+The initial clone uses a separate signed `BootstrapGrant`, restricted to its exact
+source, new workspace paths and request. A typed `StageEffect` retains the original
+declaration and concrete argument digests. Checkpoints have independent persisted
+steps and native completion receipts; a missing host record after save is rebuilt
+from that receipt and the observed bytes, rather than saving again.
 The runtime receipt records native outcome; host postconditions and actual motion
 quality remain separate. A native success cannot override a failed host check.
 Unknown requests are reconciled by their original request ID, with no speculative
@@ -29,10 +34,18 @@ duration cannot bypass contact, lock, root or collision observations.
 An export must be sealed, structurally checked, imported and measured through the
 pinned target adapter, then published under its exact destination permission.
 
-The pinned native SDK has no installed verified guard, authored dependency and
-scene identity reader, checkpoint adapter, or native export settings/completion
-adapter in this checkout. These are explicit preflight blockers. The host tests
-and math do not establish a successful live scene mutation or export.
+Native support is qualified for a particular installed build and finite scene
+domain. The independent-transform adapter does not certify humanoid controllers,
+rig ownership, mesh capture, native export or the full cleanup recipe. Missing
+observed adapters remain explicit preflight blockers. Host math and orchestration
+checks do not establish successful live motion cleanup or FBX delivery.
+
+Generated target identities may be declared with `DerivedTargetRef` role paths.
+They cannot include invented concrete IDs or profiles. After the exact producer
+receipt, the runtime resolves ownership and topology once and the run preserves
+that mapping. Host retargeting uses an immutable canonical source artifact,
+observed target rest/controller data and existing-key fitting before preparation.
+It cannot dispatch a host-only `motion.retarget` operation to the native bridge.
 
 ## Historical workflow example
 

@@ -48,6 +48,7 @@ Source: "{#StageRoot}\app\*"; DestDir: "{app}"; Excludes: "policy.json"; Flags: 
 Source: "{#StageRoot}\app\policy.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "{#StageRoot}\bridge\cascadeur_complete\*"; DestDir: "{localappdata}\Nekki Limited\Cascadeur\user_scripts\cascadeur_complete"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageRoot}\bridge\cascadeur_complete_events\*"; DestDir: "{localappdata}\Nekki Limited\Cascadeur\user_scripts\cascadeur_complete_events"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\packaging\upgrade-state.ps1"; Flags: dontcopy
 Source: "..\packaging\backup-existing.ps1"; Flags: dontcopy
 Source: "..\packaging\restore-existing.ps1"; Flags: dontcopy
 
@@ -70,6 +71,7 @@ var
   Parameters: String;
 begin
   Result := '';
+  ExtractTemporaryFile('upgrade-state.ps1');
   ExtractTemporaryFile('backup-existing.ps1');
   ExtractTemporaryFile('restore-existing.ps1');
   BackupScript := ExpandConstant('{tmp}\backup-existing.ps1');

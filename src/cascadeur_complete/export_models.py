@@ -158,6 +158,8 @@ class ExportExpectation(ExportModel):
     time_s: tuple[float, ...]
     position_m: dict[str, tuple[tuple[float, float, float], ...]]
     rotation_delta_wxyz: dict[str, tuple[tuple[float, float, float, float], ...]]
+    rest_rotation_wxyz: dict[str, tuple[float, float, float, float]] = Field(default_factory=dict)
+    rest_position_m: dict[str, tuple[float, float, float]] = Field(default_factory=dict)
     parent_paths: dict[str, str | None]
     required_metrics: tuple[str, ...]
     runtime_quality: Literal["pass"]

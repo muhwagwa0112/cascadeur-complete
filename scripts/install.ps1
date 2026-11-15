@@ -3,11 +3,13 @@ param([switch] $SkipCodexRegistration)
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$RuntimeRoot = Join-Path $env:LOCALAPPDATA 'CascadeurMCP\cascadeur-complete'
-$BridgeRoot = Join-Path $env:LOCALAPPDATA 'Nekki Limited\Cascadeur\user_scripts\cascadeur_complete'
-$EventsRoot = Join-Path $env:LOCALAPPDATA 'Nekki Limited\Cascadeur\user_scripts\cascadeur_complete_events'
-$BackupRoot = Join-Path $env:LOCALAPPDATA ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-source-install')
-$StagingRoot = Join-Path $env:LOCALAPPDATA ('CascadeurMCP\staging\' + [guid]::NewGuid().ToString('N'))
+. (Join-Path $ProjectRoot 'packaging\upgrade-state.ps1')
+$InstallLocalAppData = Get-CascadeurLocalAppData
+$RuntimeRoot = Join-Path $InstallLocalAppData 'CascadeurMCP\cascadeur-complete'
+$BridgeRoot = Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\user_scripts\cascadeur_complete'
+$EventsRoot = Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\user_scripts\cascadeur_complete_events'
+$BackupRoot = Join-Path $InstallLocalAppData ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-source-install')
+$StagingRoot = Join-Path $InstallLocalAppData ('CascadeurMCP\staging\' + [guid]::NewGuid().ToString('N'))
 $StageRuntime = Join-Path $StagingRoot 'runtime'
 $StageBridge = Join-Path $StagingRoot 'bridge'
 $StageEvents = Join-Path $StagingRoot 'events'
@@ -15,25 +17,13 @@ $TransactionManifest = Join-Path $BackupRoot 'transaction.json'
 
 foreach ($target in @($RuntimeRoot, $BridgeRoot, $EventsRoot, $BackupRoot, $StagingRoot)) {
     $full = [IO.Path]::GetFullPath($target)
-    if (-not $full.StartsWith([IO.Path]::GetFullPath($env:LOCALAPPDATA) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $full.StartsWith([IO.Path]::GetFullPath($InstallLocalAppData) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to install outside Local AppData: $full"
     }
 }
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required for a source install' }
 
-# Windows cannot atomically replace a Python environment while a registered
-# stdio server is still running from it. Fail before staging work and preserve
-# the active installation; the caller can close Codex and retry.
-$activeRuntimeProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-    $_.ExecutablePath -and [IO.Path]::GetFullPath([string]$_.ExecutablePath).StartsWith(
-        $RuntimeRoot + [IO.Path]::DirectorySeparatorChar,
-        [StringComparison]::OrdinalIgnoreCase
-    )
-}
-if ($activeRuntimeProcesses) {
-    $processIds = ($activeRuntimeProcesses | Select-Object -ExpandProperty ProcessId) -join ', '
-    throw "Cascadeur MCP is running from the install target (PIDs: $processIds). Close Codex, then retry the source install."
-}
+Assert-CascadeurUpgradeIdle $RuntimeRoot
 
 New-Item -ItemType Directory -Path $StageRuntime, $StageBridge, $StageEvents, $BackupRoot -Force | Out-Null
 foreach ($name in @('pyproject.toml', 'uv.lock', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'policy.default.json')) {
@@ -44,7 +34,10 @@ foreach ($directory in @('src', 'inventory')) {
 }
 Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete\*') -Destination $StageBridge -Recurse -Force
 Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete_events\*') -Destination $StageEvents -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $ProjectRoot 'policy.default.json') -Destination (Join-Path $StageRuntime 'policy.json')
+Copy-CascadeurPersistentState $RuntimeRoot $StageRuntime
+if (-not (Test-Path -LiteralPath (Join-Path $StageRuntime 'policy.json'))) {
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot 'policy.default.json') -Destination (Join-Path $StageRuntime 'policy.json')
+}
 
 Push-Location $StageRuntime
 try {
@@ -68,6 +61,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Staged MCP smoke failed' }
 # recreate the environment after the runtime directory reaches its final path.
 Remove-Item -LiteralPath (Join-Path $StageRuntime '.venv') -Recurse -Force
 
+Assert-CascadeurUpgradeIdle $RuntimeRoot
 $movedOld = [System.Collections.Generic.List[object]]::new()
 $activatedTargets = [System.Collections.Generic.List[string]]::new()
 $targetState = [ordered]@{}
@@ -97,15 +91,6 @@ try {
         targets = $targetState
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $TransactionManifest -Encoding utf8
 
-    # Preserve the ownership baseline across source upgrades. The old runtime
-    # was moved atomically into the transaction backup above.
-    $PreviousOwnership = Join-Path $BackupRoot 'runtime\state\install-ownership.json'
-    if (Test-Path -LiteralPath $PreviousOwnership) {
-        $NewStateRoot = Join-Path $RuntimeRoot 'state'
-        New-Item -ItemType Directory -Path $NewStateRoot -Force | Out-Null
-        Copy-Item -LiteralPath $PreviousOwnership -Destination (Join-Path $NewStateRoot 'install-ownership.json') -Force
-    }
-
     & uv sync --project $RuntimeRoot --frozen
     if ($LASTEXITCODE -ne 0) { throw 'Final-path dependency installation failed' }
     $FinalExecutable = Join-Path $RuntimeRoot '.venv\Scripts\cascadeur-complete.exe'
@@ -133,26 +118,6 @@ try {
     throw
 } finally {
     if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
-}
-
-# Snapshots (rollback points and working clones) and live evidence belong to the
-# user's history, not to a runtime version. The old runtime was moved into the
-# backup above, so carry them over only now: a failed install removes the new
-# runtime directory and must never take snapshots with it.
-$PreviousRuntime = Join-Path $BackupRoot 'runtime'
-$PreviousSnapshots = Join-Path $PreviousRuntime 'snapshots'
-if (Test-Path -LiteralPath $PreviousSnapshots) {
-    $NewSnapshots = Join-Path $RuntimeRoot 'snapshots'
-    New-Item -ItemType Directory -Path $NewSnapshots -Force | Out-Null
-    Get-ChildItem -LiteralPath $PreviousSnapshots -File | ForEach-Object {
-        $destination = Join-Path $NewSnapshots $_.Name
-        if (-not (Test-Path -LiteralPath $destination)) { Move-Item -LiteralPath $_.FullName -Destination $destination }
-    }
-}
-$PreviousEvidence = Join-Path $PreviousRuntime 'state\live_evidence.json'
-$NewEvidence = Join-Path $RuntimeRoot 'state\live_evidence.json'
-if ((Test-Path -LiteralPath $PreviousEvidence) -and -not (Test-Path -LiteralPath $NewEvidence)) {
-    Copy-Item -LiteralPath $PreviousEvidence -Destination $NewEvidence
 }
 
 [pscustomobject]@{

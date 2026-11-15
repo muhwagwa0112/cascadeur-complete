@@ -18,6 +18,7 @@ from .recipe_models import (
     ArtifactRef, RecipeRunRecord, ScopedAuthorization, StepRecord, WorkflowPlan, canonical_bytes, digest,
 )
 from .store_lock import process_is_alive, process_start_identity, store_lock
+from .stage_contracts import BootstrapGrant, StageEffect
 
 HOST_INSTANCE_ID = str(uuid.uuid4())
 TERMINAL_RUNS = frozenset({"succeeded", "failed", "canceled"})
@@ -104,6 +105,43 @@ class RecipeRunStore:
         value = self._verified(self.root / "plans" / f"{canonical_id(plan_id)}.json", "plan")
         value.pop("mac")
         return WorkflowPlan.model_validate(value)
+
+    def issue_bootstrap(self, plan, run, step, effect: StageEffect, *, attempt_id, request_id):
+        """Issue a narrow signed initial-clone capability, never an ordinary write grant."""
+        grant = self.read_grant(run.authorization_id)
+        self.verify_grant(grant, plan)
+        if step.stage != "initial_checkpoint" or effect.step_id != step.step_id:
+            raise RecipeConflict("BOOTSTRAP_SCOPE_MISMATCH")
+        runtime = plan.runtime_fingerprints
+        value = dict(grant_id=str(uuid.uuid4()), authorization_id=grant.authorization_id,
+            authorization_digest=digest(grant), plan_digest=plan.plan_digest,
+            declaration_digest=step.fixed_parameters_digest, run_id=run.run_id, step_id=step.step_id,
+            attempt_id=attempt_id, lease_epoch=run.lease_epoch, request_id=request_id,
+            operation_name=effect.operation_name, arguments_digest=effect.arguments_digest,
+            source_binding=None if effect.source_binding is None else effect.source_binding.model_dump(mode="json"),
+            input_file=None if not effect.input_files else effect.input_files[0].model_dump(mode="json"),
+            output_paths=effect.output_paths, runtime_epoch=runtime.get("runtime_epoch"),
+            adapter_fingerprint=runtime.get("loaded_adapter_fingerprint"),
+            application_build=runtime.get("installation_version"), expires_at=min(grant.expires_at, run.deadline), mac="")
+        result = BootstrapGrant.model_validate(self._signed("bootstrap", value))
+        with store_lock(self.lock_path):
+            write_immutable(self.run_dir(run.run_id) / "bootstrap" / f"{result.grant_id}.json", result.model_dump(mode="json"))
+        return result
+
+    def verify_bootstrap(self, value):
+        value = BootstrapGrant.model_validate(value)
+        stored = BootstrapGrant.model_validate(self._verified(self.run_dir(value.run_id) / "bootstrap" / f"{canonical_id(value.grant_id)}.json", "bootstrap"))
+        if value != stored or time.time() >= value.expires_at:
+            raise RecipeConflict("BOOTSTRAP_GRANT_INVALID_OR_EXPIRED")
+        run = self.read(value.run_id)
+        plan = self.read_plan(run.plan_id)
+        record = next(item for item in run.steps if item.step_id == value.step_id)
+        self.verify_grant(self.read_grant(run.authorization_id), plan)
+        if (run.cancel_requested or run.lease_epoch != value.lease_epoch or record.request_id != value.request_id
+                or record.attempt_id != value.attempt_id or record.stage_effect is None
+                or record.stage_effect.arguments_digest != value.arguments_digest or plan.plan_digest != value.plan_digest):
+            raise RecipeConflict("BOOTSTRAP_GRANT_SCOPE_CHANGED")
+        return stored
 
     def authorize(self, plan: WorkflowPlan, expires_at: float) -> ScopedAuthorization:
         now = time.time()
@@ -241,6 +279,8 @@ class RecipeRunStore:
                 raise RecipeConflict("Resource usage cannot decrease")
             if candidate.artifacts[:len(current.artifacts)] != current.artifacts:
                 raise RecipeConflict("Run artifacts are append-only")
+            if candidate.derived_targets[:len(current.derived_targets)] != current.derived_targets:
+                raise RecipeConflict("Derived mappings are append-only")
             if len(candidate.steps) != len(current.steps):
                 raise RecipeConflict("Run cannot add or remove steps")
             for before, after in zip(current.steps, candidate.steps, strict=True):
@@ -252,6 +292,9 @@ class RecipeRunStore:
                     raise RecipeConflict("A dispatched step cannot acquire a new request identity")
                 if before.dispatch_lease_epoch is not None and before.dispatch_lease_epoch != after.dispatch_lease_epoch:
                     raise RecipeConflict("The original dispatch lease is immutable")
+                for field in ("stage_effect", "bootstrap_grant", "checkpoint_observation"):
+                    if getattr(before, field) is not None and getattr(before, field) != getattr(after, field):
+                        raise RecipeConflict("Persisted stage evidence is immutable")
             self._write(candidate)
             return self.read(run_id)
 

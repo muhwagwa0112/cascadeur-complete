@@ -23,6 +23,8 @@ from .handler_registry import dispatch as dispatch_registered
 
 PROTOCOL_VERSION = "3.0"
 READ_ONLY_OPERATIONS = {
+    "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
+    "system.observe_motion_inputs", "system.observe_key_layout",
     "system.status",
     "system.logs",
     "system.view_mode_get",
@@ -987,9 +989,51 @@ def _file_loader(tool_name, scene, method, path):
 
 def _run_operation(scene, operation, request):
     name = operation.get("name")
+    adapter = guards._ADAPTERS.get(name)
+    if _operation_is_mutating(operation) and adapter is not None:
+        before = dict(guards.scene_instance(scene))
+        try:
+            return adapter.execute(scene, operation.get("arguments") or {}, request)
+        except Exception as exc:
+            phase, _failure = guards.write_observation()
+            guards.observe_effect(name, "no_effect" if phase == "not_started" else "unknown",
+                scene_before=before, scene_after=dict(guards.scene_instance(_scene_view() or scene)),
+                detail={"error": str(exc)[:500]})
+            raise
+    return _run_operation_legacy(scene, operation, request)
+
+
+def _run_operation_legacy(scene, operation, request):
+    name = operation.get("name")
     args = operation.get("arguments") or {}
+    if name == "system.native_adapter_status":
+        from .native_adapters import status
+        return status(), []
+    if name == "system.verify_observation":
+        from .native_adapters import verify_observation
+        return verify_observation(args["observation"], args["digest"], args["kind"]), []
+    if name == "system.rebind_source":
+        prior = args["source_binding"]
+        guards.assert_source(scene, prior)
+        adapter = guards._ADAPTERS.get(args["operation_name"])
+        if adapter is None:
+            raise ValueError("RIG_ADAPTER_UNVERIFIED: no executor for successor operation")
+        scope = adapter.required_scope(scene, {**prior["scope"], "operation_name": args["operation_name"],
+            "operation_arguments": args["operation_arguments"]})
+        return guards.capture_source(scene, scope, prior["inputs_digest"]), []
+    if name == "system.observe_motion_inputs":
+        from .native_adapters import observe_motion_inputs
+        return observe_motion_inputs(scene, args), []
+    if name == "system.observe_key_layout":
+        raise ValueError("RIG_ADAPTER_UNVERIFIED: current native adapter does not attest a character key/rig domain")
     if name == "system.capture_source":
-        return guards.capture_source(scene, args["scope"], args["inputs_digest"], args.get("sample_digest")), []
+        scope = args["scope"]
+        if set(scope) == {"operation_name", "operation_arguments"}:
+            adapter = guards._ADAPTERS.get(scope["operation_name"])
+            if adapter is None:
+                raise ValueError("RIG_ADAPTER_UNVERIFIED: no native dependency reader")
+            scope = adapter.required_scope(scene, scope)
+        return guards.capture_source(scene, scope, args["inputs_digest"], args.get("sample_digest")), []
     if name == "system.validate_source":
         return guards.assert_source(scene, args["source_binding"], operation_name=args.get("operation_name"), arguments=args.get("operation_arguments")), []
     handled, registered_result = dispatch_registered(
@@ -1024,6 +1068,8 @@ def _run_operation(scene, operation, request):
             state["runtime_epoch"] = guards.RUNTIME_EPOCH
             state["adapter_fingerprint"] = guards.LOADED_FINGERPRINT
             state["guarded_capabilities"] = guards.capabilities()
+            from .native_adapters import status as native_status
+            state["native_adapter"] = native_status()
             state["bridge_python"] = tuple(__import__("sys").version_info[:3])
         return state, []
     if name == "scene.objects":
@@ -1402,7 +1448,7 @@ def _request_effect(request):
         if not isinstance(op, dict) or not isinstance(op.get("name"), str) or not isinstance(op.get("arguments") or {}, dict):
             return "mixed"
         name, args = op["name"], op.get("arguments") or {}
-        if name.startswith("io.export_") or name in ("scene.save", "safety.checkpoint"):
+        if name.startswith("io.export_") or name == "scene.save":
             effects.append("file")
         elif name.startswith("io.import_") or name.startswith("safety."):
             effects.append("mixed")
@@ -1447,6 +1493,10 @@ def execute_request(scene, request):
     state = scene_state(scene)
     dispatched = False
     try:
+        if request.get("scene_id") and request["scene_id"] != state.get("scene_id"):
+            raise ValueError("SCENE_CHANGED: scene identity differs")
+        if request.get("expected_revision") and request["expected_revision"] != state.get("revision"):
+            raise ValueError("SCENE_CHANGED: scene revision differs")
         if request.get("protocol_version") not in (PROTOCOL_VERSION, "2.0") or (request.get("protocol_version") == "2.0" and effect != "none"):
             raise ValueError("PROTOCOL_MISMATCH")
         if request.get("runtime_epoch") and request.get("runtime_epoch") != guards.RUNTIME_EPOCH:
@@ -1454,11 +1504,16 @@ def execute_request(scene, request):
         if source is not None and effect == "none":
             guards.assert_source(scene, source)
         if effect != "none":
+            guards.assert_loaded_package()
+            if len(request.get("operations", ())) != 1:
+                raise ValueError("RIG_ADAPTER_UNVERIFIED: guarded native effects require one exact executor")
             if request.get("runtime_epoch") != guards.RUNTIME_EPOCH or request.get("adapter_fingerprint") != guards.LOADED_FINGERPRINT:
                 raise ValueError("PROTOCOL_MISMATCH: runtime epoch or loaded adapter differs")
             for op in request["operations"]:
                 guards.assert_source(scene, source, operation_name=op["name"], arguments=op.get("arguments") or {})
-                if (op["name"] in YIELDING_OPERATIONS
+                if op["name"] not in guards._ADAPTERS:
+                    raise ValueError("RIG_ADAPTER_UNVERIFIED: no coupled native executor")
+                if (op["name"] in YIELDING_OPERATIONS and op["name"] not in guards._ADAPTERS
                         and not (op["name"] == "safety.rollback" and _verified_rollback_adapter() is not None)):
                     raise ValueError("RIG_ADAPTER_UNVERIFIED: native completion yields")
             guards.set_write_guard(lambda: guards.assert_source(_scene_view() or scene, source))
@@ -1475,15 +1530,39 @@ def execute_request(scene, request):
     post_source = None
     if dispatched and effect != "none" and source is not None:
         try:
-            post_source = guards.capture_source(_scene_view() or scene, source["scope"], source["inputs_digest"])
+            supplied = (result.get("result") or {}).get("source_binding") if isinstance(result.get("result"), dict) else None
+            post_source = guards.assert_source(_scene_view() or scene, supplied) if supplied else guards.capture_source(_scene_view() or scene, source["scope"], source["inputs_digest"])
             if isinstance(result.get("result"), dict):
                 result["result"]["post_source_binding"] = post_source
+                result["result"]["source_binding"] = post_source
         except Exception as exc:
             result["ok"] = False
             result["error_code"] = "POSTCONDITION_FAILED"
             result["error_message"] = "Applied state could not be captured: " + str(exc)
     phase, failure = guards.write_observation()
     outcome = ("succeeded" if result["ok"] else "failed_after_dispatch") if dispatched else "rejected_pre_dispatch"
+    effects = guards.effect_observations()
+    if dispatched and effect != "none":
+        name = request["operations"][0]["name"]
+        observation = effects[-1] if effects and effects[-1]["operation_name"] == name else None
+        if observation is None or observation["completion"] == "unknown":
+            # A Python return or exception says nothing about asynchronous native
+            # completion. Keep the original claim unresolved and never replay it.
+            outcome = "outcome_unknown"
+            result["ok"] = False
+            result["error_code"] = "POSTCONDITION_FAILED"
+            result["error_message"] = "NATIVE_COMPLETION_UNKNOWN: reconcile the original request; do not redispatch"
+        elif observation["completion"] == "no_effect":
+            outcome = "failed_after_dispatch"
+            result["ok"] = False
+        if post_source is not None and source is not None:
+            old_id, new_id = source["binding"]["scene_instance_id"], post_source["binding"]["scene_instance_id"]
+            if old_id != new_id and name != "safety.bootstrap":
+                outcome = "outcome_unknown"
+                result["ok"] = False
+                result["error_message"] = "SCENE_CHANGED: unapproved native successor"
+        if isinstance(result.get("result"), dict):
+            result["result"]["native_effect_observations"] = effects
     result.update({"receipt_id": request["request_id"], "phase": "terminal", "outcome": outcome,
                    "dispatched": dispatched, "execution": outcome, "write_phase": phase,
                    "failure_kind": failure, "recovery_eligible": False,
@@ -1557,10 +1636,9 @@ def _execute_request_impl(scene, request):
         return _error(feature_id, "SCENE_CHANGED", "Scene identity changed", started, before)
     if expected_revision and expected_revision != before["revision"]:
         return _error(feature_id, "SCENE_CHANGED", "Scene revision changed", started, before)
-    try:
-        _verify_confirmation(runtime_root(), request, before)
-    except BridgeAuthenticationError as exc:
-        return _error(feature_id, "INVALID_REQUEST", str(exc), started, before)
+    # Private execution body: execute_request already authenticated and consumed
+    # the exact token before writing dispatch_started. Consuming it again here
+    # rejects every legitimate first dispatch as a replay.
     safety = request.get("safety_context") or {}
     snapshot_id = None
     if safety.get("snapshot_required"):

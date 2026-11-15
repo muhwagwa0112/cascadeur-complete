@@ -264,6 +264,26 @@ class ChangeFlowMixin:
         self._remember_scene_result(result)
         return result
 
+    def commit_initial_checkpoint(self, grant, token: str, timeout: float = 120.0) -> ResultEnvelope:
+        """Initial checkpoint uses only the exact persisted bootstrap grant."""
+        try:
+            from .stage_contracts import BootstrapGrant
+            supplied = BootstrapGrant.model_validate(grant)
+            try:
+                record = self.changes.load(token)
+            except SafetyError:
+                record = self.changes.consumed(token)
+            if (record.operation.name != "safety.bootstrap"
+                    or record.mutation_request_id != supplied.request_id
+                    or record.impact.get("bootstrap_grant") != supplied.model_dump(mode="json")):
+                raise ValueError("BOOTSTRAP_GRANT_MISMATCH")
+            if record.used:
+                return self.client.reconcile_request(record.mutation_request_id)
+            self.recipes.store.verify_bootstrap(supplied)
+            return self.commit_change(token, timeout)
+        except (ValueError, SafetyError) as exc:
+            return self._host_error("snapshot", ErrorCode.INVALID_REQUEST, str(exc))
+
     def _restore_failed_change(self, record, failed: ResultEnvelope) -> ResultEnvelope:
         """Attempt one separately authorized recovery; retain the original failure."""
         if (failed.phase != "terminal" or failed.outcome != "failed_after_dispatch"

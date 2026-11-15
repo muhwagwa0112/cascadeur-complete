@@ -47,6 +47,7 @@ if (-not $InstallerOnly) {
         --paths (Join-Path $ProjectRoot 'src') --paths (Join-Path $ProjectRoot 'packaging') `
         --hidden-import win32api `
         --collect-data cascadeur_complete `
+        --add-data ((Join-Path $ProjectRoot 'src\cascadeur_complete\blender_export_adapter.py') + ';cascadeur_complete') `
         --version-file (Join-Path $ProjectRoot 'packaging\windows_version_info.txt') `
         (Join-Path $ProjectRoot 'packaging\server_entry.py')
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed' }
@@ -74,7 +75,7 @@ if (-not $InstallerOnly) {
 
     $SupportStage = Join-Path $AppStage 'support'
     New-Item -ItemType Directory -Path $SupportStage -Force | Out-Null
-    foreach ($supportFile in @('install-hooks.ps1', 'uninstall-hooks.ps1', 'post-uninstall-restore.ps1')) {
+    foreach ($supportFile in @('upgrade-state.ps1', 'install-hooks.ps1', 'uninstall-hooks.ps1', 'post-uninstall-restore.ps1')) {
         Copy-Item -LiteralPath (Join-Path $ProjectRoot "packaging\$supportFile") -Destination $SupportStage
     }
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'scripts\verify-install.ps1') -Destination $SupportStage

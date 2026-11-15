@@ -14,6 +14,7 @@ from .atomic_queue import atomic_write_json, read_json
 from .bridge_client import BridgeClient
 from .build_profile import DEVELOPER_BUILD
 from .change_flow import ChangeFlowMixin
+from .recipe_native_service import RecipeNativeServiceMixin
 from .discovery import BASELINE_TOOLS, discover_commands, discover_installation, load_csc_schema
 from .external import available_dependencies
 from .feature_registry import build_registry, registry_json
@@ -29,6 +30,7 @@ from .models import (
     Operation,
     ResultEnvelope,
     SafetyContext,
+    VerificationState,
 )
 from .paths import RuntimePaths
 from .product_catalog import PRODUCT_CATALOG
@@ -74,7 +76,7 @@ MUTATION_VERBS = (
 )
 
 
-class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin):
+class CascadeurService(RecipeNativeServiceMixin, ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin):
     def __init__(self, paths: RuntimePaths | None = None, client: BridgeClient | None = None):
         self.paths = paths or RuntimePaths.discover()
         self.paths.ensure()
@@ -116,41 +118,25 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         return self.client.execute("validate_source", [Operation(name="system.validate_source", arguments={
             "source_binding": source, "operation_name": operation_name, "operation_arguments": arguments})])
 
-    def recipe_preflight(self, spec, steps):
-        status = self._checked_status(self.refresh_live())
-        if not status.ok:
-            return [{"code": "RUNTIME_UNAVAILABLE", "detail": status.error_message}]
-        live = status.result
-        reasons = []
-        if live.get("protocol_version") != PROTOCOL_VERSION:
-            reasons.append({"code": "PROTOCOL_MISMATCH"})
-        capabilities = live.get("guarded_capabilities", {})
-        if not capabilities.get("source_binding") or not capabilities.get("identity_verified"):
-            reasons.append({"code": "BINDING_UNAVAILABLE", "detail": "No verified authored dependency reader and scene identity adapter"})
-        if spec.input.kind == "active_scene":
-            from .request_ledger import canonical_digest
-            binding, source = spec.input.binding, spec.input.source_binding
-            if binding.scene_instance_id != live.get("scene_id") or binding.runtime_epoch != live.get("runtime_epoch"):
-                reasons.append({"code": "SCENE_CHANGED", "detail": "Recipe input identifies a different active scene instance or epoch"})
-            if source is None or source.binding != binding or not source.complete:
-                reasons.append({"code": "SOURCE_BINDING_REQUIRED"})
-            else:
-                checked = self.validate_source(source)
-                if not checked.ok:
-                    reasons.append({"code": "SCENE_CHANGED", "detail": checked.error_message})
-                profile = source.scope.get("profile", {})
-                ownership = source.scope.get("ownership", {})
-                if (canonical_digest(profile) != spec.character.rig_profile_digest
-                        or profile.get("character_id") != spec.character.character_id
-                        or profile.get("role_ids") != spec.character.role_ids
-                        or any(ownership.get(object_id) != spec.character.character_id for object_id in spec.character.object_ids)
-                        or not set(spec.character.layer_ids) <= set(source.scope.get("layer_ids", []))):
-                    reasons.append({"code": "RIG_MAPPING_AMBIGUOUS", "detail": "Runtime source does not attest exact character, layer and role ownership"})
-        verified = set(capabilities.get("operations", []))
-        for step in steps:
-            if step.effect in {"evaluation", "scene_mutation", "file_stage"} and not step.not_required_reason and step.operation_name not in verified:
-                reasons.append({"code": "RIG_ADAPTER_UNVERIFIED", "step_id": step.step_id, "operation": step.operation_name})
-        return reasons
+    def _motion_inputs(self):
+        from .motion_profile_builder import MotionInputResolver
+        if not hasattr(self, "_motion_input_resolver"):
+            def reader(selection):
+                result = self.client.execute("motion_inputs", [Operation(name="system.observe_motion_inputs", arguments=selection)])
+                if not result.ok:
+                    raise ValueError(result.error_message or "NATIVE_INPUT_OBSERVATION_UNAVAILABLE")
+                return result.result
+            def verifier(observation, observation_digest):
+                return self.client.execute("motion_inputs", [Operation(name="system.verify_observation", arguments={
+                    "observation": observation, "digest": observation_digest, "kind": "motion_inputs"})])
+            self._motion_input_resolver = MotionInputResolver(reader, verifier)
+        return self._motion_input_resolver
+
+    def inspect_motion_inputs(self, character_ref, frame_range, support_refs=(), purpose="repair"):
+        return self._motion_inputs().inspect_motion_inputs(character_ref, frame_range, support_refs, purpose)
+
+    def resolve_motion_inputs(self, draft_ref, overrides, intent_policy):
+        return self._motion_inputs().resolve_motion_inputs(draft_ref, overrides, intent_policy)
 
     def _checked_status(self, status: ResultEnvelope) -> ResultEnvelope:
         """A successful status must carry the scene state dict that tokens are bound to."""
@@ -190,13 +176,14 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
             )
 
     def _rebuild_features(self) -> None:
+        narrow_build = self._version_name == "2026.2.3.0.16863"
         self._features = build_registry(
             self.schema,
             self.commands,
             self._live_tools,
             license_name=self._license_name,
             scene_available=self._scene_available,
-            version_name=self._version_name,
+            version_name=PRODUCT_CATALOG.supported_build if narrow_build else self._version_name,
             verified_features=self.evidence_store.verified_features(
                 self._version_name,
                 license_name=self._license_name,
@@ -210,8 +197,33 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
         for feature in self._features:
             product = PRODUCT_CATALOG.by_id.get(feature.id)
             feature.implemented = bool(product and product.implementation_status == "implemented")
+            if narrow_build and feature.operation_id not in operations and feature.id not in {
+                    "status", "logs", "object_search", "scene_summary", "scene_list", "transform_get", "timeline_get", "key_list", "layer_list"}:
+                feature.state = CapabilityState.UNSUPPORTED_VERSION
+                feature.execution_mode = ExecutionMode.GATED
             feature.runtime_available = connected and feature.state == CapabilityState.AVAILABLE and (not feature.mutation or feature.operation_id in operations)
             feature.execution_observed = feature.verification.value == "verified_live"
+        # This is a bridge safety capability, not a feature in the pinned
+        # 2026.1 product inventory. Recipes and public preparation use the same
+        # record; discovery alone must never enable checkpoint writes.
+        checkpoint_ready = connected and "safety.checkpoint" in operations
+        self._features.append(FeatureRecord(
+            id="snapshot", family="safety", name="Isolated checkpoint",
+            description="Save a verified backup and successor working scene through the qualified native adapter",
+            execution_mode=ExecutionMode.NATIVE if checkpoint_ready else ExecutionMode.GATED,
+            state=CapabilityState.AVAILABLE if checkpoint_ready else CapabilityState.UNHEALTHY,
+            route="safety.checkpoint", operation_id="safety.checkpoint", test_id="",
+            adapter_id="independent-transform-key0-v1" if checkpoint_ready else None,
+            source="Cascadeur bridge runtime qualification", requires_scene=True,
+            destructive=True, mutation=True, implemented=True,
+            runtime_available=checkpoint_ready, execution_observed=checkpoint_ready,
+            verification=VerificationState.VERIFIED_LIVE if checkpoint_ready else VerificationState.IMPLEMENTED,
+            evidence_kind="live" if checkpoint_ready else "handler",
+            last_verified_version=self._version_name if checkpoint_ready else None,
+            preconditions=["Complete source binding", "Owned working clone", "Fresh checkpoint paths"],
+            postconditions=["Native save completion", "Artifact hash", "Successor source binding"],
+            contract_status="bound", truth_layer="discovered",
+        ))
 
     def _observed_runtime_context(self) -> dict:
         live = getattr(self.client, "runtime_status", {})
@@ -367,6 +379,11 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
     def _supported_build_error(self, feature_id: str) -> ResultEnvelope | None:
         if self._version_name == PRODUCT_CATALOG.supported_build:
             return None
+        if self._version_name == "2026.2.3.0.16863":
+            # Build admission is separate from individual operation admission.
+            # The 2026.1 catalogue remains the baseline; 2026.2 effects still
+            # require an exact live, qualified adapter below and in the bridge.
+            return None
         return self._host_error(
             feature_id,
             ErrorCode.UNSUPPORTED_VERSION,
@@ -451,7 +468,11 @@ class CascadeurService(ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin
                 feature.dependency or "Required integration is unavailable",
                 mode=ExecutionMode.EXTERNAL,
             )
-        if feature.state == CapabilityState.UNSUPPORTED_VERSION:
+        from .effects import classify_effect
+        supported_narrow = (self._version_name == "2026.2.3.0.16863" and (
+            classify_effect(operation_name, arguments) == "none"
+            or operation_name in self.client.runtime_status.get("guarded_capabilities", {}).get("operations", [])))
+        if feature.state == CapabilityState.UNSUPPORTED_VERSION and not supported_narrow:
             return self._host_error(
                 feature.id,
                 ErrorCode.UNSUPPORTED_VERSION,

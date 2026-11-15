@@ -307,14 +307,144 @@ def original_intent_metrics(before: SampleBatch, after: SampleBatch, rig, intent
     return result
 
 
-def evaluate_candidate(plan, evaluator, *, capture_scope):
+def evaluate_candidate(plan, evaluator, *, capture_scope, provenance_verifier=None):
     """Actual evaluation is supplied by a verified readback adapter, not a solver flag."""
-    if evaluator is None or not getattr(evaluator,"verified",False):
+    if evaluator is None or not callable(getattr(evaluator,"evaluate_candidate",None)):
         return QualityReport("unverified",reason_codes=["ACTUAL_READBACK_ADAPTER_UNAVAILABLE"])
     report=evaluator.evaluate_candidate(plan,capture_scope=capture_scope)
     if not isinstance(report,QualityReport) or not report.capture_digest:
         return QualityReport("unverified",reason_codes=["ACTUAL_CAPTURE_DIGEST_MISSING"])
+    from .capture import canonical_digest
+    evidence={"plan":plan,"scope":capture_scope,"report":report.as_dict()}
+    digest=canonical_digest(evidence)
+    receipt=provenance_verifier(evidence,digest) if callable(provenance_verifier) else None
+    result=getattr(receipt,"result",None)
+    if not (getattr(receipt,"ok",False) and isinstance(result,dict) and result.get("evaluation_digest")==digest):
+        report.runtime_verified=False
+        if report.status!="fail":report.status="unverified"
+        report.reason_codes.append("ACTUAL_CAPTURE_PROVENANCE_UNVERIFIED")
     return report
+
+
+def actual_mesh_metrics(geometry,policy,*,verifier,required_mesh_ids=()):
+    """Measure actual evaluated triangle pairs on the exact physical grid.
+
+    ``geometry`` contains immutable window manifests and tracks, not a solver's
+    predicted capsules or baseline vertices. Its authenticated manifest binds
+    terminal completion, successor/source, topology, skin and canonical units.
+    """
+    from .capture import canonical_digest
+    from .motion_geometry import triangle_pair_distance
+    manifest=geometry.get("manifest",{})
+    required=("capture_kind","source_digest","successor_digest","completion_receipt_digest",
+              "topology_digest","skin_digest","context_digest","frames","time_s","windows")
+    if any(not manifest.get(key) for key in required) or manifest.get("capture_kind") not in ("native_actual","target_actual"):
+        raise MotionInputError("ACTUAL_MESH_PROVENANCE_UNVERIFIED","evaluated geometry provenance is incomplete")
+    if manifest.get("space")!="global" or manifest.get("units")!="metres":
+        raise MotionInputError("ACTUAL_MESH_PROVENANCE_UNVERIFIED","actual meshes must be global canonical metres")
+    frames=manifest["frames"];times=np.asarray(manifest["time_s"],dtype=float)
+    if (not frames or any(type(x) is not int for x in frames) or any(b<=a for a,b in zip(frames,frames[1:]))
+            or times.shape!=(len(frames),) or not np.isfinite(times).all() or np.any(np.diff(times)<=0)):
+        raise MotionInputError("INCOMPLETE_CAPTURE","actual geometry physical grid is invalid")
+    digest=canonical_digest(manifest)
+    receipt=verifier(manifest,digest) if callable(verifier) else None
+    result=getattr(receipt,"result",None)
+    if not (getattr(receipt,"ok",False) and isinstance(result,dict) and result.get("geometry_digest")==digest):
+        raise MotionInputError("ACTUAL_MESH_PROVENANCE_UNVERIFIED","geometry window hashes and completion were not authenticated")
+    tracks=geometry.get("tracks",{})
+    pairs=manifest.get("pairs",())
+    if not pairs or any(a not in tracks or b not in tracks or a==b for a,b in pairs):
+        raise MotionInputError("INCOMPLETE_CAPTURE","actual collision pair closure is missing")
+    if set(required_mesh_ids)-{key for pair in pairs for key in pair}:
+        raise MotionInputError("INCOMPLETE_CAPTURE","required mesh is absent from actual collision pairs")
+    from .motion_geometry import ObservedSurfaceTrack,WindowedSurfaceTrack
+    for object_id,track in tracks.items():
+        windows=manifest["windows"].get(object_id)
+        if (not isinstance(track,(ObservedSurfaceTrack,WindowedSurfaceTrack))
+                or not windows or getattr(track,"windows",None)!=windows
+                or not np.array_equal(getattr(track,"frames",()),frames)
+                or canonical_digest(track.context.as_dict())!=manifest["context_digest"]):
+            raise MotionInputError("ACTUAL_MESH_PROVENANCE_UNVERIFIED","track does not match authenticated evaluated windows")
+        if track.semantics!=policy.collision_semantics:
+            raise MotionInputError("MESH_SIGN_UNVERIFIED","surface query semantics differ from the policy")
+        if policy.collision_semantics=="oriented_patch" and not (
+                track.orientation_observed and manifest.get("orientation_evidence",{}).get(object_id)):
+            raise MotionInputError("MESH_SIGN_UNVERIFIED","patch orientation has no authenticated observation")
+    if manifest.get("contact_allowances"):
+        # Unsupported exemptions cannot silently erase measured intersections.
+        raise MotionInputError("CONTACT_REGION_UNVERIFIED","triangle-region contact exemptions require an observed region adapter")
+    budget=geometry.get("max_pair_checks",1_000_000)
+    query_budget=geometry.get("max_surface_queries",1_000_000)
+    if type(budget) is not int or budget<1 or type(query_budget) is not int or query_budget<1:
+        raise MotionInputError("INVALID_POLICY","positive exact triangle pair budget required")
+    checks=queries=0;penetration=[];intersections=[];penetration_frames=[];intersection_frames=[]
+    for row,_ in enumerate(frames):
+        for a,b in pairs:
+            left,right=tracks[a][row],tracks[b][row]
+            queries+=len(left.vertices)+len(right.vertices)
+            if queries>query_budget:
+                raise MotionInputError("RESOURCE_BUDGET_EXCEEDED","exact surface query budget exhausted")
+            distances=[]
+            for source,target in ((left,right),(right,left)):
+                for vertex in source.vertices:
+                    query=target.closest(vertex)
+                    if policy.collision_semantics=="volume":
+                        if query.signed_distance_m is None:
+                            raise MotionInputError("MESH_SIGN_UNVERIFIED","open or ambiguous mesh has no volume penetration sign")
+                        distances.append(max(0.,-query.signed_distance_m))
+                    elif policy.collision_semantics=="oriented_patch":
+                        if query.signed_distance_m is None:
+                            raise MotionInputError("MESH_SIGN_UNVERIFIED","oriented patch band is not observed")
+                        distances.append(max(0.,-query.signed_distance_m))
+                    else:
+                        raise MotionInputError("MESH_SIGN_UNVERIFIED","unsigned distance cannot measure penetration")
+            penetration.extend(distances)
+            penetration_frames.extend([frames[row]]*len(distances))
+            count=0
+            right_triangles=right.vertices[right.triangles]
+            lower=right_triangles.min(axis=1);upper=right_triangles.max(axis=1)
+            for triangle in left.vertices[left.triangles]:
+                candidates=np.flatnonzero(np.all(upper>=triangle.min(axis=0)-1e-10,axis=1)
+                                          &np.all(lower<=triangle.max(axis=0)+1e-10,axis=1))
+                checks+=len(candidates)
+                if checks>budget:
+                    raise MotionInputError("RESOURCE_BUDGET_EXCEEDED","exact mesh intersection query budget exhausted")
+                count+=sum(triangle_pair_distance(triangle,right_triangles[index])<=1e-10 for index in candidates)
+            intersections.append(float(count))
+            intersection_frames.append(frames[row])
+    return {"mesh_penetration_m":measured_metric(penetration,units="m",frame_ids=penetration_frames),
+            "mesh_surface_intersection_count":measured_metric(intersections,units="count",frame_ids=intersection_frames)}
+
+
+def evaluate_actual_quality(original,actual,rig,intent,policy,*,supports=None,prediction=None,
+                            geometry=None,capture_verifier=None,geometry_verifier=None):
+    """Canonical original→actual and prediction→actual closure after completion."""
+    from .capture import canonical_digest
+    digest=canonical_digest(actual.as_dict())
+    try:
+        include_mesh=bool(rig.mesh_ids)
+        validate_quality_policy(policy,rig,intent,include_mesh,capture=original)
+        metrics=original_intent_metrics(original,actual,rig,intent)
+        if intent.contacts:
+            metrics.update(contact_metrics(actual,rig,supports or {},intent.contacts,reference_batch=original))
+        if prediction is not None:
+            metrics.update(compare_captures(prediction,actual))
+        if include_mesh and geometry is not None:
+            if (geometry.get("manifest",{}).get("context_digest")!=canonical_digest(actual.context.as_dict())
+                    or geometry.get("manifest",{}).get("motion_capture_digest")!=digest):
+                raise MotionInputError("INCOMPLETE_CAPTURE","actual mesh and motion schedules differ")
+            metrics.update(actual_mesh_metrics(geometry,policy,verifier=geometry_verifier,required_mesh_ids=rig.mesh_ids))
+        receipt=capture_verifier(actual,digest) if callable(capture_verifier) else None
+        result=getattr(receipt,"result",None)
+        observed=bool(getattr(receipt,"ok",False) and isinstance(result,dict) and result.get("capture_digest")==digest)
+        report=evaluate_metrics(metrics,policy,runtime_verified=observed,capture_digest=digest,
+                                rig=rig,intent=intent,include_mesh=include_mesh,capture=actual)
+        if not observed:
+            if report.status!="fail": report.status="unverified"
+            report.reason_codes.append("ACTUAL_CAPTURE_PROVENANCE_UNVERIFIED")
+        return report
+    except (MotionInputError,KeyError,ValueError) as exc:
+        return QualityReport("unverified",reason_codes=[str(exc)],capture_digest=digest)
 
 
 def validate_export_roundtrip(before_export: SampleBatch, exported_capture: SampleBatch,

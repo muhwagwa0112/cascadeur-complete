@@ -11,6 +11,7 @@ from pathlib import Path
 from .recipe_models import EffectBounds, ExactTarget, RecipeSpec, StepPermit, VariantEnvelope, WorkflowPlan, digest
 from .recipe_store import file_sha256
 from .package_fingerprint import expected_bridge_fingerprint
+from .capture import estimate_motion_resources
 
 
 def implementation_digest() -> str:
@@ -49,6 +50,7 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
         character_id=spec.character.character_id, object_ids=spec.character.object_ids,
         layer_ids=spec.character.layer_ids,
         lineage_id=None if spec.input.binding is None else spec.input.binding.document_lineage_id,
+        derived_ref=spec.character.derived_target,
     )
     envelope = spec.intent.correction_envelope
     bounds = EffectBounds(
@@ -59,7 +61,7 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
     )
     steps: list[StepPermit] = []
 
-    def add(stage, feature, operation, effect, parameters=None, channels=(), reason=None, variants=(), postconditions=(), objects=None):
+    def add(stage, feature, operation, effect, parameters=None, channels=(), reason=None, variants=(), postconditions=(), objects=None, lowering="literal-v1", owned="none"):
         parameters = parameters or {}
         step = StepPermit(
             step_id=f"{len(steps):03d}-{stage}", stage=stage, feature_id=feature, operation_name=operation,
@@ -67,32 +69,44 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
             target=target if objects is None else target.model_copy(update={"object_ids": tuple(objects)}),
             frame_ranges=((spec.clip.first_frame, spec.clip.last_frame),), allowed_channels=channels,
             fixed_parameters=parameters, fixed_parameters_digest=digest(parameters),
-            candidate_variants=variants, max_effect_from_baseline=bounds,
+            candidate_variants=variants, max_effect_from_baseline=bounds.model_copy(update={"owned_output_policy": owned}),
             prerequisite_step_ids=() if not steps else (steps[-1].step_id,),
             required_postconditions=postconditions, not_required_reason=reason,
+            lowering_rule_id=lowering,
         )
         steps.append(step)
 
     add("preflight", "status", "system.status", "read", postconditions=("supported_capabilities",))
+    add("initial_checkpoint", "snapshot", "safety.bootstrap", "scene_mutation",
+        {"input": spec.input.model_dump(mode="json")}, ("scene", "file"),
+        postconditions=("isolated_working_clone", "native_checkpoint_complete"), lowering="bootstrap-v1", owned="run_workspace")
     input_parameters = {} if spec.input.path is None else {"path": spec.input.path}
     add("input", "scene_open" if spec.input.kind == "casc_file" else "import_fbx", 
         "scene.open" if spec.input.kind == "casc_file" else "io.import_fbx", "scene_mutation",
-        input_parameters, ("scene",), "active_scene_exact_binding" if spec.input.kind == "active_scene" else None,
+        input_parameters, ("scene",), "bootstrap_loaded_exact_input",
         postconditions=("source_lineage", "source_integrity"))
     add("rig", "quick_rig", "rig.quick_rig", "scene_mutation", spec.rig.model_dump(mode="json"), ("scene",),
-        "existing_explicit_rig_profile" if spec.rig.mode == "existing" else None, postconditions=("target_rig_ownership",))
+        "existing_explicit_rig_profile" if spec.rig.mode == "existing" else None, postconditions=("target_rig_ownership",), lowering="rig-v1")
     mode = spec.motion.mode
     motion_feature, motion_operation = {
         "existing": ("status", "system.status"),
-        "retarget": ("retargeting", "generation.retargeting" if spec.motion.route == "native" else "motion.retarget"),
+        "retarget": (("retargeting", "generation.retargeting") if spec.motion.route == "native" else
+                     ("rotation_keys", "animation.rotation_keys_set") if spec.motion.host_channel == "rotation" else
+                     ("position_keys", "animation.position_keys_set")),
         "keyposes": ("position_keys", "animation.position_keys_set"),
         "native_root_motion": ("root_motion", "generation.root_motion"),
         "native_inbetweening": ("inbetweening", "generation.inbetweening"),
         "external_motion_asset": ("import_fbx", "io.import_fbx"),
+        "native_unbaking": ("unbaking", "generation.unbaking"),
     }[mode]
+    if mode == "retarget" and spec.motion.route == "host":
+        add("retarget_capture", "transform_get", "motion.capture", "read", postconditions=("complete_retarget_target_capture",))
+        add("host_retarget", "motion_retarget", "motion.retarget.solve", "host_compute",
+            spec.motion.model_dump(mode="json"), postconditions=("verified_controller_candidate",), lowering="host-retarget-v1")
+    channels = (spec.motion.host_channel,) if mode == "retarget" and spec.motion.route == "host" else ("position",) if mode == "keyposes" else ("position", "rotation")
     add("motion", motion_feature, motion_operation, "scene_mutation", spec.motion.model_dump(mode="json"),
-        ("position", "rotation"), "existing_motion_preserved" if mode == "existing" else None,
-        postconditions=("target_motion_readback", "non_target_unchanged"))
+        channels, "existing_motion_preserved" if mode == "existing" else None,
+        postconditions=("target_motion_readback", "non_target_unchanged"), lowering="motion-v1")
     add("source_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("evaluation", "interpolation_refresh", "animation.interpolation_refresh", "evaluation", channels=("evaluation",),
         postconditions=("evaluation_settled",))
@@ -106,15 +120,17 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
         add("correction", "rotation_keys" if rotations else "position_keys",
             "animation.rotation_keys_set" if rotations else "animation.position_keys_set", "scene_mutation",
             {"cleanup_index": index, "space": "local" if rotations else "global"}, ("rotation",) if rotations else ("position",),
-            postconditions=("exact_driver_readback", "successor_binding"), objects=cleanup.object_ids)
+            postconditions=("exact_driver_readback", "successor_binding"), objects=cleanup.object_ids, lowering="solver-candidate-v1")
         add("actual_readback", "transform_get", "motion.capture", "read", {"cleanup_index": index},
             postconditions=("complete_actual_capture",))
+        add("checkpoint", "snapshot", "safety.checkpoint", "scene_mutation", {"after_cleanup_index": index}, ("scene", "file"),
+            postconditions=("durable_successor_checkpoint",), lowering="checkpoint-v1", owned="run_workspace")
     add("quality", "motion_quality", "motion.quality", "host_compute", postconditions=("actual_required_metrics_pass",))
-    add("checkpoint", "snapshot", "safety.checkpoint", "scene_mutation", channels=("scene",),
-        postconditions=("durable_successor_checkpoint",))
+    add("checkpoint", "snapshot", "safety.checkpoint", "scene_mutation", channels=("scene", "file"),
+        postconditions=("durable_successor_checkpoint",), lowering="checkpoint-v1", owned="run_workspace")
     if spec.export is not None:
         add("export_stage", "export_fbx", "io.export_fbx", "file_stage", spec.export.model_dump(mode="json"),
-            ("file",), postconditions=("target_export_scope", "native_export_terminal"))
+            ("file",), postconditions=("target_export_scope", "native_export_terminal"), lowering="export-v1", owned="export_stage")
         add("export_validate", "export_validation", "export.validate", "host_compute",
             postconditions=("sealed_structure_pass", "target_roundtrip_pass"))
         add("publish", "publish", "export.publish", "publish", {"destination": spec.export.destination},
@@ -145,9 +161,11 @@ def input_preflight(spec: RecipeSpec) -> list[dict]:
     # The entire requested interval must fit capture accounting. No shortened
     # clip or missing mandatory channel is silently substituted.
     n = spec.clip.last_frame - spec.clip.first_frame + 1
-    estimated = n * len(spec.character.object_ids) * 2048
-    if any(item.kind == "foot_contacts" for item in spec.cleanup):
-        estimated = max(estimated, n * n * 128)
+    retained = n * len(spec.character.object_ids) * 2048
+    # Before authenticated key-layout capture, use the conservative own-grid
+    # maximum key count. The sparse estimate never allocates a dense n*n matrix.
+    estimate = estimate_motion_resources(n, {key: n for key in spec.character.object_ids}, retained_capture_bytes=retained)
+    estimated = estimate["estimated_peak_bytes"]
     if estimated > spec.budgets.memory_bytes:
         reasons.append({"code": "RESOURCE_BUDGET_EXCEEDED", "resource": "capture_memory_bytes", "required": estimated})
     return reasons

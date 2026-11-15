@@ -10,6 +10,9 @@ from typing import Any
 from .models import SourceBinding
 from .recipe_models import BudgetUsage, RecipeRunRecord, ScopedAuthorization, StepPermit, WorkflowPlan, digest
 from .recipe_store import RecipeConflict, RecipeRunStore
+from .recipe_store import file_sha256
+from .stage_contracts import StageEffect
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,7 @@ def validate_step_authorization(
     store: RecipeRunStore, grant: ScopedAuthorization, plan: WorkflowPlan,
     run: RecipeRunRecord, step: StepPermit, *, source: SourceBinding | None,
     arguments: dict[str, Any], measured_effect: dict[str, float] | None = None,
+    stage_effect: StageEffect | None = None,
 ) -> None:
     store.verify_grant(grant, plan)
     if run.plan_digest != plan.plan_digest or run.authorization_id != grant.authorization_id:
@@ -56,7 +60,49 @@ def validate_step_authorization(
     record = next(item for item in run.steps if item.step_id == step.step_id)
     if record.calls_used >= step.max_calls:
         raise RecipeConflict("Step call budget exhausted")
-    if step.effect in {"evaluation", "scene_mutation", "file_stage"}:
+    if stage_effect is not None:
+        if (stage_effect.step_id != step.step_id or stage_effect.declaration_digest != step.fixed_parameters_digest
+                or stage_effect.lowering_rule_id != step.lowering_rule_id
+                or stage_effect.lowering_rule_digest != step.lowering_rule_digest
+                or stage_effect.operation_name != step.operation_name or stage_effect.feature_id != step.feature_id
+                or stage_effect.effect_bounds_digest != digest(step.max_effect_from_baseline)
+                or stage_effect.arguments_digest != digest(arguments) or stage_effect.source_binding != source):
+            raise RecipeConflict("STAGE_EFFECT_SCOPE_MISMATCH")
+        target_ids = set(step.target.object_ids)
+        if step.target.derived_ref is not None:
+            mapping = next((item for item in run.derived_targets if item.reference_digest == digest(step.target.derived_ref)), None)
+            producer = step.target.derived_ref.producer_step_id == step.step_id
+            before_producer = step.stage in {"initial_checkpoint"} and mapping is None
+            if mapping is None and not (producer or before_producer):
+                raise RecipeConflict("DERIVED_TARGET_UNRESOLVED")
+            if mapping is not None:
+                if stage_effect.derived_mapping_digest != digest(mapping):
+                    raise RecipeConflict("DERIVED_TARGET_SCOPE_MISMATCH")
+                target_ids = {mapping.role_ids[key] for key in step.target.object_ids} if step.target.object_ids else set(mapping.object_ids)
+        if not set(stage_effect.target_object_ids) <= target_ids:
+            raise RecipeConflict("LOWERED_TARGET_ESCAPES_DECLARATION")
+        for manifest in stage_effect.input_files:
+            sha, length = file_sha256(Path(manifest.path))
+            if sha != manifest.sha256 or length != manifest.length:
+                raise RecipeConflict("LOWERED_INPUT_BYTES_CHANGED")
+            if (step.stage != "initial_checkpoint" and (source is None
+                    or manifest.model_dump(mode="json") not in source.scope.get("input_files", []))):
+                raise RecipeConflict("INPUT_MANIFEST_UNATTESTED")
+        for output in stage_effect.output_paths:
+            path = Path(output).resolve()
+            policy = step.max_effect_from_baseline.owned_output_policy
+            if policy == "run_workspace":
+                root = store.run_dir(run.run_id).resolve()
+                if not path.is_relative_to(root) or path == root:
+                    raise RecipeConflict("LOWERED_OUTPUT_ESCAPES_WORKSPACE")
+            elif policy == "export_stage":
+                destination = Path(plan.spec.export.destination).resolve()
+                if (path.parent.parent != destination.parent or not path.parent.name.startswith(f".cascadeur-export-{run.run_id}-{step.step_id}-")
+                        or path.name not in {"raw.fbx", "sealed.fbx"}):
+                    raise RecipeConflict("LOWERED_OUTPUT_ESCAPES_EXPORT_STAGE")
+            elif output not in step.max_effect_from_baseline.output_paths:
+                raise RecipeConflict("LOWERED_OUTPUT_NOT_AUTHORIZED")
+    if step.effect in {"evaluation", "scene_mutation", "file_stage"} and step.stage != "initial_checkpoint":
         if source is None or not source.complete:
             raise RecipeConflict("BINDING_UNAVAILABLE: a complete runtime-issued source binding is required")
         expected_lineage = step.target.lineage_id
@@ -64,13 +110,24 @@ def validate_step_authorization(
             raise RecipeConflict("Target document lineage differs from the authorized plan")
     writes = arguments.get("writes", [])
     if writes:
-        if set(arguments) - {"writes", "space"} or arguments.get("space") != step.fixed_parameters.get("space"):
+        creation = step.stage == "motion" and plan.spec.motion.mode == "keyposes"
+        if creation:
+            expected_writes = [item.model_dump(mode="json", exclude_none=True) for item in plan.spec.motion.keyposes]
+            if plan.spec.character.derived_target is not None:
+                mapping = next(item for item in run.derived_targets if item.reference_digest == digest(plan.spec.character.derived_target))
+                expected_writes = [{**item, "id": mapping.role_ids[item["id"]]} for item in expected_writes]
+            if arguments != {"writes": expected_writes, "space": "global"}:
+                raise RecipeConflict("Keypose payload differs from the exact creation declaration")
+        host_retarget = step.stage == "motion" and plan.spec.motion.mode == "retarget" and plan.spec.motion.route == "host"
+        expected_space = "global" if creation else plan.spec.motion.host_space if host_retarget else step.fixed_parameters.get("space")
+        if set(arguments) - {"writes", "space"} or arguments.get("space") != expected_space:
             raise RecipeConflict("Write coordinate space or arguments differ from the exact permit")
         if not isinstance(writes, list) or len(writes) > step.max_effect_from_baseline.maximum_written_keys:
             raise RecipeConflict("Write payload exceeds the approved finite budget")
         seen = set()
         for write in writes:
-            if not isinstance(write, dict) or write.get("id") not in step.target.object_ids:
+            allowed_ids = set(step.target.object_ids) if stage_effect is None else set(stage_effect.target_object_ids)
+            if not isinstance(write, dict) or write.get("id") not in allowed_ids:
                 raise RecipeConflict("Write escapes exact target objects")
             frame = write.get("frame")
             if type(frame) is not int or not any(first <= frame <= last for first, last in step.frame_ranges):
@@ -101,21 +158,23 @@ def validate_step_authorization(
                 if key in seen:
                     raise RecipeConflict("Duplicate frame/object/channel write")
                 seen.add(key)
-        if measured_effect is None:
+        if measured_effect is None and not creation:
             raise RecipeConflict("Measured cumulative effect from original baseline is required")
         for metric, cap in {
             "position_m": step.max_effect_from_baseline.maximum_position_m,
             "rotation_rad": step.max_effect_from_baseline.maximum_rotation_rad,
             "added_keys": step.max_effect_from_baseline.maximum_added_keys,
         }.items():
+            if creation:
+                continue
             value = measured_effect.get(metric)
             if value is None or isinstance(value, bool) or not math.isfinite(value) or value < 0 or value > cap:
                 raise RecipeConflict(f"CORRECTION_ENVELOPE_EXCEEDED: {metric}")
     else:
         # Concrete non-solver operations are fully fixed at plan time.
-        if digest(arguments) != step.fixed_parameters_digest:
+        if stage_effect is None and digest(arguments) != step.fixed_parameters_digest:
             raise RecipeConflict("Operation arguments differ from the approved exact parameters")
     path = arguments.get("path") or arguments.get("destination")
     input_path = step.stage == "input" and path == step.fixed_parameters.get("path")
-    if path is not None and not input_path and path not in step.max_effect_from_baseline.output_paths:
+    if path is not None and not input_path and path not in step.max_effect_from_baseline.output_paths and (stage_effect is None or path not in stage_effect.output_paths):
         raise RecipeConflict("Output path is not part of the exact approved scope")

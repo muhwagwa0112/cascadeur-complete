@@ -33,6 +33,7 @@ dedicated adapter, exact postcondition, and version-matched live evidence exist.
 ## Support status
 
 - Exact application baseline: Cascadeur `2026.1.3.0.15619`
+- Additional finite adapter: installed build `2026.2.3.0.16863`, explicitly qualified per running process as described below
 - Host runtime: bundled Python 3.12 on Windows x64
 - Primary client: Codex stdio registration
 - License/dependency/UI gates are reported as gates, not successful execution
@@ -42,6 +43,34 @@ See [the support matrix](docs/SUPPORT_MATRIX.md) for the evidence rules and
 limitations, and [the support status](docs/SUPPORT_STATUS.md) for the per-feature
 result of the latest live validation run. The generated feature registry remains the runtime source of
 truth; neither tool count nor discovered Python symbols imply support.
+
+### Installed 2026.2 native subset
+
+On `2026.2.3.0.16863`, run the installed command
+`Cascadeur Complete.Qualify native adapter` explicitly. It creates disposable
+scenes and new checkpoint files, observes SDK callbacks, save completion and clone
+equivalence, then restores the previous tab. Qualification is local to the current
+runtime epoch and loaded bridge fingerprint; changing bridge bytes requires a
+clean application restart and qualification again.
+
+This adapter accepts exactly one independent object with `Basic`, `Node3d` and
+`Transform` behaviours, one visible unlocked layer, one existing key at frame 0,
+at most 256 frames and no cycles. It supports local position changes at that key,
+initial cloning from an already saved matching source, and successor checkpoints.
+Initial bootstrap is authorized through the recipe's exact signed grant; ordinary
+preparation requires an issued source and an owned checkpoint. Qualification does
+not authorize arbitrary scene writes or make a full humanoid recipe executable.
+
+The installed app was directly observed cloning a disposable source, committing
+position `[3.25, -1.5, 0.75]`, reading it back, saving a successor checkpoint and
+returning the original receipt on duplicate commit. The source file hash remained
+unchanged. This observation does not expand the pinned 2026.1 product inventory.
+
+`inspect_motion_inputs` reads native stable IDs, channels, layer/key metadata and
+available rig metadata into an authenticated draft. `resolve_motion_inputs`
+rechecks that observation before resolving semantic overrides. Missing physical
+FPS, units, basis, rest data or ownership remains a blocker; object names and
+caller-provided evidence strings cannot establish those facts.
 
 ## Mocap cleanup
 
@@ -80,15 +109,21 @@ separate. `ok=true` requires a completed run with passing actual quality and, wh
 requested, a validated and published export. An unknown outcome remains blocked;
 cancellation preserves both the intent and any already observed native result.
 
-**Current runtime limit:** this checkout does not install a verified no-yield
-native guard, authored dependency/identity reader, checkpoint adapter, or native
-export settings/completion adapter for the pinned Cascadeur SDK. Preflight reports
-these missing capabilities and blocks live recipes. Host math and durable
-orchestration do not establish live Cascadeur or FBX delivery support. Export
-utilities independently stage, seal, inspect, import-validate, and publish bytes;
-native export remains gated until the matching adapters are verified.
+Recipe declarations now lower to a persisted `StageEffect` containing both the
+approved declaration digest and exact native argument digest. An initial signed
+bootstrap grant protects a new working clone; later checkpoints each have their
+own request and terminal receipt. Imported targets use exact producer receipts
+and role paths, then retain an immutable concrete mapping. Resume reconciles the
+original request and schedules remaining observation work without replaying it.
 
-See [the r3 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
+**Current runtime limit:** native capabilities are build- and scene-specific.
+The narrow independent-transform adapter does not establish humanoid rig,
+controller, mesh, retarget, native export settings/completion, or full recipe
+support. Preflight lists missing observed adapters. Export preparation, sealing,
+consumer validation and journaled publication are connected, but native export
+remains gated until its actual settings, target closure and completion are observed.
+
+See [the r4 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
 the limits of checks performed, and the next implementation steps.
 
 See [the cleanup workflow](docs/MOCAP_CLEANUP_WORKFLOW.md) for intent and evidence

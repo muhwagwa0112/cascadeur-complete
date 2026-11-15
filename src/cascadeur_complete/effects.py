@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 READ_ONLY_OPERATIONS = frozenset({
+    "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
+    "system.observe_motion_inputs", "system.observe_key_layout",
     "system.status", "system.logs", "system.view_mode_get", "system.tools", "system.introspect",
     "scene.summary", "scene.objects", "scene.list", "scene.validate", "selection.get", "selection.filter",
     "object.hierarchy", "object.properties", "object.behaviors", "timeline.get", "timeline.range",
@@ -26,7 +28,7 @@ def classify_effect(operation_name: str, normalized_arguments: dict | None = Non
         return "scene"
     if operation_name in READ_ONLY_OPERATIONS:
         return "none"
-    if operation_name.startswith("io.export_") or operation_name in {"scene.save", "safety.checkpoint"}:
+    if operation_name.startswith("io.export_") or operation_name == "scene.save":
         return "file"
     if operation_name.startswith("io.import_") or operation_name.startswith("safety."):
         return "mixed"

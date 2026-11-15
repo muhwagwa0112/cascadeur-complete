@@ -120,21 +120,30 @@ def publish_verified(artifact: ArtifactRef, validation_bundle: ValidationBundle,
     artifact = ArtifactRef.model_validate(artifact)
     validation_bundle = ValidationBundle.model_validate(validation_bundle)
     permit = PublishPermit.model_validate(permit)
-    destination = _validate_permit(artifact, validation_bundle, permit)
     journal = Path(journal_directory) if journal_directory else Path(artifact.path).parent
     journal = journal.resolve()
     journal.mkdir(parents=True, exist_ok=True)
     key = canonical_digest({"run_id": permit.run_id, "step_id": permit.step_id,
                             "authorization_digest": permit.authorization_digest})[:32]
     intent_path = journal / f"publish-{key}.intent.json"
-    if intent_path.exists():
+    def reconcile_existing():
+        if intent_path.stat().st_size > 65536:
+            raise ExportPublicationError('PUBLISH_INTENT_INVALID', 'Publish intent exceeds budget')
+        retained = json.loads(intent_path.read_text(encoding='utf-8'))
+        if (retained.get('validation_digest') != canonical_digest(validation_bundle)
+                or retained.get('artifact_sha256') != artifact.sha256
+                or retained.get('artifact_path') != artifact.path or retained.get('artifact_bytes') != artifact.bytes):
+            raise ExportPublicationError('PUBLISH_INTENT_CONFLICT', 'Reconciliation requires the same sealed artifact and validation bundle')
         return reconcile_publish(intent_path, expected_permit=permit)
+    if intent_path.exists():
+        return reconcile_existing()
+    destination = _validate_permit(artifact, validation_bundle, permit)
     claim = journal / f"publish-{key}.claim"
     try:
         descriptor = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
         if intent_path.exists():
-            return reconcile_publish(intent_path, expected_permit=permit)
+            return reconcile_existing()
         return {"status": "outcome_unknown", "reason": "publish_owner_unresolved", "intent_path": str(intent_path)}
     os.close(descriptor)
     temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.publish"

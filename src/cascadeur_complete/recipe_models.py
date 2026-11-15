@@ -17,6 +17,7 @@ from .export_models import ExportProfile
 from .models import SceneBinding, SourceBinding
 from .motion_context import IntentConstraints
 from .motion_quality import QualityPolicy
+from .stage_contracts import BootstrapGrant, CheckpointObservation, DerivedTargetMapping, DerivedTargetRef, StageEffect
 
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Identifier = Annotated[str, Field(min_length=1, max_length=256, pattern=r"^[^\x00-\x1f*?]+$")]
@@ -82,19 +83,27 @@ class InputSpec(RecipeModel):
 
 
 class CharacterSpec(RecipeModel):
-    character_id: Identifier
-    root_id: Identifier
-    object_ids: tuple[Identifier, ...] = Field(min_length=1)
+    character_id: Identifier | None = None
+    root_id: Identifier | None = None
+    object_ids: tuple[Identifier, ...] = ()
     layer_ids: tuple[Identifier, ...] = ()
-    role_ids: dict[str, Identifier]
-    rig_profile_digest: Sha256
-    rig_profile: dict[str, JsonValue]
+    role_ids: dict[str, Identifier] = Field(default_factory=dict)
+    rig_profile_digest: Sha256 | None = None
+    rig_profile: dict[str, JsonValue] = Field(default_factory=dict)
     required_mesh_ids: tuple[Identifier, ...] = ()
     optional_mesh_ids: tuple[Identifier, ...] = ()
     source_character_id: Identifier | None = None
+    derived_target: DerivedTargetRef | None = None
 
     @model_validator(mode="after")
     def unique_scope(self):
+        if self.derived_target is not None:
+            if (self.character_id is not None or self.root_id is not None or self.object_ids or self.layer_ids
+                    or self.role_ids or self.rig_profile or self.rig_profile_digest is not None):
+                raise ValueError("Derived targets cannot contain invented concrete IDs/profile")
+            return self
+        if self.character_id is None or self.root_id is None or not self.object_ids:
+            raise ValueError("Existing targets require exact character/root/object identities")
         if len(self.object_ids) != len(set(self.object_ids)):
             raise ValueError("Duplicate target objects")
         if self.root_id not in self.object_ids or not set(self.role_ids.values()) <= set(self.object_ids):
@@ -154,12 +163,15 @@ class PoseWrite(RecipeModel):
 
 
 class MotionStageSpec(RecipeModel):
-    mode: Literal["existing", "retarget", "keyposes", "native_root_motion", "native_inbetweening", "external_motion_asset"] = "existing"
+    mode: Literal["existing", "retarget", "keyposes", "native_root_motion", "native_inbetweening", "external_motion_asset", "native_unbaking"] = "existing"
     route: Literal["native", "host"] | None = None
     source: ArtifactRef | None = None
     mapping: dict[str, JsonValue] = Field(default_factory=dict)
     keyposes: tuple[PoseWrite, ...] = ()
     settings: dict[str, JsonValue] = Field(default_factory=dict)
+    unbaking_step: Literal["prepare_keys_by_fulcrums", "adjust_keys_and_interpolation", "adjust_autoposing_lock_state"] | None = None
+    host_channel: Literal["position", "rotation"] = "position"
+    host_space: Literal["local", "global"] = "global"
 
     @model_validator(mode="after")
     def required_mode_inputs(self):
@@ -171,6 +183,10 @@ class MotionStageSpec(RecipeModel):
             raise ValueError("keyposes mode requires explicit poses")
         if self.mode == "external_motion_asset" and self.source is None:
             raise ValueError("external_motion_asset requires an immutable input artifact")
+        if self.mode == "native_unbaking" and self.unbaking_step is None:
+            raise ValueError("native_unbaking requires one of the three registered steps")
+        if self.mode != "native_unbaking" and self.unbaking_step is not None:
+            raise ValueError("unbaking_step only applies to native_unbaking")
         return self
 
 
@@ -246,7 +262,7 @@ class RecipeSpec(RecipeModel):
 
     @model_validator(mode="after")
     def validate_permissions(self):
-        scope = set(self.character.object_ids)
+        scope = set(self.character.object_ids) if self.character.derived_target is None else set(self.character.derived_target.role_paths)
         if tuple(self.intent.editable_frames) != (self.clip.first_frame, self.clip.last_frame):
             raise ValueError("Clip and editable intent range must match")
         for cleanup in self.cleanup:
@@ -269,10 +285,11 @@ class RecipeSpec(RecipeModel):
 
 
 class ExactTarget(RecipeModel):
-    character_id: Identifier
+    character_id: Identifier | None
     object_ids: tuple[Identifier, ...]
     layer_ids: tuple[Identifier, ...] = ()
     lineage_id: Identifier | None = None
+    derived_ref: DerivedTargetRef | None = None
 
 
 class EffectBounds(RecipeModel):
@@ -281,6 +298,7 @@ class EffectBounds(RecipeModel):
     maximum_added_keys: NonnegativeInt = 0
     maximum_written_keys: PositiveInt = 60000
     output_paths: tuple[str, ...] = ()
+    owned_output_policy: Literal["none", "run_workspace", "export_stage"] = "none"
 
 
 class StepPermit(RecipeModel):
@@ -301,11 +319,19 @@ class StepPermit(RecipeModel):
     prerequisite_step_ids: tuple[Identifier, ...] = ()
     required_postconditions: tuple[Identifier, ...] = ()
     not_required_reason: str | None = None
+    lowering_rule_id: str = "literal-v1"
+    lowering_rule_digest: Sha256 | None = None
 
     @model_validator(mode="after")
     def parameters_match(self):
         if digest(self.fixed_parameters) != self.fixed_parameters_digest:
             raise ValueError("Step parameters digest mismatch")
+        rule_digest = digest({"rule_id": self.lowering_rule_id, "declaration_digest": self.fixed_parameters_digest,
+                              "operation_name": self.operation_name})
+        if self.lowering_rule_digest is None:
+            object.__setattr__(self, "lowering_rule_digest", rule_digest)
+        elif self.lowering_rule_digest != rule_digest:
+            raise ValueError("Lowering rule digest mismatch")
         return self
 
 
@@ -376,6 +402,10 @@ class StepRecord(RecipeModel):
     calls_used: NonnegativeInt = 0
     error: dict[str, JsonValue] | None = None
     result: dict[str, JsonValue] | None = None
+    stage_effect: StageEffect | None = None
+    bootstrap_grant: BootstrapGrant | None = None
+    checkpoint_observation: CheckpointObservation | None = None
+    stage_data: dict[str, JsonValue] | None = None
 
 
 class RecipeRunRecord(RecipeModel):
@@ -396,6 +426,7 @@ class RecipeRunRecord(RecipeModel):
     deadline: float
     current_step_id: str | None = None
     current_binding: SourceBinding | None = None
+    derived_targets: tuple[DerivedTargetMapping, ...] = ()
     budgets_used: BudgetUsage = Field(default_factory=BudgetUsage)
     steps: tuple[StepRecord, ...]
     artifacts: tuple[ArtifactRef, ...] = ()

@@ -84,6 +84,9 @@ def test_global_contact_tracks_a_moving_support_and_keeps_exact_lengths():
     contact=ContactSegment(role="Left.ankle",support_id="floor",first_frame=0,last_frame=3,mode="planted",provenance="explicit")
     intent=IntentConstraints(editable_frames=(0,3),contacts=(contact,))
     support=SupportTrack("floor",origin,np.tile([1,0,0,0],(n,1)),{"kind":"plane","normal_local":[0,1,0]})
+    blocked=solve_contacts_v2(capture,rig,{"floor":support},intent.contacts,intent,
+                              {"position_correction_m":.05,"max_variables":1})
+    assert blocked.reason_codes==["RESOURCE_BUDGET_EXCEEDED"]
     result=solve_contacts_v2(capture,rig,{"floor":support},intent.contacts,intent,{"position_correction_m":.05})
     assert result.status=="candidate",result.as_dict()
     goal=result.values["position_m"]
@@ -112,3 +115,93 @@ def test_transport_split_keeps_one_owner_and_preserves_the_global_digest():
     assert [w for chunk in chunks for w in chunk["writes"]]==writes
     assert len({chunk["candidate_digest"] for chunk in chunks})==1
     assert [chunk["chunk_index"] for chunk in chunks]==list(range(len(chunks)))
+
+
+def test_declared_interpolation_is_not_native_evidence_and_budget_precedes_allocation(monkeypatch):
+    from cascadeur_complete.capture import estimate_motion_resources,enforce_motion_budget
+    from cascadeur_complete import motion_solvers
+    capture=batch({"a":np.zeros((3,3))},3)
+    rig=RigProfile("p","c",{"a":"a"},frozenset(("a",)))
+    model=build_key_model(capture,rig,interpolation_capabilities={"a":{"frames":[0,2],"mode":"LINEAR"}})
+    assert model.capability=="declared_only"
+    with pytest.raises(MotionInputError,match="INTERPOLATION_MODEL_UNVERIFIED"):
+        build_key_model(capture,rig,key_layout={"build_fingerprint":"b","evaluator_fingerprint":"e",
+            "source_fingerprint":"s","capture_digest":"wrong","evidence_ref":"ref","drivers":[]})
+    monkeypatch.setattr(motion_solvers,"temporal_operators",lambda _:pytest.fail("allocation occurred before the budget guard"))
+    result=fit_keys({"a":np.zeros((3,3))},capture,model,{}, {"max_variables":1})
+    assert result.reason_codes==["RESOURCE_BUDGET_EXCEEDED"]
+    estimate=estimate_motion_resources(100000,{"a":20})
+    assert estimate["estimated_peak_bytes"]<256*1024*1024
+    with pytest.raises(MotionInputError,match="RESOURCE_BUDGET_UNVERIFIED"):
+        enforce_motion_budget(estimate,{"require_factorization_bound":True})
+
+
+def test_motion_draft_reports_missing_orientation_and_rejects_stale_native_inputs():
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from cascadeur_complete.motion_profile_builder import MotionInputResolver
+    observed={"values":{"context":context(3).as_dict(),"objects":[{"id":"p","character_id":"c"}],
+                        "role_candidates":{"root":["p"]},"root_rotation_id":None},
+              "provenance":{key:"native" for key in ("context","objects","role_candidates","root_rotation_id")},
+              "source_fingerprint":"s","rig_structure_fingerprint":"r","evidence_ref":"immutable-record"}
+    resolver=MotionInputResolver(lambda _:deepcopy(observed),
+        lambda _,digest:SimpleNamespace(ok=True,result={"observation_digest":digest}))
+    draft=resolver.inspect_motion_inputs("c",(0,2))
+    assert "root_rotation_id" in draft.missing_fields
+    draft.values["root_rotation_id"]="injected"
+    with pytest.raises(MotionInputError,match="MISSING_MOTION_INPUTS"):
+        resolver.resolve_motion_inputs(draft.draft_ref,{}, {"editable_frames":[0,2]})
+    observed["source_fingerprint"]="successor"
+    with pytest.raises(MotionInputError,match="STALE_MOTION_INPUT_DRAFT"):
+        resolver.resolve_motion_inputs(draft.draft_ref,{}, {"editable_frames":[0,2]})
+    observed["values"]["objects"].append({"id":"p","character_id":"c"})
+    with pytest.raises(MotionInputError,match="duplicate"):
+        resolver.inspect_motion_inputs("c",(0,2))
+
+
+def test_actual_mesh_metric_requires_authenticated_evaluated_geometry():
+    from types import SimpleNamespace
+    from cascadeur_complete.capture import canonical_digest
+    from cascadeur_complete.motion_geometry import ObservedSurfaceTrack
+    from cascadeur_complete.motion_quality import QualityPolicy,actual_mesh_metrics
+    vertices=np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1.]])
+    faces=np.array([[0,2,1],[0,1,3],[0,3,2],[1,2,3]])
+    ctx=context(1)
+    tracks={"a":ObservedSurfaceTrack(vertices[None],faces,context=ctx),
+            "b":ObservedSurfaceTrack((vertices+3)[None],faces,context=ctx)}
+    manifest={"capture_kind":"target_actual","source_digest":"s","successor_digest":"t",
+              "completion_receipt_digest":"done","topology_digest":"topology","skin_digest":"skin",
+              "context_digest":canonical_digest(ctx.as_dict()),"frames":[0],"time_s":[0.],
+              "windows":{key:track.windows for key,track in tracks.items()},
+              "pairs":[["a","b"]],"space":"global","units":"metres"}
+    geometry={"manifest":manifest,"tracks":tracks}
+    policy=QualityPolicy(profile_id="p",profile_revision="r",required_metrics=("mesh_penetration_m","mesh_surface_intersection_count"),
+                         limits_si={"mesh_penetration_m":0,"mesh_surface_intersection_count":0})
+    with pytest.raises(MotionInputError,match="PROVENANCE_UNVERIFIED"):
+        actual_mesh_metrics(geometry,policy,verifier=None)
+    metrics=actual_mesh_metrics(geometry,policy,
+        verifier=lambda _,digest:SimpleNamespace(ok=True,result={"geometry_digest":digest}),required_mesh_ids=("a","b"))
+    assert metrics["mesh_penetration_m"]["max"]==0
+    assert metrics["mesh_surface_intersection_count"]["sample_count"]==1
+
+
+def test_host_retarget_observes_target_and_blocks_an_absent_controller_adapter():
+    from types import SimpleNamespace
+    from cascadeur_complete.cleanup_workflow import CleanupWorkflow
+    ctx=context(2)
+    observation={"target_rest":{"root":{"position_m":[0,0,0],"rotation_matrix":np.eye(3).tolist()}},
+        "target_parents":{"root":None},"axis_alignment":{"root":np.eye(3).tolist()},
+        "root_basis":np.eye(3).tolist(),"target_root_anchor_m":[0,0,0]}
+    requests=[]
+    service=SimpleNamespace(observe_retarget_inputs=lambda request:(requests.append(request) or SimpleNamespace(ok=True,result=observation)),
+        verify_retarget_inputs=lambda _,digest:SimpleNamespace(ok=True,result={"retarget_inputs_digest":digest}))
+    rig=RigProfile("p","c",{"root":"r"},frozenset(("r",)))
+    workflow=CleanupWorkflow(service,profile=rig,context=ctx,
+        intent=IntentConstraints(action="retarget",editable_frames=(0,1),root_policy="explicit_mapped_trajectory"))
+    source={"schema_version":1,"context":ctx.as_dict(),"provenance":{"source":"canonical imported observations"},
+        "source_local":{"root":{"position_m":np.zeros((2,3)).tolist(),"rotation_matrix":np.tile(np.eye(3),(2,1,1)).tolist()}},
+        "source_rest":{"root":{"position_m":[0,0,0],"rotation_matrix":np.eye(3).tolist()}},
+        "source_root_position_m":np.zeros((2,3)).tolist()}
+    result=workflow.plan_retarget(source,{"root":"root"},{"root_role":"root","scale":1,"target_channels":["position"]})
+    assert requests[0]["role_ids"]=={"root":"r"}
+    assert result["reason_codes"]==["RIG_ADAPTER_UNVERIFIED"]

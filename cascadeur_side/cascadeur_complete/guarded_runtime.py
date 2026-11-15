@@ -55,10 +55,17 @@ def register_adapter(operation_name, adapter):
     bytes. Unsupported native APIs must not be filled in with defaults.
     """
     proof = adapter.verification
+    evidence = getattr(adapter, "evidence_bytes", None)
+    executor = getattr(adapter, "execute", None)
     if (proof.get("runtime_fingerprint") != LOADED_FINGERPRINT
+            or _loaded_fingerprint() != LOADED_FINGERPRINT
             or proof.get("dispatch_semantics") != "synchronous_no_yield"
             or proof.get("identity_stable") is not True
-            or not proof.get("evidence_sha256")):
+            or not isinstance(evidence, bytes)
+            or hashlib.sha256(evidence).hexdigest() != proof.get("evidence_sha256")
+            or not callable(executor)
+            or operation_name not in proof.get("operations", ())
+            or proof.get("installed_build") != adapter.observed_build()):
         raise ValueError("RIG_ADAPTER_UNVERIFIED")
     _ADAPTERS[operation_name] = adapter
 
@@ -70,10 +77,15 @@ def capabilities():
 
 
 def capture_source(scene, scope, inputs_digest, sample_digest=None, selection_digest=None):
+    assert_loaded_package()
     operation = scope.get("operation_name")
     adapter = _ADAPTERS.get(operation)
     if adapter is None:
         raise ValueError("BINDING_UNAVAILABLE: no verified dependency reader for " + str(operation))
+    return _capture_with_adapter(scene, scope, inputs_digest, sample_digest, selection_digest, adapter)
+
+
+def _capture_with_adapter(scene, scope, inputs_digest, sample_digest, selection_digest, adapter):
     required = adapter.required_scope(scene, scope)
     if digest(required) != digest(scope):
         raise ValueError("INCOMPLETE_CAPTURE: requested scope differs from required dependency closure")
@@ -117,6 +129,25 @@ def begin_request(request):
     _LOCAL.write_phase = "not_started"
     _LOCAL.failure_kind = None
     _LOCAL.guard = None
+    _LOCAL.effects = []
+
+
+def assert_loaded_package():
+    if _loaded_fingerprint() != LOADED_FINGERPRINT:
+        raise ValueError("PROTOCOL_MISMATCH: package changed; clean runtime restart required")
+
+
+def observe_effect(operation_name, completion, *, scene_before, scene_after, detail=None):
+    if completion not in {"completed", "no_effect", "unknown"}:
+        raise ValueError("Invalid native completion observation")
+    item = {"operation_name": operation_name, "completion": completion,
+            "scene_before": scene_before, "scene_after": scene_after, "detail": detail or {}}
+    _LOCAL.effects = getattr(_LOCAL, "effects", []) + [item]
+    return item
+
+
+def effect_observations():
+    return list(getattr(_LOCAL, "effects", ()))
 
 
 def set_write_guard(guard):
@@ -129,7 +160,9 @@ def before_write(source_guard=None):
         if source_guard is not None:
             source_guard()
     except Exception:
-        _LOCAL.failure_kind = "guard_rejected_before_first_write"
+        _LOCAL.failure_kind = ("guard_rejected_before_first_write"
+            if getattr(_LOCAL, "write_phase", "not_started") == "not_started"
+            else "guard_rejected_after_partial_write")
         raise
     _LOCAL.write_phase = "started"
 

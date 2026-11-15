@@ -103,6 +103,8 @@ class CleanupWorkflow:
         inputs = {"context": self.context.as_dict(), "profile": scope["profile"],
                   "intent": self.intent.model_dump(mode="json"),"support_tracks":scope["support_tracks"]}
         scope["planning_parameters"]=getattr(self,"_planning_parameters",{})
+        if getattr(self,"_key_layout_digest",None):
+            scope["key_layout_digest"]=self._key_layout_digest
         bound_scope = (self.source_binding.get("scope", {}) if isinstance(self.source_binding, dict)
                        else getattr(self.source_binding, "scope", {}))
         if self.source_binding is None or bound_scope != scope:
@@ -292,6 +294,27 @@ class CleanupWorkflow:
         validate_samples(batch, required)
         return batch
 
+    def _observed_key_model(self,batch,goal,parameters):
+        from dataclasses import replace
+        from .motion_solvers import build_key_model
+        descriptor=parameters.pop("key_layout",None)
+        # Legacy declarations may describe a math experiment, but cannot
+        # certify native interpolation or enable a production write.
+        parameters.pop("interpolation_capabilities",None)
+        if descriptor is None:
+            reader=getattr(self.service,"observe_key_layout",None)
+            if not callable(reader):
+                raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native key-layout reader unavailable")
+            receipt=reader({"ids":sorted(goal),"space":batch.space,"channel":"position",
+                            "frames":batch.context.frames.tolist(),"capture_digest":canonical_digest(batch.as_dict())})
+            if not getattr(receipt,"ok",False):
+                raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native key-layout observation failed")
+            descriptor=receipt.result
+        model=build_key_model(batch,replace(self.profile,writable_ids=frozenset(goal)),
+            key_layout=descriptor,verifier=getattr(self.service,"verify_key_layout",None))
+        self._key_layout_digest=model.descriptor_digest
+        return model
+
     def plan_pass(self, kind, parameters=None):
         """Compute a whole-domain candidate, without preparing a token or changing a scene."""
         from scipy.spatial.transform import Rotation
@@ -311,16 +334,21 @@ class CleanupWorkflow:
             "wrist_soften":{"joint_ids","sigma_s"},
         }
         unknown=set(parameters)-allowed.get(kind,set())-{"object_ids","ttl"}
+        unknown.discard("key_layout")
         if unknown:
             raise CleanupError("INVALID_POLICY: unsupported parameters: "+", ".join(sorted(unknown)))
         limit_names={"position_correction_m","rotation_correction_rad","contact_gap_m","contact_drift_m","iterations",
-                     "collision_clearance_m","collision_residual_m","arm_radius_m","velocity_weight","acceleration_weight","fit_error_m","max_nonzeros"}
+                     "collision_clearance_m","collision_residual_m","arm_radius_m","velocity_weight","acceleration_weight","fit_error_m","max_nonzeros",
+                     "max_variables","max_memory_bytes","factorization_workspace_bytes","fit_iterations"}
         limits=parameters.get("limits",{})
         if not isinstance(limits,dict) or set(limits)-limit_names:
             raise CleanupError("INVALID_POLICY: unsupported solver limit names")
         if any(isinstance(value,bool) or not isinstance(value,(int,float)) or not np.isfinite(value) or value<0 for value in limits.values()):
             raise CleanupError("INVALID_POLICY: solver limits must be finite nonnegative numbers")
         self._planning_parameters=canonical_data(parameters)
+        self._key_layout_digest=None
+        fit_limits={**limits,"position_correction_m":min(limits.get("position_correction_m",float("inf")),
+                                                       self.intent.correction_envelope.get("position_m",0.))}
         requested = parameters.pop("object_ids", None)
         requested_writes = set(self.profile.writable_ids) if requested is None else set(requested)
         self._require_contract(kind, requested_writes)
@@ -338,14 +366,10 @@ class CleanupWorkflow:
             if solved.status != "candidate":
                 return solved.as_dict()
             goal = solved.values.get("position_m", solved.values)
-            capabilities = parameters.pop("interpolation_capabilities", {})
-            if not capabilities:
-                return {"status": "unsupported", "reason_codes": ["INTERPOLATION_MODEL_UNVERIFIED"], "report": solved.report}
-            from dataclasses import replace
-            model = build_key_model(batch, replace(self.profile,writable_ids=frozenset(goal)), interpolation_capabilities=capabilities)
+            model = self._observed_key_model(batch,goal,parameters)
             locks = {self.profile.role_ids[role]: {frame:value for frame,value in values.items() if len(value)==3} for role, values in self.intent.key_pose_locks.items()
                      if role in self.profile.role_ids}
-            fitted = fit_keys(goal, batch, model, locks, {"position_correction_m":self.intent.correction_envelope.get("position_m",0.)})
+            fitted = fit_keys(goal, batch, model, locks, fit_limits)
             if fitted.status != "candidate":
                 return fitted.as_dict()
             writes = []
@@ -368,13 +392,9 @@ class CleanupWorkflow:
                 solved=wrist_accent_targets(batch,self.profile,self.intent,parameters)
             if solved.status!="candidate":
                 return solved.as_dict()
-            capabilities=parameters.pop("interpolation_capabilities",{})
-            if not capabilities:
-                return {"status":"unsupported","reason_codes":["INTERPOLATION_MODEL_UNVERIFIED"],"report":solved.report}
-            from dataclasses import replace
-            model=build_key_model(batch,replace(self.profile,writable_ids=frozenset(solved.values["position_m"])),interpolation_capabilities=capabilities)
+            model=self._observed_key_model(batch,solved.values["position_m"],parameters)
             locks={self.profile.role_ids[role]:{frame:value for frame,value in values.items() if len(value)==3} for role,values in self.intent.key_pose_locks.items() if role in self.profile.role_ids}
-            fitted=fit_keys(solved.values["position_m"],batch,model,locks,{"position_correction_m":self.intent.correction_envelope.get("position_m",0.)})
+            fitted=fit_keys(solved.values["position_m"],batch,model,locks,fit_limits)
             if fitted.status!="candidate":
                 return fitted.as_dict()
             writes=[]
@@ -456,6 +476,129 @@ class CleanupWorkflow:
         return {"status": "candidate", "feature_id": feature, "operation_name": operation,
                 "arguments": arguments, "source_binding": self._bind_source(operation, arguments),
                 "chunks": chunks, "report": report}
+
+    def plan_retarget(self,source_artifact,mapping,settings):
+        """Lower a canonical source artifact through observed target controllers.
+
+        This is host computation followed by the same existing-key writer as
+        cleanup. An import file is never dispatched as a native retarget op.
+        """
+        from .retargeting import retarget_pose,controller_targets
+        from .motion_solvers import fit_keys
+        self._require_contract("retarget")
+        self._key_layout_digest=None
+        if self.intent.action!="retarget" or self.intent.root_policy!="explicit_mapped_trajectory":
+            raise MotionInputError("MISSING_MOTION_INTENT","retarget requires explicit mapped-root intent")
+        fields={"schema_version","context","source_local","source_rest","source_root_position_m",
+                "source_leg_length_m","provenance"}
+        if (not isinstance(source_artifact,dict) or set(source_artifact)-fields
+                or type(source_artifact.get("schema_version")) is not int or source_artifact.get("schema_version")!=1
+                or not source_artifact.get("provenance")):
+            raise MotionInputError("RETARGET_SOURCE_UNVERIFIED","canonical source artifact/provenance is incomplete")
+        source_context=MotionContext.from_dict(source_artifact["context"])
+        if (not np.array_equal(source_context.time_s,self.context.time_s)
+                or not np.array_equal(source_context.frames,self.context.frames)):
+            raise MotionInputError("INCOMPLETE_CAPTURE","retarget source must use the exact target physical sample schedule")
+        allowed={"root_role","axis_alignment","root_basis","scale","target_leg_length_m","target_root_anchor_m",
+                 "required_roles","end_effector_constraints","fit_limits","target_channels"}
+        if set(settings)-allowed or not mapping or set(mapping)-set(self.profile.role_ids):
+            raise MotionInputError("RIG_MAPPING_AMBIGUOUS","retarget settings or target semantic mapping are unknown")
+        channels=tuple(settings.get("target_channels",("position",)))
+        if channels not in (("position",),("rotation",)):
+            raise MotionInputError("COUPLED_CHANNEL_WRITER_UNAVAILABLE","retarget must declare one target channel")
+        fit_limits=settings.get("fit_limits",{})
+        if (not isinstance(fit_limits,dict) or set(fit_limits)-{"position_correction_m","velocity_weight",
+                "acceleration_weight","fit_error_m","max_variables","max_nonzeros","max_memory_bytes",
+                "factorization_workspace_bytes","fit_iterations"}):
+            raise MotionInputError("INVALID_POLICY","unknown retarget key fitting limits")
+        n=len(self.context.frames)
+        for role,value in source_artifact["source_local"].items():
+            if np.asarray(value.get("position_m")).shape!=(n,3) or np.asarray(value.get("rotation_matrix")).shape!=(n,3,3):
+                raise MotionInputError("INCOMPLETE_CAPTURE",f"source local time coverage missing: {role}")
+        reader=getattr(self.service,"observe_retarget_inputs",None)
+        verifier=getattr(self.service,"verify_retarget_inputs",None)
+        if not callable(reader) or not callable(verifier):
+            return {"status":"unsupported","reason_codes":["RETARGET_TARGET_OBSERVATION_UNAVAILABLE"]}
+        receipt=reader({"profile_id":self.profile.profile_id,"role_ids":self.profile.role_ids,
+                        "context":self.context.as_dict(),"source_artifact_digest":canonical_digest(source_artifact)})
+        if not getattr(receipt,"ok",False) or not isinstance(receipt.result,dict):
+            return {"status":"unsupported","reason_codes":["RETARGET_TARGET_OBSERVATION_UNAVAILABLE"]}
+        observed=receipt.result;observed_digest=canonical_digest(observed)
+        proof=verifier(observed,observed_digest)
+        if not (getattr(proof,"ok",False) and isinstance(getattr(proof,"result",None),dict)
+                and proof.result.get("retarget_inputs_digest")==observed_digest):
+            return {"status":"unsupported","reason_codes":["RETARGET_TARGET_PROVENANCE_UNVERIFIED"]}
+        for key in ("target_rest","target_parents","axis_alignment","root_basis","target_root_anchor_m"):
+            if key not in observed:
+                return {"status":"unsupported","reason_codes":["RETARGET_TARGET_OBSERVATION_INCOMPLETE"],"report":{"missing":key}}
+        if ("target_leg_length_m" in settings
+                and settings["target_leg_length_m"]!=observed.get("target_leg_length_m")):
+            raise MotionInputError("RIG_ADAPTER_UNVERIFIED","declared target leg length differs from native observation")
+        solved=retarget_pose(source_artifact["source_local"],source_artifact["source_rest"],observed["target_rest"],
+            mapping,settings.get("axis_alignment",observed["axis_alignment"]),observed["target_parents"],
+            root_role=settings["root_role"],source_root_position_m=source_artifact["source_root_position_m"],
+            target_root_anchor_m=settings.get("target_root_anchor_m",observed["target_root_anchor_m"]),
+            root_basis=settings.get("root_basis",observed["root_basis"]),scale=settings.get("scale"),
+            source_leg_length_m=source_artifact.get("source_leg_length_m"),
+            target_leg_length_m=observed.get("target_leg_length_m"),required_roles=settings.get("required_roles",()),
+            end_effector_constraints=settings.get("end_effector_constraints",()))
+        if solved.status!="candidate":return solved.as_dict()
+        targets=controller_targets(solved,self.profile,getattr(self.service,"motion_controller_adapter",None),
+            planned_world=solved.values["world"],adapter_verifier=getattr(self.service,"verify_controller_targets",None))
+        if targets.status!="candidate":return targets.as_dict()
+        if set(targets.values)-{"position_m","rotation_wxyz","space"}:
+            raise MotionInputError("RIG_ADAPTER_UNVERIFIED","controller adapter returned an unsupported candidate schema")
+        positions=targets.values.get("position_m",{});rotations=targets.values.get("rotation_wxyz",{})
+        if bool(positions)==bool(rotations):
+            return {"status":"unsupported","reason_codes":["COUPLED_CHANNEL_WRITER_UNAVAILABLE"]}
+        if ("position" if positions else "rotation")!=channels[0]:
+            return {"status":"unsupported","reason_codes":["RETARGET_CONTROLLER_CHANNEL_MISMATCH"]}
+        space=targets.values.get("space","global")
+        ids=sorted(set(self.profile.role_ids.values())|self.profile.dependency_ids)
+        batch=self.capture_batch(ids,space=space,required_rotation_ids=tuple(rotations))
+        writes=[]
+        report={**solved.report,**targets.report,"target_observation_digest":observed_digest,
+                "source_artifact_digest":canonical_digest(source_artifact)}
+        self._planning_parameters={"retarget":canonical_data(settings),"mapping":dict(mapping),**report}
+        if positions:
+            model=self._observed_key_model(batch,positions,{})
+            limits={**fit_limits,"position_correction_m":min(fit_limits.get("position_correction_m",float("inf")),
+                                                            self.intent.correction_envelope.get("position_m",0.))}
+            locks={self.profile.role_ids[role]:{frame:value for frame,value in values.items() if len(value)==3}
+                   for role,values in self.intent.key_pose_locks.items()}
+            fitted=fit_keys(positions,batch,model,locks,limits)
+            if fitted.status!="candidate":return fitted.as_dict()
+            report.update(fitted.report)
+            for object_id,value in fitted.values.items():
+                for frame,position in zip(value["frames"],value["position_m"],strict=True):
+                    row=int(np.flatnonzero(self.context.frames==frame)[0])
+                    if np.linalg.norm(position-batch.position_m[object_id][row])>1e-9:
+                        writes.append({"id":object_id,"frame":frame,"position":self.context.positions_to_scene(position).tolist()})
+            feature,operation="position_keys","animation.position_keys_set"
+        else:
+            from scipy.spatial.transform import Rotation
+            keys=self.key_frames(rotations)
+            for object_id,value in rotations.items():
+                values=np.asarray(value,dtype=float)
+                if values.shape!=(n,4) or not np.isfinite(values).all():
+                    raise MotionInputError("INCOMPLETE_CAPTURE","controller rotation coverage is incomplete")
+                before=Rotation.from_quat(batch.rotation_wxyz[object_id][:,[1,2,3,0]])
+                after=Rotation.from_quat(values[:,[1,2,3,0]])
+                changed=np.flatnonzero((before.inv()*after).magnitude()>1e-9)
+                if any(int(self.context.frames[row]) not in keys[object_id] for row in changed):
+                    return {"status":"unsupported","reason_codes":["KEY_LAYOUT_INSUFFICIENT"]}
+                eulers=self._eulers_from_solver(values);expected=self._scene_quaternions(values)
+                for row in changed:
+                    writes.append({"id":object_id,"frame":int(self.context.frames[row]),
+                        "rotation_euler_xyz_radians":eulers[row].tolist(),"expected_quaternion_wxyz":expected[row].tolist()})
+            feature,operation="rotation_keys","animation.rotation_keys_set"
+        if not writes:return {"status":"no_change","reason_codes":[],"report":report}
+        validate_write_scope(writes,self.profile,self.intent)
+        self._validate_candidate_effect(writes,batch)
+        chunks=partition_writes(writes)
+        arguments={"writes":[write for chunk in chunks for write in chunk["writes"]],"space":space}
+        return {"status":"candidate","feature_id":feature,"operation_name":operation,"arguments":arguments,
+                "source_binding":self._bind_source(operation,arguments),"chunks":chunks,"report":report}
 
     def _validate_candidate_effect(self,writes,batch):
         from scipy.spatial.transform import Rotation

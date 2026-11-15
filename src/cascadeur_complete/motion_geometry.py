@@ -2,11 +2,47 @@
 from __future__ import annotations
 
 import heapq
+import hashlib
 from dataclasses import dataclass
 
 import numpy as np
 
 from .motion_context import MotionInputError
+
+
+class ObservedSurfaceTrack:
+    """Bounded in-memory evaluated geometry, normally decoded from a consumer.
+
+    Hashes cover exact canonical float64 metres and int64 topology bytes. They
+    identify observations; only the consumer/native verifier authenticates them.
+    """
+    def __init__(self,vertices_m,triangles,*,context,semantics="volume",orientation_observed=False,
+                 memory_budget_bytes=256*1024*1024):
+        vertices=np.asarray(vertices_m)
+        faces=np.asarray(triangles)
+        if (vertices.ndim!=3 or vertices.shape!=(len(context.frames),vertices.shape[1],3)
+                or faces.ndim!=2 or faces.shape[1]!=3 or faces.dtype.kind not in "iu"
+                or not np.isfinite(vertices).all()):
+            raise MotionInputError("INCOMPLETE_CAPTURE","evaluated geometry has invalid frame/vertex/topology coverage")
+        allocation=vertices.nbytes+faces.nbytes+vertices.size*8*2+faces.size*8
+        if allocation>memory_budget_bytes:
+            raise MotionInputError("RESOURCE_BUDGET_EXCEEDED","evaluated geometry conversion exceeds memory budget")
+        self._vertices=np.array(vertices,dtype="<f8",copy=True)
+        self._triangles=np.array(faces,dtype="<i8",copy=True)
+        self._vertices.flags.writeable=self._triangles.flags.writeable=False
+        self.context=context;self.frames=context.frames
+        self.semantics=semantics;self.orientation_observed=orientation_observed
+        def digest(array):
+            view=memoryview(array).cast("B");hasher=hashlib.sha256()
+            for start in range(0,len(view),1024*1024):hasher.update(view[start:start+1024*1024])
+            return hasher.hexdigest()
+        self.windows=[{"frames":list(map(int,self.frames)),"vertices_shape":list(self._vertices.shape),
+                       "canonical_vertices_sha256":digest(self._vertices),
+                       "triangles_shape":list(self._triangles.shape),"triangles_sha256":digest(self._triangles)}]
+
+    def __getitem__(self,row):
+        return TriangleSurface(self._vertices[row],self._triangles,semantics=self.semantics,
+                               orientation_observed=self.orientation_observed)
 
 
 class WindowedSurfaceTrack:

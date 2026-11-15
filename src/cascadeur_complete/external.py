@@ -119,12 +119,13 @@ def _run_target_process(arguments, directory, *, timeout, max_log_bytes, cancel)
 
 
 def validate_target_import(sealed_fbx: ArtifactRef, profile: ExportProfile, expected: ExportExpectation,
-                           timeout: float = 240, cancel=None, *, roundtrip_validator=None) -> ValidationReport:
+                           timeout: float = 240, cancel=None, *, roundtrip_validator=None,
+                           quality_context=None, provenance_key=None) -> ValidationReport:
     """Compare actual imported joint motion and require the common quality gate.
 
-    ``roundtrip_validator(capture, expected, profile)`` is an internal adapter to
-    motion_quality.validate_export_roundtrip with the original intent/supports/
-    policy. Without that context the artifact remains unverified.
+    The concrete quality context supplies immutable original intent/supports/
+    policy. Only internally minted subprocess provenance reaches the common
+    checker. The legacy callback argument never grants a strict grade.
     """
     def result(status, code, *, checks=(), capture=None):
         return ValidationReport(status=status, artifact_sha256=sealed_fbx.sha256,
@@ -133,6 +134,10 @@ def validate_target_import(sealed_fbx: ArtifactRef, profile: ExportProfile, expe
 
     if not np.isfinite(timeout) or timeout <= 0:
         raise ValueError("Target validation timeout must be finite and positive")
+    from .target_capture import RoundtripQualityContext
+    if (not isinstance(quality_context, RoundtripQualityContext)
+            or not isinstance(provenance_key, bytes) or len(provenance_key) < 32):
+        return result('unverified', 'ROUNDTRIP_QUALITY_CONTEXT_UNAVAILABLE')
     blender = find_blender()
     if blender is None:
         return result("unverified", "ROUNDTRIP_ADAPTER_UNAVAILABLE")
@@ -182,9 +187,11 @@ def validate_target_import(sealed_fbx: ArtifactRef, profile: ExportProfile, expe
         checks = _compare_target_capture(capture, expected, profile)
         if any(not item["ok"] for item in checks):
             return result("fail", "EXPORT_MOTION_QUALITY_FAILED", checks=tuple(checks), capture=capture)
-        if roundtrip_validator is None:
+        if quality_context is None or not isinstance(provenance_key, bytes) or len(provenance_key) < 32:
             return result("unverified", "ROUNDTRIP_QUALITY_CONTEXT_UNAVAILABLE", checks=tuple(checks), capture=capture)
-        quality = roundtrip_validator(capture, expected, profile)
+        from .target_capture import evaluate_target_capture
+        quality = evaluate_target_capture(capture, expected, profile, quality_context, directory=directory,
+                                          key=provenance_key, report_path=report_path, manifest=manifest)
         quality = quality.as_dict() if hasattr(quality, "as_dict") else quality
         # The common checker must actually measure every requested metric. A
         # caller cannot bypass it by returning a bare True or an empty pass.
@@ -199,7 +206,8 @@ def validate_target_import(sealed_fbx: ArtifactRef, profile: ExportProfile, expe
             status = "fail" if isinstance(quality, dict) and quality.get("status") == "fail" else "unverified"
             return result(status, "EXPORT_ROUNDTRIP_QUALITY_INCOMPLETE", checks=tuple(checks), capture=capture)
         checks.append({"id": "original_intent_roundtrip", "ok": True, "quality_report": quality,
-                       "capture_sha256": canonical_digest(capture), "source_capture_digest": expected.source_capture_digest})
+                       "capture_sha256": canonical_digest(capture), "source_capture_digest": expected.source_capture_digest,
+                       "capture_provenance": str(directory / 'capture-provenance.json')})
         return result("pass", None, checks=tuple(checks), capture=capture)
     except (OSError, ValueError, RuntimeError, TypeError, KeyError) as exc:
         return result("fail", "TARGET_VALIDATION_FAILED", checks=({"id": "target_validation", "ok": False,

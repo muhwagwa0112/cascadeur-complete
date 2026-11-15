@@ -1,0 +1,385 @@
+"""Installed-SDK adapter for a deliberately finite native transform domain.
+
+No humanoid/controller/physics/mesh coverage is implied. Qualification creates
+its own tab and exercises the same reader and executor used for real requests.
+Evidence bytes are produced by that observation, never supplied on the wire.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import sys
+import uuid
+from pathlib import Path
+
+import csc
+
+from . import guarded_runtime as guards
+
+SUPPORTED_BUILD = "2026.2.3.0.16863"
+_OBSERVATIONS = {}
+_WORKSPACES = {}
+_INITIALIZED = False
+_ERROR = None
+
+
+def installed_build():
+    # Read the PE resource belonging to this running interpreter, not an
+    # installation discovered elsewhere on PATH.
+    import ctypes
+    from ctypes import wintypes
+    path = ctypes.create_unicode_buffer(32768)
+    ctypes.windll.kernel32.GetModuleFileNameW(None, path, len(path))
+    size = ctypes.windll.version.GetFileVersionInfoSizeW(path.value, None)
+    data = ctypes.create_string_buffer(size)
+    if not size or not ctypes.windll.version.GetFileVersionInfoW(path.value, 0, size, data):
+        raise ValueError("Installed executable version unavailable")
+    pointer, length = ctypes.c_void_p(), wintypes.UINT()
+    if not ctypes.windll.version.VerQueryValueW(data, "\\VarFileInfo\\Translation", ctypes.byref(pointer), ctypes.byref(length)):
+        raise ValueError("Installed executable version translation unavailable")
+    translation = ctypes.cast(pointer, ctypes.POINTER(wintypes.WORD))
+    block = "\\StringFileInfo\\%04x%04x\\ProductVersion" % (translation[0], translation[1])
+    if not ctypes.windll.version.VerQueryValueW(data, block, ctypes.byref(pointer), ctypes.byref(length)):
+        raise ValueError("Installed executable product version unavailable")
+    return ctypes.wstring_at(pointer.value).strip()
+
+
+def _value(value):
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if hasattr(value, "to_quaternion"):
+        value = value.to_quaternion()
+    if all(hasattr(value, name) for name in ("w", "x", "y", "z")):
+        return [float(getattr(value, name)() if callable(getattr(value, name)) else getattr(value, name))
+                for name in ("w", "x", "y", "z")]
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    if isinstance(value, (list, tuple)):
+        return [_value(item) for item in value]
+    raise ValueError("INCOMPLETE_CAPTURE: unsupported native value " + type(value).__name__)
+
+
+def read_scene(scene):
+    """Capture every data value, setting, link and key in the supported domain."""
+    from . import runtime as rt
+    domain = rt._domain_scene(scene)
+    mv, bv, dv, lv = domain.model_viewer(), domain.behaviour_viewer(), domain.data_viewer(), domain.layers_viewer()
+    objects = sorted(mv.get_objects(), key=str)
+    if len(objects) != 1 or int(lv.frames_count()) > 256:
+        raise ValueError("RIG_ADAPTER_UNVERIFIED: requires one independent Transform, at most 256 frames")
+    layers = list(lv.all_layer_ids())
+    if len(layers) != 1:
+        raise ValueError("RIG_ADAPTER_UNVERIFIED: requires one animation layer")
+    layer = lv.layer(layers[0])
+    if layer.is_locked or not layer.is_visible or list(layer.key_frame_indices()) != [0]:
+        raise ValueError("RIG_ADAPTER_UNVERIFIED: requires visible unlocked single existing key at frame zero")
+    from .handlers.animation import _cycles, _sections
+    ctx = {"read_member": rt._read_member, "id_string": rt._id_string,
+           "json_safe": rt.json_safe, "csc": csc, "guid": rt._guid}
+    cycles = _cycles(domain, layers, 0, int(lv.frames_count()) - 1, ctx)
+    if cycles:
+        raise ValueError("RIG_ADAPTER_UNVERIFIED: cycles are outside this adapter")
+    rows = []
+    for obj in objects:
+        behaviours = sorted(bv.get_behaviours(obj), key=str)
+        if sorted(bv.get_behaviour_name(b) for b in behaviours) != ["Basic", "Node3d", "Transform"]:
+            raise ValueError("RIG_ADAPTER_UNVERIFIED: controller/rig/mesh behaviours unsupported")
+        basic = bv.get_behaviour_by_name(obj, "Basic")
+        if not bv.get_behaviour_object(basic, "parent").is_null():
+            raise ValueError("RIG_ADAPTER_UNVERIFIED: parented transforms unsupported")
+        links = []
+        for beh in behaviours:
+            for name in sorted(bv.get_behaviour_property_names(beh)):
+                kind = bv.get_property_type(beh, name).name
+                if kind == "DataType":
+                    link = str(bv.get_behaviour_data(beh, name))
+                elif kind == "SettingType":
+                    link = str(bv.get_behaviour_setting(beh, name))
+                elif kind == "ObjectType":
+                    link = str(bv.get_behaviour_object(beh, name))
+                else:
+                    raise ValueError("INCOMPLETE_CAPTURE: unsupported property " + kind)
+                links.append([str(beh), bv.get_behaviour_name(beh), name, kind, link])
+        data = []
+        for identifier in sorted(dv.get_all_data_id(obj), key=str):
+            native = dv.get_data(identifier)
+            animated = native.mode == csc.model.DataMode.Animation
+            values = [_value(dv.get_data_value(identifier, frame)) for frame in range(int(lv.frames_count()))] if animated else [_value(dv.get_data_value(identifier))]
+            data.append([str(identifier), dv.get_data_name(identifier), native.mode.name, values])
+        settings = [[str(i), _value(dv.get_setting_value(i))] for i in sorted(dv.get_all_settings_id(obj), key=str)]
+        rows.append({"id": str(obj), "name": mv.get_object_name(obj), "type": mv.get_object_type_name(obj),
+                     "links": links, "data": data, "settings": settings,
+                     "layer_id": str(lv.layer_id_by_obj_id(obj))})
+    return {"objects": rows, "layers": rt.scene_state(scene)["layers"],
+            "sections": _sections(domain, {}, ctx), "frame_count": int(lv.frames_count()),
+            "cycles": cycles}
+
+
+class TransformAdapter:
+    def __init__(self, evidence):
+        self.evidence_bytes = json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+        self.verification = {"runtime_fingerprint": guards.LOADED_FINGERPRINT,
+            "installed_build": installed_build(), "identity_stable": True,
+            "operations": evidence.get("operations", []),
+            "dispatch_semantics": "synchronous_no_yield",
+            "evidence_sha256": hashlib.sha256(self.evidence_bytes).hexdigest()}
+
+    observed_build = staticmethod(installed_build)
+
+    def required_scope(self, scene, scope):
+        projection = read_scene(scene)
+        operation = scope.get("operation_name")
+        arguments = scope.get("operation_arguments")
+        if not isinstance(arguments, dict) or operation not in {"animation.transform_set", "safety.bootstrap", "safety.checkpoint"}:
+            raise ValueError("BINDING_UNAVAILABLE: exact native operation arguments required")
+        if operation == "animation.transform_set":
+            allowed = {"ids", "position", "frame", "space"}
+            if set(arguments) - allowed or arguments.get("ids") != [projection["objects"][0]["id"]] or arguments.get("space", "local") != "local" or arguments.get("frame", 0) != 0:
+                raise ValueError("RIG_ADAPTER_UNVERIFIED: only explicit local position at existing key zero")
+            position = arguments.get("position")
+            if not isinstance(position, list) or len(position) != 3 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in position):
+                raise ValueError("Invalid position")
+        required = {"operation_name": operation, "operation_arguments": arguments,
+            "operation_arguments_digest": guards.digest(arguments), "adapter_id": "independent-transform-key0-v1",
+            "object_ids": [item["id"] for item in projection["objects"]],
+            "layer_ids": [item["id"] for item in projection["layers"]], "frames": [0, projection["frame_count"] - 1]}
+        workspace = _WORKSPACES.get(guards.scene_instance(scene)["scene_instance_id"])
+        if workspace is not None:
+            required["snapshot_manifest"] = workspace
+        return required
+
+    def capture(self, scene, scope):
+        projection = read_scene(scene)
+        return {"coverage_complete": True, "sample_projection": projection,
+                "authored_projection": projection}
+
+    def execute(self, scene, arguments, request):
+        from . import runtime as rt
+        name = request["operations"][0]["name"]
+        before = dict(guards.scene_instance(scene))
+        if name == "animation.transform_set":
+            result = rt._run_operation_legacy(scene, {"name": name, "arguments": arguments}, request)
+            observed = rt._read_transforms(rt._domain_scene(scene), arguments["ids"], 0, "local")
+            if any(abs(a-b) > 1e-5 for a,b in zip(observed[0]["position"], arguments["position"])):
+                raise ValueError("POSTCONDITION_FAILED: native position readback differs")
+            guards.observe_effect(name, "completed", scene_before=before, scene_after=dict(guards.scene_instance(scene)), detail={"readback": observed})
+            return {"transforms": observed, "native_completion": "observed"}, result[1]
+        return checkpoint(scene, arguments, request, self)
+
+
+def _save_observed(scene, path):
+    from events import event_message_manager
+    messages = []
+    subscription = event_message_manager.subscribe(lambda _s, full, level, simple: messages.append(str(full)))
+    try:
+        scene.save(str(path))
+    finally:
+        event_message_manager.unsubscribe(subscription)
+    if not any("Saving is completed" in message for message in messages):
+        raise ValueError("NATIVE_COMPLETION_UNKNOWN: save completion event absent")
+    content = path.read_bytes()
+    if not content:
+        raise ValueError("NATIVE_COMPLETION_UNKNOWN: empty checkpoint")
+    return {"schema_version": 1, "path": str(path), "sha256": hashlib.sha256(content).hexdigest(), "length": len(content)}
+
+
+def checkpoint(scene, arguments, request, adapter):
+    from . import runtime as rt
+    name = request["operations"][0]["name"]
+    if name == "safety.bootstrap" and arguments.get("input_kind", "active_scene") != "active_scene":
+        raise ValueError("RIG_ADAPTER_UNVERIFIED: file bootstrap has no qualified loader")
+    backup = Path(arguments["checkpoint_path"]).resolve()
+    working = Path(arguments["working_path"]).resolve()
+    if backup == working or any(p.exists() for p in (backup, working)):
+        raise ValueError("Checkpoint requires two distinct new paths")
+    root = (rt.runtime_root() / "snapshots").resolve()
+    context = request.get("execution_context") or {}
+    run_id = context.get("run_id")
+    run_root = (rt.runtime_root() / "state" / "runs" / str(run_id)).resolve() if run_id else None
+    if run_id:
+        if str(uuid.UUID(run_id)) != run_id or run_root.parent != (rt.runtime_root() / "state" / "runs").resolve():
+            raise ValueError("Invalid run workspace")
+    if not all((p.is_relative_to(root) or (run_root is not None and p.parent in (run_root / "workspace", run_root / "checkpoints")))
+               and p.suffix.lower() == ".casc" for p in (backup, working)):
+        raise ValueError("Checkpoint paths must be owned .casc snapshot paths")
+    original = read_scene(scene)
+    original_path = str(scene.get_path_name())
+    before = dict(guards.scene_instance(scene))
+    source = request.get("source_binding")
+    manager = csc.app.get_application().get_scene_manager()
+    target = scene
+    if name == "safety.bootstrap":
+        # Never save the original document just to obtain a clone. A persisted
+        # source is usable only after native reload proves its complete content
+        # equals the captured live source (unsaved edits therefore block).
+        path = Path(original_path)
+        if not original_path or not path.is_file():
+            raise ValueError("CHECKPOINT_UNAVAILABLE: save the initial document before bootstrap")
+        guards.before_write()
+        target = manager.create_application_scene()
+        with _locked_input(path) as manifest:
+            csc.app.ProjectLoader.load_from(str(path), target.domain_scene())
+            if read_scene(target) != original:
+                raise ValueError("CHECKPOINT_UNAVAILABLE: persisted source differs from live source")
+        guards.link_clone(scene, target)
+        manager.set_current_scene(target)
+    else:
+        if before["scene_instance_id"] not in _WORKSPACES:
+            raise ValueError("CHECKPOINT_UNAVAILABLE: current scene is not an owned working instance")
+        guards.before_write()
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    working.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_file = _save_observed(target, backup)
+    working_file = _save_observed(target, working)
+    if read_scene(target) != original or (target is not scene and (read_scene(scene) != original or str(scene.get_path_name()) != original_path)):
+        raise ValueError("NATIVE_COMPLETION_UNKNOWN: clone or source changed during checkpoint")
+    identity = dict(guards.scene_instance(target))
+    snapshot = {"schema_version": 1, "snapshot_id": str(uuid.uuid4()), "path": str(backup),
+        "sha256": checkpoint_file["sha256"], "bytes": checkpoint_file["length"],
+        "working_path": str(working), "working_scene_instance_id": identity["scene_instance_id"],
+        "document_lineage_id": identity["document_lineage_id"], "runtime_epoch": guards.RUNTIME_EPOCH,
+        "adapter_fingerprint": guards.LOADED_FINGERPRINT, "native_completion": "observed"}
+    _WORKSPACES[identity["scene_instance_id"]] = snapshot
+    scope = adapter.required_scope(target, source["scope"])
+    successor = guards._capture_with_adapter(target, scope, source["inputs_digest"], None, None, adapter)
+    observation = {"schema_version": 1, "completion": "native_observed", "checkpoint": checkpoint_file,
+        "working_file": working_file, "source_before": source, "source_after": successor,
+        "parent_scene_instance_id": before["scene_instance_id"], "working_scene_instance_id": identity["scene_instance_id"],
+        "document_lineage_id": identity["document_lineage_id"], "authored_digest": successor["binding"]["content_revision"],
+        "sample_digest": successor["sample_digest"]}
+    guards.finish_write()
+    guards.observe_effect(name, "completed", scene_before=before, scene_after=identity, detail={"checkpoint": checkpoint_file})
+    return {"native_completion": "observed", "source_binding": successor,
+            "post_source_binding": successor, "checkpoint_observation": observation}, []
+
+
+class _locked_input:
+    """Deny write/delete sharing across hash + native path load on Windows."""
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        import ctypes
+        import msvcrt
+        import os
+        api = ctypes.windll.kernel32.CreateFileW
+        api.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+                        ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+        api.restype = ctypes.c_void_p
+        handle = api(str(self.path), 0x80000000, 1, None, 3, 0, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise OSError("Input file cannot be locked against replacement")
+        self.stream = os.fdopen(msvcrt.open_osfhandle(handle, os.O_RDONLY), "rb")
+        self.content = self.stream.read()
+        return {"path": str(self.path), "sha256": hashlib.sha256(self.content).hexdigest(), "length": len(self.content)}
+
+    def __exit__(self, *args):
+        self.stream.close()
+
+
+def qualify_disposable():
+    """Explicit native setup action; never reachable as an unguarded wire op."""
+    global _ERROR
+    guards.assert_loaded_package()
+    ensure_installed()
+    if installed_build() != SUPPORTED_BUILD:
+        raise ValueError("Unsupported native SDK build")
+    import pycsc
+    from . import runtime as rt
+    manager = csc.app.get_application().get_scene_manager()
+    previous = manager.current_scene()
+    disposable = manager.create_application_scene()
+    try:
+        manager.set_current_scene(disposable)
+        pycsc.wrap(disposable.domain_scene()).create_object("MCP adapter qualification")
+        original = read_scene(disposable)
+        object_id = original["objects"][0]["id"]
+        request = {"operations": [{"name": "animation.transform_set", "arguments": {
+            "ids": [object_id], "position": [1.25, 2.5, -0.75], "space": "local", "frame": 0}}]}
+        guards.begin_request(request)
+        guards.set_write_guard(lambda: read_scene(disposable) == original or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+        adapter = TransformAdapter({})
+        adapter.execute(disposable, request["operations"][0]["arguments"], request)
+        after = read_scene(disposable)
+        if original == after or guards.effect_observations()[0]["completion"] != "completed":
+            raise ValueError("Native qualification did not observe changed data")
+        observed_id = dict(guards.scene_instance(disposable))
+        if observed_id != guards.scene_instance(disposable):
+            raise ValueError("Scene identity is unstable")
+        # Observe the source-preserving save/load path using the same executor.
+        folder = rt.runtime_root() / "snapshots" / ("qualification-" + str(uuid.uuid4()))
+        folder.mkdir(parents=True)
+        source_file = _save_observed(disposable, folder / "source.casc")
+        args = {"checkpoint_path": str(folder / "backup.casc"), "working_path": str(folder / "working.casc"),
+                "input_kind": "active_scene"}
+        scope = adapter.required_scope(disposable, {"operation_name": "safety.bootstrap", "operation_arguments": args})
+        source = guards._capture_with_adapter(disposable, scope, guards.digest({"qualification": True}), None, None, adapter)
+        bootstrap_request = {"operations": [{"name": "safety.bootstrap", "arguments": args}], "source_binding": source}
+        guards.begin_request(bootstrap_request)
+        guards.set_write_guard(lambda: read_scene(disposable) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+        checkpoint_result, _ = checkpoint(disposable, args, bootstrap_request, adapter)
+        successor_scene = manager.current_scene()
+        next_args = {"checkpoint_path": str(folder / "next-backup.casc"),
+                     "working_path": str(folder / "next-working.casc")}
+        next_scope = adapter.required_scope(successor_scene, {"operation_name": "safety.checkpoint", "operation_arguments": next_args})
+        next_source = guards._capture_with_adapter(successor_scene, next_scope, source["inputs_digest"], None, None, adapter)
+        next_request = {"operations": [{"name": "safety.checkpoint", "arguments": next_args}], "source_binding": next_source}
+        guards.begin_request(next_request)
+        guards.set_write_guard(lambda: read_scene(successor_scene) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+        repeated_checkpoint, _ = checkpoint(successor_scene, next_args, next_request, adapter)
+        evidence = {"build": installed_build(), "runtime_fingerprint": guards.LOADED_FINGERPRINT,
+            "sdk": "csc.model.DataEditor.set_data_value/Scene.modify_update",
+            "before": original, "after": after, "effect": guards.effect_observations(),
+            "identity": observed_id, "source_file": source_file,
+            "checkpoint": checkpoint_result, "successor_checkpoint": repeated_checkpoint,
+            "operations": ["animation.transform_set", "safety.bootstrap", "safety.checkpoint"]}
+        adapter = TransformAdapter(evidence)
+        for name in ("animation.transform_set", "safety.bootstrap", "safety.checkpoint"):
+            guards.register_adapter(name, adapter)
+        _ERROR = None
+        return {"adapter_id": "independent-transform-key0-v1", "installed_build": installed_build(),
+                "evidence_sha256": adapter.verification["evidence_sha256"], "qualified_operations": evidence["operations"],
+                "checkpoint_completion": "observed_native_save_and_clone_equivalence"}
+    finally:
+        if previous is not None:
+            manager.set_current_scene(previous)
+        if "successor_scene" in locals() and successor_scene is not disposable:
+            manager.remove_application_scene(successor_scene)
+        manager.remove_application_scene(disposable)
+
+
+def ensure_installed():
+    global _INITIALIZED, _ERROR
+    if _INITIALIZED:
+        return
+    _INITIALIZED = True
+    try:
+        if installed_build() != SUPPORTED_BUILD:
+            raise ValueError("No qualified SDK adapter for " + installed_build())
+        # Qualification is explicit: it is never a hidden mutation at import.
+        _ERROR = "Native qualification not run in this runtime epoch"
+    except Exception as exc:
+        _ERROR = str(exc)
+
+
+def status():
+    ensure_installed()
+    return {"installed_build": installed_build(), "adapter_id": "independent-transform-key0-v1", "qualification_error": _ERROR}
+
+
+def verify_observation(observation, digest, kind):
+    if digest != guards.digest(observation) or _OBSERVATIONS.get((kind, digest)) != observation:
+        raise ValueError("RIG_ADAPTER_UNVERIFIED: observation not issued by this runtime")
+    return {"key_layout_digest" if kind == "key_layout" else "observation_digest": digest}
+
+
+def observe_motion_inputs(scene, arguments):
+    from .native_motion_inputs import read_motion_inputs
+    guards.assert_loaded_package()
+    value = read_motion_inputs(scene, arguments)
+    value["evidence_ref"] = "native-motion-input:" + guards.RUNTIME_EPOCH + ":" + value["source_fingerprint"]
+    key = guards.digest(value)
+    # A wire object can only authenticate bytes actually read in this epoch.
+    _OBSERVATIONS[("motion_inputs", key)] = json.loads(json.dumps(value, allow_nan=False))
+    return value

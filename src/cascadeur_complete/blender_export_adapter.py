@@ -125,7 +125,7 @@ def run(manifest):
             raise ValueError("EXPORT_RIG_MAPPING_AMBIGUOUS")
         reverse[key] = path
         resolved[path] = (obj, bone)
-    parent_paths, rest_rotations, rest_lengths = {}, {}, {}
+    parent_paths, rest_rotations, rest_lengths, rest_positions = {}, {}, {}, {}
     for path, (obj, bone) in resolved.items():
         # Object-level animated transforms need an independently decoded rest
         # transform. The classic adapter supports static armature containers;
@@ -150,6 +150,7 @@ def run(manifest):
             matrix = obj.matrix_world
         parent_paths[path] = reverse.get(parent_key)
         rest_rotations[path] = (basis @ matrix.to_3x3().normalized() @ inverse).to_quaternion()
+        rest_positions[path] = list(basis @ matrix.translation)
         if parent_paths[path] != expected["parent_paths"][path]:
             raise ValueError("EXPORT_SKELETON_TOPOLOGY")
     for item in profile["skeleton_map"]:
@@ -180,8 +181,27 @@ def run(manifest):
         estimated += len(expected["time_s"]) * sum(len(obj.data.vertices) for obj in meshes.values()) * 3 * 26
         if estimated > settings["max_report_bytes"]:
             raise ValueError("TARGET_CAPTURE_BUDGET_EXCEEDED")
-    capture = {"time_s": expected["time_s"], "position_m": {path: [] for path in paths},
+    skin_binding = {}
+    for path, obj in meshes.items():
+        modifiers = []
+        for modifier in obj.modifiers:
+            if modifier.type == 'ARMATURE':
+                if modifier.object is None:
+                    raise ValueError('EXPORT_SKIN_ARMATURE_UNBOUND')
+                modifiers.append({'type': modifier.type, 'armature': modifier.object.name,
+                                  'bones': [bone.name for bone in modifier.object.data.bones],
+                                  'use_vertex_groups': modifier.use_vertex_groups,
+                                  'use_bone_envelopes': modifier.use_bone_envelopes})
+        skin_binding[path] = {'modifiers': modifiers, 'groups': [group.name for group in obj.vertex_groups],
+                              'weights': [[[group.group, group.weight] for group in vertex.groups]
+                                          for vertex in obj.data.vertices]}
+    capture = {'space': 'global', 'units': 'metres', 'rotation_semantics': 'global_rest_delta',
+               'basis_digest': _canonical(settings['blender_to_canonical_basis']),
+               "time_s": expected["time_s"], "position_m": {path: [] for path in paths},
                "rotation_delta_wxyz": {path: [] for path in paths}, "parent_paths": parent_paths,
+               "rest_rotation_wxyz": {path: list(value) for path, value in rest_rotations.items()},
+               "rest_position_m": rest_positions,
+               "mesh_skin_digest": _canonical(skin_binding) if meshes else None,
                "rest_lengths_m": rest_lengths, "mesh": {path: {"positions_m": [], "triangles": None} for path in meshes}}
     file_start = profile["first_frame"] * profile["fps_den"] / profile["fps_num"] if profile["time_origin"] == "preserve" else 0
     for seconds in expected["time_s"]:

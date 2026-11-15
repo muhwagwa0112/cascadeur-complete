@@ -191,6 +191,12 @@ def _reload_handlers_if_changed():
     restores the previous handlers. runtime.py and this module still need a
     restart to change.
     """
+    # Protocol 3 evidence binds the entire imported package. Swapping only
+    # handlers would certify disk bytes different from the running executor.
+    from . import guarded_runtime
+    if guarded_runtime._loaded_fingerprint() != guarded_runtime.LOADED_FINGERPRINT:
+        _state["last_error"] = "package changed: clean Cascadeur restart required"
+        return
     import importlib
     import sys
 

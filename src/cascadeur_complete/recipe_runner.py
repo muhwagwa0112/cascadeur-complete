@@ -18,12 +18,14 @@ from .atomic_queue import read_json
 from .cleanup_workflow import CleanupWorkflow
 from .models import SourceBinding
 from .motion_context import MotionContext, MotionInputError, RigProfile, SampleBatch, SupportTrack, validate_samples
-from .motion_quality import contact_metrics, evaluate_metrics, original_intent_metrics, required_motion_metrics, validate_quality_policy
+from .motion_quality import contact_metrics, evaluate_actual_quality, original_intent_metrics, required_motion_metrics, validate_quality_policy
 from .recipe_authorization import validate_step_authorization, validate_usage
 from .recipe_models import BudgetUsage, RecipeSpec, StepRecord, canonical_bytes, digest, run_view
 from .recipe_planning import build_plan, compile_steps, implementation_digest, input_preflight
 from .recipe_store import HOST_INSTANCE_ID, RecipeConflict, RecipeRunStore, TERMINAL_RUNS, TERMINAL_STEPS
 from .store_lock import store_lock
+from .stage_contracts import StageEffect
+from .capture import estimate_motion_resources, enforce_motion_budget
 
 
 def _json(value):
@@ -66,7 +68,8 @@ class _PlanningService:
                 "arguments": arguments, "source_binding": _json(kwargs.get("source_binding"))}
 
     def __getattr__(self, name):
-        if name not in {"execute_readonly", "capture_source", "validate_source", "batch"}:
+        if name not in {"execute_readonly", "capture_source", "validate_source", "batch", "observe_key_layout", "verify_key_layout",
+                        "observe_retarget_inputs", "verify_retarget_inputs", "motion_controller_adapter", "verify_controller_targets"}:
             raise RecipeConflict("Solver attempted an effect outside read-only planning")
         return getattr(self._service, name)
 
@@ -77,34 +80,22 @@ class RecipeRunner:
         self.store = RecipeRunStore(service.paths)
         self._threads: dict[str, threading.Thread] = {}
         self._threads_lock = threading.Lock()
+        self._wakeups: set[str] = set()
 
-    def _preflight(self, spec, steps):
+    def _preflight(self, spec, steps, **context):
         reasons = input_preflight(spec)
         hook = getattr(self.service, "recipe_preflight", None)
         if not callable(hook):
             reasons.append({"code": "RUNTIME_PREFLIGHT_UNAVAILABLE"})
         else:
-            reasons.extend(hook(spec, steps))
-        # These are native adapters, not generic user-supplied operation dispatch.
-        for stage, required in (("input", spec.input.kind != "active_scene"),
-                                ("rig", spec.rig.mode != "existing"),
-                                ("motion", spec.motion.mode != "existing"),
-                                ("export", spec.export is not None)):
-            if required and not callable(getattr(self.service, f"recipe_{stage}_arguments", None)):
-                reasons.append({"code": "STAGE_ADAPTER_UNAVAILABLE", "stage": stage})
-        if not callable(getattr(self.service, "recipe_checkpoint", None)):
-            reasons.append({"code": "CHECKPOINT_ADAPTER_UNAVAILABLE"})
-        if spec.export is not None and not callable(getattr(self.service, "recipe_export_stage", None)):
-            reasons.append({"code": "VERIFIED_EXPORT_ADAPTER_UNAVAILABLE"})
-        if spec.intent.allow_key_insertion:
-            reasons.append({"code": "KEY_TOPOLOGY_ADAPTER_UNAVAILABLE"})
-        for cleanup in spec.cleanup:
-            if cleanup.kind not in {"fingers", "foot_contacts"}:
-                reasons.append({"code": "VERIFIED_CONTROLLER_ADAPTER_UNAVAILABLE", "kind": cleanup.kind})
-            if cleanup.kind == "foot_contacts":
-                verifier = getattr(self.service, "recipe_verify_interpolation", None)
-                if not callable(verifier) or not verifier(spec, cleanup):
-                    reasons.append({"code": "INTERPOLATION_MODEL_UNVERIFIED", "kind": cleanup.kind})
+            reasons.extend(hook(spec, steps, **context))
+        if spec.motion.mode == "retarget" and spec.motion.route == "host" and not callable(getattr(CleanupWorkflow, "plan_retarget", None)):
+            reasons.append({"code": "HOST_RETARGET_CONTROLLER_ADAPTER_UNAVAILABLE"})
+        if spec.character.derived_target is not None:
+            producer = next((item for item in steps if item.step_id == spec.character.derived_target.producer_step_id), None)
+            if producer is None or producer.stage not in {"initial_checkpoint", "rig"}:
+                reasons.append({"code": "DERIVED_TARGET_PRODUCER_INVALID"})
+            return reasons
         try:
             rig = self._profile(spec)
         except (ValueError, TypeError, KeyError) as exc:
@@ -112,6 +103,11 @@ class RecipeRunner:
         else:
             try:
                 validate_quality_policy(spec.quality, rig, spec.intent, self._include_mesh(spec, rig))
+                if spec.export is not None:
+                    roundtrip = {"position_readback_m", "rotation_readback_rad", "duration_error_s"}
+                    missing = roundtrip - set(spec.quality.required_metrics)
+                    if missing:
+                        reasons.append({"code": "EXPORT_ROUNDTRIP_METRICS_REQUIRED", "metrics": sorted(missing)})
             except MotionInputError as exc:
                 reasons.append({"code": exc.code, "detail": str(exc),
                                 "required_metrics": sorted(required_motion_metrics(rig, spec.intent, self._include_mesh(spec, rig)))})
@@ -139,10 +135,18 @@ class RecipeRunner:
         grant = self.store.authorize(plan, expires_at)
         return {"ok": False, "accepted": True, "workflow": "authorized", **grant.model_dump(mode="json")}
 
-    def _check_plan(self, plan):
+    def _check_plan(self, plan, run=None):
         if plan.implementation_digest != implementation_digest():
             raise RecipeConflict("IMPLEMENTATION_CHANGED: plan again before authorization or dispatch")
-        reasons = self._preflight(plan.spec, plan.steps)
+        context = {}
+        if run is not None and any(item.execution_outcome == "succeeded" for item in run.steps):
+            receipts = [ref for item in run.steps for ref in item.artifact_refs if ref.kind == "runtime_receipt"]
+            if not receipts:
+                raise RecipeConflict("CONTINUATION_EVIDENCE_MISSING")
+            context = {"mode": "continuation", "current_binding": run.current_binding,
+                       "predecessor_receipt": self.store.read_artifact(run.run_id, receipts[-1])}
+        spec = plan.spec if run is None or not run.derived_targets else self.effective_spec(plan.spec, run)
+        reasons = self._preflight(spec, plan.steps, **context)
         if reasons:
             raise RecipeConflict("PREFLIGHT_BLOCKED: " + canonical_bytes(reasons).decode("utf-8"))
         if self._runtime_fingerprints() != plan.runtime_fingerprints:
@@ -192,14 +196,27 @@ class RecipeRunner:
             return run_view(run)
         if authorization_id is not None and authorization_id != run.authorization_id:
             run = self.store.renew_authorization(run_id, self.store.read_grant(authorization_id))
+        publish = next((item for item in run.steps if item.step_id.endswith("-publish")
+                        and item.stage_data and Path(item.stage_data["intent_path"]).exists()), None)
+        if publish is not None and publish.state not in TERMINAL_STEPS:
+            plan = self.store.read_plan(run.plan_id)
+            step = next(item for item in plan.steps if item.step_id == publish.step_id)
+            if run.state == "blocked":
+                run = self._update(run, state="cancel_requested" if run.cancel_requested else "running", blocked_reason=None)
+            run = self._export_host_step(run, publish, step, plan)
+            self._schedule(run_id)
+            return run_view(run)
         if any(item.state in {"preparing", "dispatching", "awaiting_result", "blocked"} for item in run.steps):
-            return run_view(self.reconcile(run_id))
+            run = self.reconcile(run_id)
+            if run.state != "blocked":
+                self._schedule(run_id)
+            return run_view(run)
+        if any(item.state in {"verifying", "checkpointing"} for item in run.steps):
+            self._schedule(run_id)
+            return run_view(run)
         # A process interruption after an applied effect requires the persisted
         # successor checkpoint, never a new solve or mutation replay.
-        if any(item.execution_outcome == "succeeded" and not item.checkpoint_ref
-               and item.state not in TERMINAL_STEPS for item in run.steps):
-            return run_view(self._update(run, state="blocked", blocked_reason="CHECKPOINT_MISSING"))
-        self._check_plan(self.store.read_plan(run.plan_id))
+        self._check_plan(self.store.read_plan(run.plan_id), run)
         self.store.verify_grant(self.store.read_grant(run.authorization_id), self.store.read_plan(run.plan_id))
         if run.state == "blocked" and run.blocked_reason in {"QUALITY_UNVERIFIED", "QUALITY_FAILED"}:
             return run_view(run)
@@ -211,6 +228,7 @@ class RecipeRunner:
     def _schedule(self, run_id):
         with self._threads_lock:
             if run_id in self._threads and self._threads[run_id].is_alive():
+                self._wakeups.add(run_id)
                 return
             worker = threading.Thread(target=self._supervise, args=(run_id,), daemon=True,
                                       name=f"cascadeur-recipe-{run_id}")
@@ -218,6 +236,19 @@ class RecipeRunner:
             worker.start()
 
     def _supervise(self, run_id):
+        try:
+            self._work(run_id)
+        finally:
+            with self._threads_lock:
+                self._threads.pop(run_id, None)
+                wake = run_id in self._wakeups
+                self._wakeups.discard(run_id)
+            if wake:
+                run = self.store.read(run_id)
+                if run.state not in TERMINAL_RUNS and run.state != "blocked":
+                    self._schedule(run_id)
+
+    def _work(self, run_id):
         while True:
             before = self.store.read(run_id)
             if before.state in TERMINAL_RUNS or before.state == "blocked":
@@ -235,7 +266,7 @@ class RecipeRunner:
             except Exception as exc:
                 current = self.store.read(run_id)
                 if current.state not in TERMINAL_RUNS:
-                    self._update(current, state="blocked", blocked_reason=f"WORKER_EXCEPTION:{type(exc).__name__}")
+                    self._update(current, state="blocked", blocked_reason=str(getattr(exc, "code", f"WORKER_EXCEPTION:{type(exc).__name__}"))[:256])
                 return
             if after.seq == before.seq:
                 return
@@ -270,6 +301,10 @@ class RecipeRunner:
                            and run.quality == "pass" and (plan.spec.export is None or run.export == "published"))
                 return self._update(run, state="canceled" if run.cancel_requested else "succeeded" if success else "failed")
             step = next(item for item in plan.steps if item.step_id == pending.step_id)
+            # An already journaled atomic publication is observed even when its
+            # authorization has since expired or cancellation was requested.
+            if step.stage == "publish" and pending.stage_data and Path(pending.stage_data["intent_path"]).exists():
+                return self._export_host_step(run, pending, step, plan)
             if pending.state in {"preparing", "dispatching", "awaiting_result", "blocked"}:
                 return self.reconcile(run_id)
             if pending.state in {"verifying", "checkpointing"}:
@@ -286,30 +321,16 @@ class RecipeRunner:
             if step.not_required_reason:
                 # Live preflight verifies these assertions; a client label is
                 # never enough to skip an input/rig/motion obligation.
-                self._check_plan(plan)
+                self._check_plan(plan, run)
                 return self._persist_result(run, pending, {"reason": step.not_required_reason,
                                                            "verified_by": "live_preflight"}, step_state="skipped")
             if step.stage == "preflight":
-                self._check_plan(plan)
+                self._check_plan(plan, run)
                 return self._persist_result(run, pending, {"supported": True})
-            if step.stage in {"source_capture", "baseline_capture", "actual_readback", "analyze", "solve", "quality"}:
+            if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "analyze", "solve", "quality", "host_retarget"}:
                 return self._host_step(run, pending, step, plan)
-            if step.stage == "checkpoint":
-                pending = pending.model_copy(update={"state": "checkpointing"})
-                run = self._step_update(run, pending)
-                result = self.service.recipe_checkpoint(run, plan, step)
-                if not result.get("verified") or not result.get("sha256"):
-                    raise RecipeConflict("CHECKPOINT_UNVERIFIED")
-                ref = self.store.artifact(run_id, "checkpoint", result)
-                record = pending.model_copy(update={"checkpoint_ref": ref.path, "verification_status": "pass"})
-                return self._persist_result(run, record, result)
-            if step.stage in {"export_stage", "export_validate", "publish"}:
-                hook = getattr(self.service, f"recipe_{step.stage}", None)
-                if not callable(hook):
-                    raise RecipeConflict("VERIFIED_EXPORT_ADAPTER_UNAVAILABLE")
-                # Export adapters receive only immutable permits; the installed
-                # protected native export path must own its request journal.
-                raise RecipeConflict("EXPORT_STAGE_REQUIRES_PERSISTED_NATIVE_PREPARATION")
+            if step.stage in {"export_validate", "publish"}:
+                return self._export_host_step(run, pending, step, plan)
             return self._prepare(run, pending, step, plan)
 
     @staticmethod
@@ -324,6 +345,27 @@ class RecipeRunner:
         if not (set(profile.role_ids.values()) | set(profile.dependency_ids)) <= set(spec.character.object_ids):
             raise RecipeConflict("Rig dependencies escape the exact target object scope")
         return profile
+
+    @staticmethod
+    def effective_spec(spec, run):
+        reference = spec.character.derived_target
+        if reference is None:
+            return spec
+        mapping = next((item for item in run.derived_targets if item.reference_digest == digest(reference)), None)
+        if mapping is None:
+            raise RecipeConflict("DERIVED_TARGET_UNRESOLVED")
+        value = spec.model_dump(mode="json")
+        value["character"].update(character_id=mapping.character_id, root_id=mapping.root_id,
+            object_ids=list(mapping.object_ids), layer_ids=list(mapping.layer_ids), role_ids=mapping.role_ids,
+            rig_profile=mapping.rig_profile, rig_profile_digest=mapping.rig_profile_digest, derived_target=None)
+        for cleanup in value["cleanup"]:
+            cleanup["object_ids"] = [mapping.role_ids[key] for key in cleanup["object_ids"]]
+            for parameters in (cleanup["parameters"], *(variant["parameters"] for variant in cleanup["variants"])):
+                if "joint_ids" in parameters:
+                    parameters["joint_ids"] = [mapping.role_ids[key] for key in parameters["joint_ids"]]
+        for write in value["motion"]["keyposes"]:
+            write["id"] = mapping.role_ids[write["id"]]
+        return RecipeSpec.model_validate(value)
 
     def _supports(self, spec):
         supports = {}
@@ -354,8 +396,12 @@ class RecipeRunner:
     def _capture(self, spec, operation="motion.capture", arguments=None, source=None):
         workflow = self._workflow(spec, source)
         ids = spec.character.object_ids
-        rotation_ids = tuple(item for item in self._profile(spec).role_ids.values()
-                             if item in {obj for cleanup in spec.cleanup if cleanup.kind == "fingers" for obj in cleanup.object_ids})
+        rig = self._profile(spec)
+        roles = {"root", *spec.intent.key_pose_locks, *spec.intent.locked_roles_frames}
+        rotation_ids = tuple(sorted(set(ids) if spec.export is not None or (spec.motion.mode == "retarget" and spec.motion.host_channel == "rotation") else
+            {rig.role_ids[role] for role in roles if role in rig.role_ids}
+            | {obj for cleanup in spec.cleanup if cleanup.kind in {"fingers", "finger_fan", "wrist_soften", "hand_pose"}
+               for obj in cleanup.object_ids}))
         global_batch = workflow.capture_batch(ids, space="global", required_rotation_ids=rotation_ids)
         local_batch = workflow.capture_batch(ids, space="local", required_rotation_ids=rotation_ids)
         binding = _json(workflow._bind_source(operation, arguments))
@@ -373,8 +419,31 @@ class RecipeRunner:
         return self.store.read_artifact(run.run_id, ref)
 
     def _host_step(self, run, record, step, plan):
+        # Resolve symbolic selectors only from immutable producer evidence.
+        plan = plan.model_copy(update={"spec": self.effective_spec(plan.spec, run)})
+        validate_quality_policy(plan.spec.quality, self._profile(plan.spec), plan.spec.intent,
+                                self._include_mesh(plan.spec, self._profile(plan.spec)))
+        if step.stage == "host_retarget":
+            from .recipe_store import file_sha256
+            source = plan.spec.motion.source
+            sha, size = file_sha256(Path(source.path))
+            if sha != source.sha256 or size != source.length:
+                raise RecipeConflict("RETARGET_SOURCE_DIGEST_MISMATCH")
+            value = read_json(Path(source.path))
+            workflow = self._workflow(plan.spec, run.current_binding, planning=True)
+            planner = getattr(workflow, "plan_retarget", None)
+            if not callable(planner):
+                raise RecipeConflict("HOST_RETARGET_CONTROLLER_ADAPTER_UNAVAILABLE")
+            settings = dict(plan.spec.motion.settings)
+            if settings.get("target_channels", [plan.spec.motion.host_channel]) != [plan.spec.motion.host_channel]:
+                raise RecipeConflict("RETARGET_CHANNEL_DECLARATION_MISMATCH")
+            settings["target_channels"] = [plan.spec.motion.host_channel]
+            result = _json(planner(value, dict(plan.spec.motion.mapping), settings))
+            if result.get("status") not in {"candidate", "no_change"}:
+                return self._persist_result(run, record, result, state="blocked", blocked_reason="HOST_RETARGET_UNVERIFIED")
+            return self._persist_result(run, record, result)
         used = run.budgets_used.model_dump()
-        if step.stage in {"source_capture", "baseline_capture", "actual_readback"}:
+        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback"}:
             # Upper bound covers compact read chunks, rotation/local capture,
             # and source certification before entering the capture helper.
             n = plan.spec.clip.last_frame - plan.spec.clip.first_frame + 1
@@ -387,14 +456,17 @@ class RecipeRunner:
             n = plan.spec.clip.last_frame - plan.spec.clip.first_frame + 1
             used["bridge_requests"] += len(step.candidate_variants) * (2 * ((n + 24) // 25) + 8)
             if plan.spec.cleanup[step.fixed_parameters["cleanup_index"]].kind == "foot_contacts":
-                used["memory_bytes"] = max(used["memory_bytes"], n * n * 128)
+                estimate = estimate_motion_resources(n, {key: n for key in plan.spec.cleanup[step.fixed_parameters["cleanup_index"]].object_ids},
+                    retained_capture_bytes=n * len(plan.spec.character.object_ids) * 2048)
+                enforce_motion_budget(estimate, {"max_memory_bytes": plan.spec.budgets.memory_bytes})
+                used["memory_bytes"] = max(used["memory_bytes"], estimate["estimated_peak_bytes"])
         usage = BudgetUsage.model_validate(used)
         validate_usage(plan, usage, run.deadline)
         # Reserve all bounded resource costs before calling a native read helper
         # or host solver. Pure compute may be repeated after a crash, never writes.
         record = record.model_copy(update={"state": "ready"})
         run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
-        if step.stage in {"source_capture", "baseline_capture", "actual_readback"}:
+        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback"}:
             value = (self._capture(plan.spec, "animation.interpolation_refresh", {}, run.current_binding)
                      if step.stage == "source_capture" else self._capture(plan.spec, source=run.current_binding))
             binding = SourceBinding.model_validate(value["global"]["source_binding"])
@@ -442,9 +514,8 @@ class RecipeRunner:
         valid = self.service.validate_source(binding)
         if not valid.ok:
             raise RecipeConflict("SOURCE_CHANGED: actual quality capture is no longer the live source")
-        report = evaluate_metrics(metrics, plan.spec.quality, runtime_verified=binding.complete, capture_digest=digest(actual),
-                                  rig=rig, intent=plan.spec.intent, include_mesh=self._include_mesh(plan.spec, rig),
-                                  capture=batch).as_dict()
+        report = evaluate_actual_quality(original, batch, rig, plan.spec.intent, plan.spec.quality,
+            supports=self._supports(plan.spec), capture_verifier=getattr(self.service, "recipe_verify_capture", None)).as_dict()
         violations = self._original_constraints(plan, metrics)
         if violations:
             report["status"] = "fail"
@@ -500,56 +571,88 @@ class RecipeRunner:
                 "capture_digest": digest(actual), "candidate_digest": digest(candidate)}
 
     def _prepare(self, run, record, step, plan):
+        context = {}
         if step.stage == "correction":
             candidate = self._latest(run, "solve")
             if candidate.get("status") == "no_change":
                 return self._persist_result(run, record, candidate, step_state="no_change")
             if candidate.get("operation_name") != step.operation_name or candidate.get("feature_id") != step.feature_id:
                 raise RecipeConflict("Solver candidate operation differs from the exact permit")
-            arguments = candidate["arguments"]
-            source = SourceBinding.model_validate(candidate["source_binding"])
-            effect = self._measured_effect(run, plan, arguments)
+            context["candidate"] = candidate
+            context["source_binding"] = candidate["source_binding"]
+            measured = self._measured_effect(run, plan, candidate["arguments"])
         else:
-            source, effect = run.current_binding, None
-            if step.stage == "evaluation":
-                if source is None:
-                    raise RecipeConflict("BINDING_UNAVAILABLE: pre-evaluation source capture is missing")
-                arguments = dict(step.fixed_parameters)
-            else:
-                adapter = getattr(self.service, f"recipe_{step.stage}_arguments", None)
-                if not callable(adapter):
-                    raise RecipeConflict("STAGE_ADAPTER_UNAVAILABLE")
-                arguments = adapter(plan.spec, step)
+            measured = None
+        if step.stage == "motion" and plan.spec.motion.mode == "retarget" and plan.spec.motion.route == "host":
+            candidate = self._latest(run, "host_retarget")
+            if candidate.get("status") == "no_change":
+                return self._persist_result(run, record, candidate, step_state="no_change")
+            if candidate.get("operation_name") != step.operation_name or candidate.get("feature_id") != step.feature_id:
+                raise RecipeConflict("RETARGET_CANDIDATE_OPERATION_MISMATCH")
+            context["candidate"] = candidate
+            context["source_binding"] = candidate["source_binding"]
+            measured = self._measured_effect(run, plan, candidate["arguments"], baseline_prefix="retarget_capture")
+        if step.stage == "export_stage":
+            from .export_workflow import create_export_stage
+            if record.stage_data is None:
+                spec = self.effective_spec(plan.spec, run)
+                n = spec.clip.last_frame - spec.clip.first_frame + 1
+                used = run.budgets_used.model_dump()
+                used["bridge_requests"] += 4 * ((n * len(spec.character.object_ids) + 24) // 25) + 8
+                used["memory_bytes"] = max(used["memory_bytes"], n * len(spec.character.object_ids) * 2048)
+                usage = BudgetUsage.model_validate(used)
+                validate_usage(plan, usage, run.deadline)
+                run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
+                stage = create_export_stage(plan.spec.export, run.run_id, step.step_id)
+                before = self._capture(spec, source=run.current_binding)
+                record = record.model_copy(update={"stage_data": {"export_stage": stage.as_dict(), "before_export": before}})
+                run = self._step_update(run, record)
+            context["export_stage"] = record.stage_data["export_stage"]
+        effect = self.service.recipe_resolve_stage_effect(plan, run, step, context)
+        effect = StageEffect.model_validate(effect)
+        arguments, source = effect.arguments, effect.source_binding
         grant = self.store.read_grant(run.authorization_id)
-        validate_step_authorization(self.store, grant, plan, run, step, source=source, arguments=arguments, measured_effect=effect)
+        validate_step_authorization(self.store, grant, plan, run, step, source=source, arguments=arguments,
+                                    measured_effect=measured, stage_effect=effect)
         attempt_id, request_id = str(uuid.uuid4()), str(uuid.uuid4())
         usage = run.budgets_used.model_dump()
         usage["bridge_requests"] += 8
         usage["written_keys"] += len(arguments.get("writes", []))
-        usage["generated_keys"] += int((effect or {}).get("added_keys", 0))
+        usage["generated_keys"] += int((measured or {}).get("added_keys", 0))
         usage["correction_passes"] += int(step.stage == "correction")
         usage = BudgetUsage.model_validate(usage)
         validate_usage(plan, usage, run.deadline)
         record = record.model_copy(update={"state": "preparing", "attempt_id": attempt_id, "request_id": request_id,
                                            "source_binding": source, "calls_used": record.calls_used + 1,
                                            "dispatch_lease_epoch": run.lease_epoch,
-                                           "request_digest": digest(arguments)})
+                                           "request_digest": digest(arguments), "stage_effect": effect})
         run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"),
-                                current_binding=source.model_dump(mode="json"))
+                                current_binding=None if source is None else source.model_dump(mode="json"))
+        execution = {"run_id": run.run_id, "step_id": step.step_id, "attempt_id": attempt_id,
+                     "lease_epoch": run.lease_epoch, "request_id": request_id}
+        if step.stage == "export_stage":
+            from .export_workflow import ExportStage, bind_export_stage
+            bind_export_stage(ExportStage.from_dict(record.stage_data["export_stage"]), request_id=request_id,
+                attempt_id=attempt_id, lease_epoch=run.lease_epoch, operation_name=step.operation_name,
+                arguments=arguments, source_binding=source)
         # Durable intent precedes snapshot/evaluation effects in prepare_change.
-        prepared = self.service.prepare_change(step.feature_id, step.operation_name, arguments,
+        if step.stage == "initial_checkpoint":
+            bootstrap = self.store.issue_bootstrap(plan, run, step, effect, attempt_id=attempt_id, request_id=request_id)
+            record = record.model_copy(update={"bootstrap_grant": bootstrap})
+            run = self._step_update(run, record)
+            prepared = self.service.prepare_initial_checkpoint(bootstrap, execution)
+        else:
+            prepared = self.service.prepare_change(step.feature_id, step.operation_name, arguments,
                                               min(plan.spec.budgets.per_step_seconds, grant.expires_at - time.time()),
-                                              source_binding=source, execution_context={"run_id": run.run_id,
-                                              "step_id": step.step_id, "attempt_id": attempt_id,
-                                              "lease_epoch": run.lease_epoch, "request_id": request_id})
+                                              source_binding=source, execution_context=execution)
         if not prepared.get("confirmation_token"):
             return self._persist_result(self.store.read(run.run_id), record, prepared, step_state="blocked",
                                         state="blocked", blocked_reason="PREPARATION_BLOCKED")
         record = record.model_copy(update={"state": "prepared", "token_ref": prepared["confirmation_token"]})
         return self._step_update(self.store.read(run.run_id), record)
 
-    def _measured_effect(self, run, plan, arguments):
-        baseline = self._latest(run, "baseline_capture")
+    def _measured_effect(self, run, plan, arguments, baseline_prefix="baseline_capture"):
+        baseline = self._latest(run, baseline_prefix)
         space = arguments.get("space", "local" if "rotation" in arguments.get("channel", "") else "global")
         batch = _batch(baseline[space])
         positions, rotations = [0.0], [0.0]
@@ -584,7 +687,9 @@ class RecipeRunner:
             raise RecipeConflict("IMPLEMENTATION_CHANGED: prepared step cannot dispatch after host or loaded runtime changes")
         record = record.model_copy(update={"state": "dispatching", "execution_outcome": "outcome_unknown"})
         run = self._step_update(current, record)
-        host_result = _json(self.service.commit_change(record.token_ref, timeout=plan.spec.budgets.per_step_seconds))
+        host_result = _json(self.service.commit_initial_checkpoint(record.bootstrap_grant, record.token_ref,
+                           timeout=plan.spec.budgets.per_step_seconds) if record.bootstrap_grant is not None
+                           else self.service.commit_change(record.token_ref, timeout=plan.spec.budgets.per_step_seconds))
         current = self.store.read(run.run_id)
         record = next(item for item in current.steps if item.step_id == record.step_id)
         ref = self.store.artifact(run.run_id, "host_commit_result", host_result)
@@ -622,7 +727,9 @@ class RecipeRunner:
                 return self._update(run, state="blocked", blocked_reason="outcome_unknown")
             if outcome == "succeeded":
                 host_result = (record.result or {}).get("host_commit_result")
-                if host_result is None or not host_result.get("ok"):
+                repeatable_evidence = (record.stage_effect is not None and record.stage_effect.operation_name
+                                       in {"safety.bootstrap", "safety.checkpoint", "io.export_fbx"})
+                if (host_result is None and not repeatable_evidence) or (host_result is not None and not host_result.get("ok")):
                     reason = "HOST_POSTCONDITION_RESULT_MISSING" if host_result is None else "HOST_POSTCONDITION_FAILED"
                     return self._step_update(run, record.model_copy(update={"state": "blocked",
                                             "execution_outcome": "succeeded", "verification_status": "unverified" if host_result is None else "fail"}),
@@ -638,17 +745,103 @@ class RecipeRunner:
     def _finish_native(self, run, record, step, plan):
         # No further evaluation or transform read occurs while outcome is
         # unknown. Reaching this branch requires its terminal success receipt.
-        if record.state == "checkpointing":
-            return self._update(run, state="blocked", blocked_reason="CHECKPOINT_MISSING")
-        record = record.model_copy(update={"state": "checkpointing"})
-        run = self._step_update(run, record)
-        value = self.service.recipe_checkpoint(run, plan, step)
-        if not value.get("verified") or not value.get("sha256") or not value.get("source_binding"):
-            return self._update(run, state="blocked", blocked_reason="CHECKPOINT_MISSING")
-        binding = SourceBinding.model_validate(value["source_binding"])
-        if not binding.complete:
-            return self._update(run, state="blocked", blocked_reason="SUCCESSOR_BINDING_UNVERIFIED")
-        ref = self.store.artifact(run.run_id, "successor_checkpoint", value)
-        record = record.model_copy(update={"checkpoint_ref": ref.path, "expected_successor": binding,
-                                           "verification_status": "pass"})
-        return self._persist_result(run, record, value, current_binding=binding.model_dump(mode="json"))
+        receipt_ref = next((item for item in record.artifact_refs if item.path == record.receipt_ref), None)
+        if receipt_ref is None or record.stage_effect is None:
+            raise RecipeConflict("NATIVE_EVIDENCE_MISSING")
+        receipt = self.store.read_artifact(run.run_id, receipt_ref)
+        effect = record.stage_effect
+        transition = {}
+        if step.stage in {"initial_checkpoint", "checkpoint"}:
+            observation = self.service.recipe_checkpoint_observation(receipt, effect)
+            binding = observation.source_after
+            value = observation.model_dump(mode="json")
+            ref = self.store.artifact(run.run_id, "successor_checkpoint", value)
+            run = self._step_update(run, record, artifacts=[item.model_dump(mode="json") for item in (*run.artifacts, ref)])
+            record = record.model_copy(update={"checkpoint_ref": ref.path, "checkpoint_observation": observation})
+        elif step.stage == "export_stage":
+            from .export_workflow import ExportStage, seal_export
+            stage = ExportStage.from_dict(record.stage_data["export_stage"])
+            artifact = seal_export(stage, receipt, plan.spec.budgets)
+            value = {"artifact": artifact.model_dump(mode="json"), "export_stage": stage.as_dict(),
+                     "before_export": record.stage_data["before_export"]}
+            binding = effect.source_binding
+            transition["export"] = "staged"
+        else:
+            binding = self.service.recipe_successor_source(effect, receipt)
+            value = {"source_binding": binding.model_dump(mode="json"), "receipt_digest": digest(receipt)}
+        if plan.spec.character.derived_target is not None and plan.spec.character.derived_target.producer_step_id == step.step_id:
+            mapping = self.service.recipe_resolve_derived_target(plan.spec.character.derived_target, receipt)
+            transition["derived_targets"] = [item.model_dump(mode="json") for item in (*run.derived_targets, mapping)]
+            binding = mapping.source_binding
+        used = run.budgets_used.model_dump()
+        native_files = set()
+        for prior in (*run.steps, record):
+            if prior.stage_effect is not None:
+                native_files.update(prior.stage_effect.output_paths)
+        retained = sum(Path(path).stat().st_size for path in native_files if Path(path).is_file())
+        retained += sum(path.stat().st_size for path in (self.store.run_dir(run.run_id) / "artifacts").glob("*.json"))
+        used["disk_bytes"] = max(used["disk_bytes"], retained)
+        if step.stage == "export_stage":
+            used["output_bytes"] = max(used["output_bytes"], artifact.bytes)
+        usage = BudgetUsage.model_validate(used)
+        # Receipt/copy recovery is observation and remains possible after expiry;
+        # resource caps still apply before a later effect can be dispatched.
+        for name in ("disk_bytes", "output_bytes"):
+            if getattr(usage, name) > getattr(plan.spec.budgets, name):
+                raise RecipeConflict(f"RESOURCE_BUDGET_EXCEEDED: {name}")
+        transition["budgets_used"] = usage.model_dump(mode="json")
+        record = record.model_copy(update={"expected_successor": binding, "verification_status": "pass"})
+        return self._persist_result(run, record, value, current_binding=binding.model_dump(mode="json"), **transition)
+
+    def _export_host_step(self, run, record, step, plan):
+        plan = plan.model_copy(update={"spec": self.effective_spec(plan.spec, run)})
+        from .export_models import ArtifactRef as ExportArtifact, PublishPermit, ValidationBundle
+        from .export_publisher import publish_verified, reconcile_publish
+        from .export_workflow import validate_export
+        from .target_capture import make_export_expectation, roundtrip_quality_context
+        exported = self._latest(run, "export_stage")
+        artifact = ExportArtifact.model_validate(exported["artifact"])
+        if step.stage == "export_validate":
+            # Persisted captures preserve both original intent and the actual
+            # pre-export state. Reconstructing this host context is safe to repeat.
+            before = _batch(exported["before_export"]["global"])
+            original = _batch(self._latest(run, "baseline_capture")["global"])
+            rig = self._profile(plan.spec)
+            expected = make_export_expectation(before, plan.spec.export, rig,
+                original_reference=original, intent=plan.spec.intent, policy=plan.spec.quality,
+                reference_digests={"supports": digest(plan.spec.references.support_tracks),
+                                   "geometry": digest(plan.spec.references.geometry), "props": digest(plan.spec.references.prop_tracks)})
+            context = roundtrip_quality_context(before, original, rig, plan.spec.intent, plan.spec.quality,
+                                               supports=self._supports(plan.spec))
+            result = validate_export(artifact, plan.spec.export, expected, quality_context=context,
+                                     provenance_key=self.store._secret, timeout=plan.spec.budgets.per_step_seconds,
+                                     cancel=lambda: self.store.read(run.run_id).cancel_requested)
+            if result.get("export") != "validated" or result.get("quality") != "pass":
+                return self._persist_result(run, record, result, state="blocked", blocked_reason="EXPORT_VALIDATION_FAILED")
+            return self._persist_result(run, record, result, export="validated")
+        if record.stage_data is None:
+            grant = self.store.read_grant(run.authorization_id)
+            permit = PublishPermit(destination=plan.spec.export.destination, authorization_digest=digest(grant),
+                artifact_sha256=artifact.sha256, profile_digest=digest(plan.spec.export),
+                expires_at=min(grant.expires_at, run.deadline), run_id=run.run_id, step_id=step.step_id,
+                overwrite_mode=plan.spec.export.overwrite_mode, overwrite_semantics=plan.spec.export.overwrite_semantics)
+            journal = Path(exported["export_stage"]["directory"])
+            key = digest({"run_id": run.run_id, "step_id": step.step_id, "authorization_digest": digest(grant)})[:32]
+            record = record.model_copy(update={"stage_data": {"permit": permit.model_dump(mode="json"),
+                "intent_path": str(journal / f"publish-{key}.intent.json"), "journal": str(journal)}})
+            run = self._step_update(run, record)
+        data = record.stage_data
+        permit = PublishPermit.model_validate(data["permit"])
+        if Path(data["intent_path"]).exists():
+            result = reconcile_publish(data["intent_path"], expected_permit=permit)
+        else:
+            validate_usage(plan, run.budgets_used, run.deadline)
+            self.store.verify_grant(self.store.read_grant(run.authorization_id), plan)
+            if run.cancel_requested:
+                return self._step_update(run, record.model_copy(update={"state": "canceled"}), state="canceled")
+            validation = self._latest(run, "export_validate")
+            result = publish_verified(artifact, ValidationBundle.model_validate(validation["validation_bundle"]), permit,
+                                      journal_directory=data["journal"])
+        if result.get("status") != "published":
+            return self._persist_result(run, record, result, step_state="blocked", state="blocked", blocked_reason="PUBLISH_OUTCOME_UNKNOWN")
+        return self._persist_result(run, record, result, export="published")

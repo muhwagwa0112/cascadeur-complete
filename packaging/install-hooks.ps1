@@ -7,9 +7,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot)
-$BackupRoot = Join-Path $env:LOCALAPPDATA ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-installer')
-$SettingsPath = Join-Path $env:LOCALAPPDATA 'Nekki Limited\Cascadeur\settings.json'
-$UserScriptsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Nekki Limited\Cascadeur\user_scripts')).TrimEnd('\')
+. (Join-Path $PSScriptRoot 'upgrade-state.ps1')
+$InstallLocalAppData = Get-CascadeurLocalAppData
+Assert-CascadeurUpgradeIdle $RuntimeRoot
+if ($TransactionManifest -and (Test-Path -LiteralPath $TransactionManifest)) {
+    $upgradeTransaction = Get-Content -LiteralPath $TransactionManifest -Raw | ConvertFrom-Json
+    Copy-CascadeurPersistentState (Join-Path $upgradeTransaction.backup_root 'runtime') $RuntimeRoot
+}
+$BackupRoot = Join-Path $InstallLocalAppData ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-installer')
+$SettingsPath = Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\settings.json'
+$UserScriptsRoot = [IO.Path]::GetFullPath((Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\user_scripts')).TrimEnd('\')
 $CodexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
 New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
 

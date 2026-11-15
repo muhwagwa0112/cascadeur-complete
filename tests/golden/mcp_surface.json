@@ -2000,7 +2000,7 @@
       }
     },
     "change_prepare": {
-      "description": "Dry-run a destructive change, save a CASC snapshot, and return an expiring token.",
+      "description": "Prepare an exact change against an issued source and existing checkpoint; return an expiring token without editing.",
       "input_schema": {
         "$defs": {
           "SceneBinding": {
@@ -2752,7 +2752,7 @@
       }
     },
     "feature_prepare": {
-      "description": "Snapshot and prepare any adapter-bound feature by id; see feature_describe for its arguments.",
+      "description": "Prepare an adapter-bound feature against its issued source and checkpoint; see feature_describe for arguments.",
       "input_schema": {
         "$defs": {
           "SceneBinding": {
@@ -3495,6 +3495,56 @@
       "output_schema": {
         "additionalProperties": true,
         "title": "inbetweening_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "inspect_motion_inputs": {
+      "description": "Read native rig/context metadata into a provenance-bound input draft.",
+      "input_schema": {
+        "properties": {
+          "character_ref": {
+            "title": "Character Ref",
+            "type": "string"
+          },
+          "frame_range": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Frame Range",
+            "type": "array"
+          },
+          "purpose": {
+            "default": "repair",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "support_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Support Refs"
+          }
+        },
+        "required": [
+          "character_ref",
+          "frame_range"
+        ],
+        "title": "inspect_motion_inputsArguments",
+        "type": "object"
+      },
+      "name": "inspect_motion_inputs",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "inspect_motion_inputsDictOutput",
         "type": "object"
       }
     },
@@ -6638,11 +6688,30 @@
             "additionalProperties": false,
             "properties": {
               "character_id": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\x00-\\x1f*?]+$",
-                "title": "Character Id",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[^\\x00-\\x1f*?]+$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Character Id"
+              },
+              "derived_target": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/DerivedTargetRef"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
               },
               "layer_ids": {
                 "default": [],
@@ -6656,13 +6725,13 @@
                 "type": "array"
               },
               "object_ids": {
+                "default": [],
                 "items": {
                   "maxLength": 256,
                   "minLength": 1,
                   "pattern": "^[^\\x00-\\x1f*?]+$",
                   "type": "string"
                 },
-                "minItems": 1,
                 "title": "Object Ids",
                 "type": "array"
               },
@@ -6696,9 +6765,17 @@
                 "type": "object"
               },
               "rig_profile_digest": {
-                "pattern": "^[0-9a-f]{64}$",
-                "title": "Rig Profile Digest",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Rig Profile Digest"
               },
               "role_ids": {
                 "additionalProperties": {
@@ -6711,11 +6788,19 @@
                 "type": "object"
               },
               "root_id": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\x00-\\x1f*?]+$",
-                "title": "Root Id",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[^\\x00-\\x1f*?]+$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Root Id"
               },
               "source_character_id": {
                 "anyOf": [
@@ -6733,14 +6818,6 @@
                 "title": "Source Character Id"
               }
             },
-            "required": [
-              "character_id",
-              "root_id",
-              "object_ids",
-              "role_ids",
-              "rig_profile_digest",
-              "rig_profile"
-            ],
             "title": "CharacterSpec",
             "type": "object"
           },
@@ -7016,6 +7093,55 @@
               "provenance"
             ],
             "title": "ContactSegment",
+            "type": "object"
+          },
+          "DerivedTargetRef": {
+            "additionalProperties": false,
+            "properties": {
+              "expected_character_count": {
+                "const": 1,
+                "default": 1,
+                "title": "Expected Character Count",
+                "type": "integer"
+              },
+              "ownership_rule": {
+                "const": "producer_created_character",
+                "default": "producer_created_character",
+                "title": "Ownership Rule",
+                "type": "string"
+              },
+              "producer_step_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f*?]+$",
+                "title": "Producer Step Id",
+                "type": "string"
+              },
+              "role_paths": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Role Paths",
+                "type": "object"
+              },
+              "selector_kind": {
+                "const": "role_path",
+                "default": "role_path",
+                "title": "Selector Kind",
+                "type": "string"
+              },
+              "topology_policy_digest": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Topology Policy Digest",
+                "type": "string"
+              }
+            },
+            "required": [
+              "producer_step_id",
+              "role_paths",
+              "topology_policy_digest"
+            ],
+            "title": "DerivedTargetRef",
             "type": "object"
           },
           "ExportBoneMap": {
@@ -7463,6 +7589,24 @@
           "MotionStageSpec": {
             "additionalProperties": false,
             "properties": {
+              "host_channel": {
+                "default": "position",
+                "enum": [
+                  "position",
+                  "rotation"
+                ],
+                "title": "Host Channel",
+                "type": "string"
+              },
+              "host_space": {
+                "default": "global",
+                "enum": [
+                  "local",
+                  "global"
+                ],
+                "title": "Host Space",
+                "type": "string"
+              },
               "keyposes": {
                 "default": [],
                 "items": {
@@ -7486,7 +7630,8 @@
                   "keyposes",
                   "native_root_motion",
                   "native_inbetweening",
-                  "external_motion_asset"
+                  "external_motion_asset",
+                  "native_unbaking"
                 ],
                 "title": "Mode",
                 "type": "string"
@@ -7524,6 +7669,23 @@
                   }
                 ],
                 "default": null
+              },
+              "unbaking_step": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "prepare_keys_by_fulcrums",
+                      "adjust_keys_and_interpolation",
+                      "adjust_autoposing_lock_state"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Unbaking Step"
               }
             },
             "title": "MotionStageSpec",
@@ -8935,6 +9097,40 @@
       "output_schema": {
         "additionalProperties": true,
         "title": "request_statusDictOutput",
+        "type": "object"
+      }
+    },
+    "resolve_motion_inputs": {
+      "description": "Resolve semantic role choices against the unchanged native input draft.",
+      "input_schema": {
+        "properties": {
+          "draft_ref": {
+            "title": "Draft Ref",
+            "type": "string"
+          },
+          "intent_policy": {
+            "additionalProperties": true,
+            "title": "Intent Policy",
+            "type": "object"
+          },
+          "overrides": {
+            "additionalProperties": true,
+            "title": "Overrides",
+            "type": "object"
+          }
+        },
+        "required": [
+          "draft_ref",
+          "overrides",
+          "intent_policy"
+        ],
+        "title": "resolve_motion_inputsArguments",
+        "type": "object"
+      },
+      "name": "resolve_motion_inputs",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "resolve_motion_inputsDictOutput",
         "type": "object"
       }
     },

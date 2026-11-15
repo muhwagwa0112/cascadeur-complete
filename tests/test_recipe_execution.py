@@ -38,6 +38,67 @@ def allocated(tmp_path):
     return paths, store, plan, grant, run
 
 
+def test_r4_checkpoint_steps_and_derived_identity_are_explicit():
+    from cascadeur_complete.recipe_planning import compile_steps
+    value = spec_dict()
+    steps = compile_steps(RecipeSpec.model_validate(value))
+    bootstrap = steps[1]
+    assert bootstrap.stage == "initial_checkpoint" and bootstrap.operation_name == "safety.bootstrap"
+    assert bootstrap.lowering_rule_id == "bootstrap-v1"
+    checkpoints = [step for step in steps if step.stage == "checkpoint"]
+    assert checkpoints and all(step.operation_name == "safety.checkpoint" and step.max_calls == 1 for step in checkpoints)
+    value["character"] = {"derived_target": {"producer_step_id": bootstrap.step_id,
+        "role_paths": {"root": "Character/Root"}, "topology_policy_digest": "a" * 64}}
+    derived = RecipeSpec.model_validate(value)
+    assert derived.character.character_id is None and derived.character.object_ids == ()
+    value["character"]["character_id"] = "invented-before-import"
+    with pytest.raises(ValidationError, match="invented"):
+        RecipeSpec.model_validate(value)
+
+
+def test_r4_late_terminal_receipt_resume_schedules_original_step(tmp_path):
+    paths, store, _, _, run = allocated(tmp_path)
+    record = run.steps[1].model_copy(update={"state": "blocked", "request_id": "original",
+        "attempt_id": "attempt", "dispatch_lease_epoch": run.lease_epoch,
+        "execution_outcome": "outcome_unknown", "result": {"host_commit_result": {"ok": True}}})
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+        transition={"state": "blocked", "blocked_reason": "outcome_unknown", "steps": [
+            record.model_dump(mode="json") if item.step_id == record.step_id else item.model_dump(mode="json") for item in run.steps]})
+    queried, scheduled = [], []
+    receipt = {"phase": "terminal", "outcome": "succeeded", "request_id": "original", "run_id": run.run_id,
+               "step_id": record.step_id, "attempt_id": "attempt", "lease_epoch": run.lease_epoch}
+    runner = RecipeRunner(SimpleNamespace(paths=paths, client=SimpleNamespace(
+        request_status=lambda request_id: queried.append(request_id) or receipt)))
+    runner._schedule = scheduled.append
+    runner.resume(run.run_id)
+    resumed = store.read(run.run_id)
+    restored = next(item for item in resumed.steps if item.step_id == record.step_id)
+    assert queried == ["original"] and scheduled == [run.run_id]
+    assert restored.state == "verifying" and restored.request_id == "original" and restored.calls_used == record.calls_used
+
+
+def test_r4_worker_exit_preserves_pending_wakeup(tmp_path):
+    import threading
+    paths, _, _, _, run = allocated(tmp_path)
+    runner = RecipeRunner(SimpleNamespace(paths=paths))
+    entered, release, resumed = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+    def work(run_id):
+        calls.append(run_id)
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(5)
+        else:
+            resumed.set()
+    runner._work = work
+    runner._schedule(run.run_id)
+    assert entered.wait(5)
+    runner._schedule(run.run_id)
+    release.set()
+    assert resumed.wait(5)
+    assert calls == [run.run_id, run.run_id]
+
+
 def test_strict_recipe_rejects_unknown_boolean_frames_and_nonfinite():
     for update in ({"arbitrary_operation": "scene.delete"},):
         with pytest.raises(ValidationError):

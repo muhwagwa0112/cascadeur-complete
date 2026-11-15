@@ -47,9 +47,31 @@ class KeyModel:
     keys_by_id: dict
     mode_by_id: dict
     capability: str
+    descriptor_digest: str | None = None
+    source_fingerprint: str | None = None
 
 
-def build_key_model(capture, rig, *, interpolation_capabilities):
+def build_key_model(capture, rig, *, interpolation_capabilities=None, key_layout=None, verifier=None):
+    descriptor_digest=source_fingerprint=None
+    capability="declared_only"
+    if key_layout is not None:
+        from .motion_key_layout import verify_key_layout
+        observed,descriptor_digest=verify_key_layout(key_layout,capture,verifier)
+        source_fingerprint=observed.source_fingerprint
+        interpolation_capabilities={}
+        for driver in observed.drivers:
+            if driver.channel!="position" or driver.space!=capture.space:
+                continue
+            modes=set(driver.segment_modes)
+            # Explicit observation of *no* controller/blend/cycle influence is
+            # required; an absent influence entry is not proof of independence.
+            if (set(driver.influences)!={"controllers","blend","cycle"}
+                    or any(driver.influences.values()) or len(modes)>1
+                    or modes-set(("LINEAR","STEP"))):
+                raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","native evaluator for nonlinear or influenced keys is unavailable")
+            interpolation_capabilities[driver.object_id]={"frames":driver.frames,"mode":next(iter(modes),"LINEAR")}
+        capability="verified"
+    interpolation_capabilities=interpolation_capabilities or {}
     keys, modes = {}, {}
     for object_id in rig.writable_ids:
         spec = interpolation_capabilities.get(object_id)
@@ -61,8 +83,9 @@ def build_key_model(capture, rig, *, interpolation_capabilities):
         if np.any(grid<capture.context.frames[0]) or np.any(grid>capture.context.frames[-1]):
             raise MotionInputError("KEY_LAYOUT_INSUFFICIENT","key influence extends outside the captured impact interval")
         keys[object_id], modes[object_id] = grid, str(spec.get("mode", "unknown"))
-    capability = "verified" if all(m in ("LINEAR", "STEP") for m in modes.values()) else "approximate"
-    return KeyModel(capture.context.frames, keys, modes, capability)
+    if any(m not in ("LINEAR","STEP") for m in modes.values()):
+        raise MotionInputError("INTERPOLATION_MODEL_UNVERIFIED","unsupported declared interpolation")
+    return KeyModel(capture.context.frames, keys, modes, capability,descriptor_digest,source_fingerprint)
 
 
 def fit_keys(goal, original, key_model, constraints, limits):
@@ -76,6 +99,18 @@ def fit_keys(goal, original, key_model, constraints, limits):
         return SolverResult("failed", ["EMPTY_GOAL"])
     if any(not np.isfinite(value) or value<0 for value in limits.values() if isinstance(value,(int,float))):
         return SolverResult("failed",["INVALID_POLICY"])
+    if type(limits.get("fit_iterations",10000)) is not int or not 0<limits.get("fit_iterations",10000)<=1_000_000:
+        return SolverResult("failed",["INVALID_POLICY"])
+    from .capture import estimate_motion_resources,enforce_motion_budget
+    estimate=estimate_motion_resources(len(original.context.frames),
+        {key:len(key_model.keys_by_id.get(key,())) for key in goal},
+        retained_capture_bytes=sum(value.nbytes for value in original.position_m.values())*3,
+        factorization_workspace_bytes=limits.get("factorization_workspace_bytes"))
+    try:
+        enforce_motion_budget(estimate,{"max_variables":1_000_000,"max_nonzeros":2_000_000,
+                                       "max_memory_bytes":512*1024*1024,**limits})
+    except MotionInputError as exc:
+        return SolverResult("failed",[exc.code],report={"resources":estimate})
     d1, d2 = temporal_operators(original.context.time_s)
     for object_id, wanted in goal.items():
         if object_id not in key_model.keys_by_id:
@@ -84,6 +119,8 @@ def fit_keys(goal, original, key_model, constraints, limits):
         if wanted.shape != (len(original.context.frames), 3) or not np.isfinite(wanted).all():
             return SolverResult("failed", ["INVALID_GOAL"])
         keys = key_model.keys_by_id[object_id]
+        if not set(map(int,keys))<=set(map(int,original.context.frames)):
+            return SolverResult("failed",["KEY_LAYOUT_INSUFFICIENT"],report={"detail":"original authored key values were not captured"})
         mode = key_model.mode_by_id[object_id]
         b = linear_interpolation(original.context.frames, keys)
         if mode == "STEP":
@@ -107,7 +144,8 @@ def fit_keys(goal, original, key_model, constraints, limits):
             linear = -2 * (b.T @ wanted[:, axis] + smooth @ original_keys[:, axis])
             solver = osqp.OSQP()
             solver.setup(sp.triu(2 * hessian).tocsc(), linear, sp.identity(len(keys), format="csc"),
-                         lower, upper, verbose=False, eps_abs=1e-8, eps_rel=1e-8, max_iter=10000)
+                         lower, upper, verbose=False, eps_abs=1e-8, eps_rel=1e-8,
+                         max_iter=int(limits.get("fit_iterations",10000)))
             result = solver.solve(raise_error=False)
             if (result.info.status not in ("solved", "solved inaccurate") or result.x is None
                     or not np.isfinite(result.x).all() or result.info.prim_res > 1e-6
@@ -120,12 +158,25 @@ def fit_keys(goal, original, key_model, constraints, limits):
             return SolverResult("failed", ["KEY_LAYOUT_INSUFFICIENT"], report={"fit_residual_m": residuals})
         targets[object_id] = {"frames": keys.tolist(), "position_m": output}
     return SolverResult("candidate", values=targets, report={"fit_residual_m": residuals,
-                         "prediction_model": key_model.capability, "runtime_quality": "unverified"})
+                         "prediction_model": key_model.capability, "runtime_quality": "unverified",
+                         "key_layout_digest":key_model.descriptor_digest,"model_source_fingerprint":key_model.source_fingerprint,
+                         "sample_frames":original.context.frames.tolist(),"resources":estimate})
 
 
 def _skew(vector):
     x, y, z = vector
     return np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
+
+
+def _sequence_resource_gate(batch, count, limits, *, constraint_nonzeros):
+    from .capture import estimate_motion_resources,enforce_motion_budget
+    estimate=estimate_motion_resources(len(batch.context.frames),{},variables=count,
+        constraint_nonzeros=constraint_nonzeros+count*6,
+        retained_capture_bytes=sum(x.nbytes for x in batch.position_m.values())*3,
+        factorization_workspace_bytes=limits.get("factorization_workspace_bytes"))
+    enforce_motion_budget(estimate,{"max_variables":1_000_000,"max_nonzeros":2_000_000,
+                                   "max_memory_bytes":512*1024*1024,**limits})
+    return estimate
 
 
 def _joint_angle_allowed(rig,role,first,middle,last):
@@ -179,6 +230,10 @@ def solve_arm_clearance_v2(batch, rig, surfaces, intent, limits):
     if (not np.isfinite([cap, margin, tolerance, radius]).all() or min(cap, tolerance, radius) <= 0
             or margin < 0 or isinstance(max_iterations, bool) or not isinstance(max_iterations, int) or not 0 < max_iterations <= 100):
         return SolverResult("failed", ["INVALID_POLICY"])
+    try:
+        resources=_sequence_resource_gate(batch,count,limits,constraint_nonzeros=count*50)
+    except MotionInputError as exc:
+        return SolverResult("unsupported",[exc.code],report={"detail":str(exc)})
     d1, d2 = temporal_operators(batch.context.time_s)
     hessian = sp.kron(sp.identity(len(sides)), sp.kron(sp.identity(n) + .01*d1.T@d1 + .001*d2.T@d2, sp.identity(6))).tocsc()
     current = np.zeros((len(sides), n, 6))
@@ -233,6 +288,9 @@ def solve_arm_clearance_v2(batch, rig, surfaces, intent, limits):
                                 jacobian[start+3+axis]=wrist_weight*normal[axis]
                             jacobians.append(jacobian)
                             lower.append(residual + dot(jacobian,value.reshape(-1)))
+                            if (len(jacobians)*12>max_nonzeros
+                                    or resources["estimated_peak_bytes"]+len(jacobians)*1024>limits.get("max_memory_bytes",512*1024*1024)):
+                                raise MotionInputError("RESOURCE_BUDGET_EXCEEDED","arm constraint assembly exceeds its resource budget")
         # Both arms move in this same iterate, including segment interiors.
         for left in range(len(sides)):
             for right in range(left+1, len(sides)):
@@ -262,6 +320,9 @@ def solve_arm_clearance_v2(batch, rig, surfaces, intent, limits):
                                     jacobian[index+3+axis]=jacobian.get(index+3+axis,0)+sign*weights[1]*normal[axis]
                             jacobians.append(jacobian)
                             lower.append(residual+dot(jacobian,value.reshape(-1)))
+                            if (len(jacobians)*12>max_nonzeros
+                                    or resources["estimated_peak_bytes"]+len(jacobians)*1024>limits.get("max_memory_bytes",512*1024*1024)):
+                                raise MotionInputError("RESOURCE_BUDGET_EXCEEDED","coupled arm constraint assembly exceeds its resource budget")
         return jacobians, lower, max(worst, 0.)
 
     try:
@@ -295,6 +356,8 @@ def solve_arm_clearance_v2(batch, rig, surfaces, intent, limits):
                             if segment==1: jac[index+3+axis]=direction[axis]
                         equalities.append(jac); targets.append(declared_lengths[side][segment]-length+dot(jac,flat))
             slack_count=len(jacobians)
+            resources=_sequence_resource_gate(batch,count+slack_count,limits,
+                constraint_nonzeros=sum(map(len,jacobians))+sum(map(len,equalities))+slack_count*3)
             collision=sp.hstack([sparse_rows(jacobians),sp.identity(slack_count)],format="csc")
             bone=sp.hstack([sparse_rows(equalities),sp.csc_matrix((len(equalities),slack_count))],format="csc")
             a=sp.vstack([collision,bone,sp.identity(count+slack_count)],format="csc")
@@ -338,7 +401,7 @@ def solve_arm_clearance_v2(batch, rig, surfaces, intent, limits):
                 return SolverResult("failed",["CORRECTION_ENVELOPE_EXCEEDED"])
             values[rig.role_ids[f"{side}.{role}"]]=batch.position_m[rig.role_ids[f"{side}.{role}"]]+delta
     return SolverResult(status,values={"position_m":values},report={"iterations":history,"runtime_quality":"unverified",
-                        "prediction_model":"coupled_capsules_triangle_surface","coverage":"sampled_frames"})
+                        "prediction_model":"coupled_capsules_triangle_surface","coverage":"sampled_frames","resources":resources})
 
 
 def solve_contacts_v2(batch, rig, supports, contacts, intent, limits):
@@ -380,6 +443,13 @@ def solve_contacts_v2(batch, rig, supports, contacts, intent, limits):
            for name, metric in baseline.items()):
         return SolverResult("no_change", report={"constraints_checked": True, "baseline": baseline})
     count = 6 * n * len(sides)
+    contact_rows=sum(int(np.searchsorted(batch.context.frames,contact.last_frame,side="right")
+                         -np.searchsorted(batch.context.frames,contact.first_frame,side="left"))
+                     for contact in contacts if contact.mode!="free")
+    try:
+        resources=_sequence_resource_gate(batch,count,limits,constraint_nonzeros=max(count*36,contact_rows*18))
+    except MotionInputError as exc:
+        return SolverResult("unsupported",[exc.code],report={"detail":str(exc)})
     d1, d2 = temporal_operators(batch.context.time_s)
     smooth = (sp.identity(n) + 0.01 * d1.T @ d1 + 0.001 * d2.T @ d2).tocsc()
     hessian = sp.kron(sp.identity(len(sides)), sp.kron(smooth, sp.identity(6))).tocsc()
@@ -448,6 +518,10 @@ def solve_contacts_v2(batch, rig, supports, contacts, intent, limits):
         log.append({"iteration": iteration, "max_contact_residual_m": maximum})
         if maximum <= min(gap_limit, drift_limit):
             break
+        try:
+            resources=_sequence_resource_gate(batch,count,limits,constraint_nonzeros=len(data)+count*6)
+        except MotionInputError as exc:
+            return SolverResult("unsupported",[exc.code],report={"detail":str(exc)})
         a = sp.csc_matrix((data, (rows, cols)), shape=(len(rhs), count))
         cap = np.tile([position_cap] * 3 + [rotation_cap] * 3, n * len(sides))
         step = np.tile([0.01] * 3 + [np.radians(5)] * 3, n * len(sides))
@@ -520,4 +594,4 @@ def solve_contacts_v2(batch, rig, supports, contacts, intent, limits):
             return SolverResult("failed", ["CORRECTION_ENVELOPE_EXCEEDED"])
     return SolverResult("candidate", values={"position_m": targets},
                         report={"metrics": metrics, "iterations": log, "runtime_quality": "unverified",
-                                "root_preserved": True, "host_model_pass": True})
+                                "root_preserved": True, "host_model_pass": True,"resources":resources})
