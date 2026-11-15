@@ -7,6 +7,30 @@
 
 ## 이번 변경과 관찰 범위
 
+### 최신 추가: 키포즈 작성과 독립 객체 model-pose rest
+
+원격 개선안 branch의 최신 SHA `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`를 다시 확인했다. 기존 r4 목표를 유지하며, 이번에는 실제 키포즈 쓰기와 target rest 관측을 연결했다. 전체 r4 목표는 진행 중이다.
+
+- scene/motion 자격 명령이 각각 interpolation 실험을 재생성해 먼저 등록한 adapter의 model digest를 무효화하던 문제를 수정했다. 현재 loaded bytes/build/epoch의 private 성공 관측만 재사용한다. 새 프로세스에서는 실제 실험이 필요하며 caller가 proof를 넣을 수 없다.
+- existing-position writer는 native float32 인코딩과 exact readback 계약을 source scope에 발급한다. host의 쓰기 후 확인도 이 계약을 확인하고 같은 float32 값과 정확히 비교한다. 기존 코드가 존재하지 않는 source `context.metres_per_scene_unit`를 읽어 native 성공 뒤 실패하던 문제를 해결했다. native 값 비교에 물리 단위를 추정하지 않으며 SI 품질은 별도 명시 MotionContext를 사용한다.
+- recipe planner의 rotation adapter 조회를 연결하고 `wrist_soften`의 permit를 실제 rotation operation/channel과 일치시켰다. 이 두 수정의 실제 character rotation 실행은 아직 관찰하지 않았다.
+- 설치 SDK의 공식 Set/Go To Model Pose 명령이 사용하는 `Node3d.model_local_position/rotation/scale`을 읽는 전용 reader를 추가했다. private qualification이 유효한 부모 없는 단일 Transform, 실제 owned Static data, 정상 quaternion과 unit scale만 허용한다. recipe target은 선언된 rest와 이 실제 native 행렬을 정확히 비교하며 private observation을 재인증한다. 일반 리그의 inverse-bind reader나 bone length 요건을 이 경로로 우회하지 않는다.
+
+새 Cascadeur PID 36280, build `2026.2.3.0.16863`, bridge fingerprint `e2f73393d8c96ea6c8692bcb5d83b0cc3e8f396cf6c55acb74a0e39ac4fec21a`, epoch `fe71b8c1-4df5-4d2e-b895-15a34e6d075b`에서 아래를 직접 관찰했다. native 코드를 hot reload하지 않았다.
+
+| 실제 확인 | 결과와 범위 |
+|---|---|
+| scene → motion 자격 명령 연속 실행 | 최초 40 model trials, 후속 명령의 같은 private model digest 재사용(`reused=true`), 실제 writer 16 trials. model digest `8e5abd2d6b3f7cc8be22aaa085fc3b36a2e12d9c1c61fb67faf1fc64514e3c9f`, writer digest `863fa8b90efab7876d712df4b7cd471fcbf1e12f775542835b640aca4ecddeea` |
+| 독립 scene 관측 | `independent-scene-qualification-3309e929-c93f-4b27-b1c6-31b7732717be/qualification.json`, SHA-256 `459b0192a0847024edc02b77dab8fdd411479bebc224e1f16bea2a922d34ba2f` |
+| 실제 공개 recipe | run `9142c760-f8ad-4c1d-be76-53a51a1d9368`, `succeeded`. 기존 0/2/4 키의 위치를 각각 `[0.25,-0.25,0.5]`, `[2.25,0.75,0.25]`, `[0.25,1.75,1.25]`로 작성. 쓰기 요청 `63e726d2-5807-49d1-84e9-c2dfe6f05d12`, exact settled readback과 인증 성공 receipt 확인 |
+| 평가·품질·체크포인트 | 평가 요청 `2cbb111a-b3df-4e75-ad91-2842f5a15f53`, 최종 checkpoint `6f4648d6-98b3-4f9c-8360-7920942f6513` 성공. 0..4 sampled global/local capture 뒤 여섯 필수 preservation metric의 measured max 0. quality artifact SHA-256 `92e2bd25dfb31079f04a97ea99b018b7d2fad5c96c0a871fc96c333236c08c8f` |
+| rest 관측·공개 target 인증 | 실제 저장된 model pose는 identity, 작성한 frame-0 위치는 위의 nonzero 값. current pose를 rest로 사용하지 않았다. 공개 `recipe_observe_target`과 원 native private record 재인증 성공, provenance `native_node3d_model_pose`. target artifact SHA-256 `f52f131ce47ce9fd8091ce1f43765eae6ca30b1759c6917f71ee80e29be36796` |
+| 원본 | qualification의 입력 파일 SHA-256 유지. receipt·checkpoint·기존 unknown을 보존. 산출물은 ignored local runtime 폴더에 보관 |
+
+이 recipe의 source/baseline은 **키포즈를 작성한 뒤** 캡처했다. 30fps, 0.01m/scene-unit, identity basis는 확인용 명시 정책이다. 결과는 입력 애니메이션 보존, jerk 개선, humanoid cleanup, 실제 물리 metadata, FBX consumer 왕복/게시의 성공 증거가 아니다. export는 `not_requested`다. 전체 suite/build/CI는 실행하지 않았다.
+
+다음 연결의 구체적인 제한도 확인했다. 설치된 root constraint part의 내부 graph와 공식 builder의 외부 edge 정의는 찾았지만, 현재 scene graph를 읽는 `Update.root_group()`은 edit callback 안에서만 제공된다. 기존 readonly 전체 projection과 revision에는 graph edge가 포함되지 않아 캐시된 graph를 현재 권위로 사용할 수 없다. fresh readonly graph 관측/변경 감지 근거를 확보하기 전에는 final-root를 추정하지 않는다. general retarget의 native input observer/controller, 실제 실패 후 conditional recovery, 원본 intent/rest와 연결한 consumer 왕복·게시도 남아 있다.
+
 r4의 16개 항목을 대상으로 source/완료/receipt, 입력 수집, recipe lowering·bootstrap·checkpoint·resume, 실제 품질 관측 계약, sparse 자원 예산, export·consumer capture·publish 및 설치 상태 보존 경로를 연결했다. **16개 항목 전체의 실앱 지원이나 전체 제작 파이프라인 완료를 의미하지 않는다.** native 동작과 리그 범위별로 아래 제한이 남는다.
 
 실제 실행 파일은 `C:\Program Files\Cascadeur\cascadeur.exe`이며 ProductVersion과 FileVersion은 `2026.2.3.0.16863`이다. PE의 숫자 고정 버전 `2026.2.0.16863`과 구분해 실행 중인 파일의 ProductVersion을 읽도록 했다. 설치된 SDK와 embedded Python 3.11에서 실제 callback·저장·재로드를 관찰했다. 기존 2026.1 지원 표기를 2026.2 전체 지원으로 바꾸지 않았다.

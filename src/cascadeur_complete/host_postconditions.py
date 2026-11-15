@@ -300,6 +300,27 @@ class HostPostconditionsMixin:
         if not samples:
             return 0
         is_position = record.operation.name == "animation.position_keys_set"
+        position_scale, tolerance, unit = None, SETTLED_TOLERANCE_DEGREES, "deg"
+        exact_native_position = False
+        if is_position:
+            scope = record.source_binding.scope
+            exact_native_position = (
+                scope.get("adapter_id") == "native-independent-existing-position-v1"
+                and scope.get("position_readback_contract") == "native_float32_xyz_exact_v1"
+                and bool(scope.get("model_qualification_digest"))
+                and bool(scope.get("writer_qualification_digest")))
+            if exact_native_position:
+                # This independently qualified writer encodes native float32
+                # XYZ and proves exact readback. It does not observe physical
+                # units. Keep this check in native units; SI quality uses its
+                # separately authenticated explicit MotionContext.
+                position_scale, tolerance, unit = 1., 0., "native scene units"
+            else:
+                position_scale = scope["context"]["metres_per_scene_unit"]
+                if (isinstance(position_scale, bool) or not isinstance(position_scale, (int, float))
+                        or not math.isfinite(position_scale) or position_scale <= 0):
+                    raise RuntimeError("MISSING_CLIP_METADATA: explicit positive position conversion required")
+                tolerance, unit = 0.0005, "m"
         default_space = "global" if is_position else "local"
         space = str(record.operation.arguments.get("space", default_space))
         time.sleep(0.3)
@@ -340,19 +361,17 @@ class HostPostconditionsMixin:
                     actual = item["position"]
                     if len(actual) != 3 or not all(math.isfinite(v) for v in actual):
                         raise RuntimeError("INCOMPLETE_CAPTURE: invalid settled position")
-                    scale = record.source_binding.scope["context"]["metres_per_scene_unit"]
-                    error = math.sqrt(sum((a-b)**2 for a,b in zip(actual, expected, strict=True))) * scale
+                    if exact_native_position:
+                        import struct
+                        expected = struct.unpack("=3f", struct.pack("=3f", *expected))
+                    error = math.sqrt(sum((a-b)**2 for a,b in zip(actual, expected, strict=True))) * position_scale
                 else:
                     error = quaternion_angle_degrees(expected, item["rotation"]["quaternion_wxyz"])
                 if error > worst[0]:
                     worst = (error, object_id, sample_frame)
-        if is_position:
-            tolerance, unit = 0.0005, "m"
-        else:
-            tolerance, unit = SETTLED_TOLERANCE_DEGREES, "deg"
         if worst[0] > tolerance:
             raise RuntimeError(
-                f"written value did not persist: {worst[1]} at frame {worst[2]} differs by {worst[0]:.2f} {unit} "
+                f"written value did not persist: {worst[1]} at frame {worst[2]} differs by {worst[0]:.9g} {unit} "
                 "after the update (AutoPosing or the rig re-solved it)"
             )
         return len(samples)

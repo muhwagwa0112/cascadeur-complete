@@ -10,9 +10,9 @@ def command_description():
 
 
 def run(scene):
-    from .native_interpolation_qualification import qualify_independent_models
+    from .native_interpolation_qualification import ensure_independent_models
     from .native_independent_scene import qualify_independent_scene_adapter
-    models = qualify_independent_models()
+    models = ensure_independent_models()
     adapter = qualify_independent_scene_adapter()
     scene.success("Qualified independent complete-scene bootstrap, evaluation and checkpoint")
     return {"models": models, "scene_adapter": adapter}

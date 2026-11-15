@@ -118,7 +118,7 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
         variants = cleanup.variants or (VariantEnvelope(variant_id="requested", parameters=cleanup.parameters),)
         add("solve", "motion_cleanup", "motion.solve", "host_compute", {"cleanup_index": index}, variants=variants,
             postconditions=("finite_feasible_candidate", "original_intent_preserved"))
-        rotations = cleanup.kind in {"fingers", "finger_fan", "hand_pose"}
+        rotations = cleanup.kind in {"fingers", "finger_fan", "hand_pose", "wrist_soften"}
         add("correction", "rotation_keys" if rotations else "position_keys",
             "animation.rotation_keys_set" if rotations else "animation.position_keys_set", "scene_mutation",
             {"cleanup_index": index, "space": "local" if rotations else "global"}, ("rotation",) if rotations else ("position",),

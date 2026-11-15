@@ -214,6 +214,17 @@ context before accepting roundtrip quality.
 See [the r4 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
 the limits of checks performed, and the next implementation steps.
 
+A separate real five-frame keypose recipe has also completed existing-key
+position writes, exact native float32 readback, evaluation, sampled quality and
+checkpoint on installed `2026.2.3.0.16863`. The independent scene and motion
+qualification commands now reuse their current private model observation so
+running both commands preserves the first adapter's qualification. For this
+qualified parentless Transform only, recipe target rest can be authenticated
+from its stored `Node3d.model_local_*` model pose. This is distinct from skin
+inverse binds, current animation, physical metadata and FBX defaults. The
+keypose recipe's source capture follows authored motion; its zero preservation
+errors do not establish preservation of the input animation or cleanup quality.
+
 See [the cleanup workflow](docs/MOCAP_CLEANUP_WORKFLOW.md) for intent and evidence
 requirements. Its earlier production example is historical context, not evidence
 that this guarded runtime supports every listed stage.

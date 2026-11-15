@@ -10,9 +10,9 @@ def command_description():
 
 
 def run(scene):
-    from .native_interpolation_qualification import qualify_independent_models
+    from .native_interpolation_qualification import ensure_independent_models
     from .native_independent_position import qualify_independent_position_writer
-    models = qualify_independent_models()
+    models = ensure_independent_models()
     writer = qualify_independent_position_writer()
     scene.success("Qualified independent position models and existing-key writer")
     return {"models": models, "writer": writer}

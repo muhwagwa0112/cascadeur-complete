@@ -325,6 +325,7 @@ class NativeIndependentPositionAdapter(NativeSceneAdapter):
             "declared_channel_space":arguments["space"],"requested_position_data_id":driver["data_id"],
             "authoritative_write_data_id":driver["position_closure"]["data_ids"]["local_position"],
             "position_conversion":"independent_identity_global_to_local" if arguments["space"]=="global" else "identity_local",
+            "position_readback_contract":"native_float32_xyz_exact_v1",
             "position_closure":driver["position_closure"],
             "model_qualification_digest":guards.digest(model),
             "writer_qualification_digest":None if probing else guards.digest(json.loads(self.evidence_bytes))}

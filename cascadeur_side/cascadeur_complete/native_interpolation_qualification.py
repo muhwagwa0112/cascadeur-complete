@@ -57,6 +57,23 @@ def qualified_models():
     return [] if value is None else list(value["qualified_models"])
 
 
+def ensure_independent_models():
+    """Compose explicit setup commands without replacing their shared proof.
+
+    This only reuses this module's private successful native observation, after
+    checking the current loaded package, build and epoch. A fresh process still
+    performs the experiment; callers cannot supply proof bytes or model IDs.
+    """
+    from . import guarded_runtime as guards
+    value = qualification()
+    if value is None:
+        return qualify_independent_models()
+    return {"qualified_models": list(value["qualified_models"]),
+            "qualification_digest": guards.digest(value),
+            "native_build": value["native_build"], "runtime_epoch": value["runtime_epoch"],
+            "trial_count": len(value["trials"]), "reused": True}
+
+
 def qualified_export_metadata(bv, dv, behaviour, object_id):
     value = qualification()
     if value is None:

@@ -2,7 +2,8 @@
 
 Role names, constraints and physical conversions remain declarations. This
 module neither expands source scope nor qualifies a writer. Rest, when supplied,
-must match actual native inverse-bind evidence, never the current pose.
+must match actual native inverse-bind evidence or the separately qualified
+independent Transform's stored Node3d model pose, never the current pose.
 """
 from __future__ import annotations
 
@@ -121,12 +122,23 @@ def _read(scene, request):
     if rests or lengths:
         required = sorted({stable(key) for key in rests} | {stable(key) for key in lengths})
         native_rest = read_native_bind_rest(scene, required)
-        if native_rest["errors"] or native_rest["unobserved"]:
+        from .native_interpolation_qualification import independent_projection_identity
+        if (len(profile_ids) == 1 and independent_projection_identity(projection, required[0])):
+            # This independently qualified domain contains no mesh assets. Its
+            # stored model pose is a distinct source contract, not a general
+            # fallback for missing/malformed skin binds or character evidence.
+            if native_rest["errors"] or native_rest["rest_local_transforms"]:
+                raise ValueError("RIG_REST_CONFLICT: independent model pose conflicts with inverse-bind evidence")
+            if lengths:
+                raise ValueError("RIG_BONE_LENGTH_UNVERIFIED: parentless model pose is not a bone length")
+            from .native_model_pose import read_independent_model_pose_rest
+            native_rest = read_independent_model_pose_rest(projection, required)
+        elif native_rest["errors"] or native_rest["unobserved"]:
             raise ValueError("RIG_REST_UNVERIFIED: complete native inverse-bind evidence required")
         for key, value in rests.items():
             matrix, _ = _matrix(value, "recipe rest:" + key)
             if not np.array_equal(matrix, np.asarray(native_rest["rest_local_transforms"][stable(key)])):
-                raise ValueError("RIG_REST_MISMATCH: rest must equal native scene-local inverse-bind matrix")
+                raise ValueError("RIG_REST_MISMATCH: rest must equal the observed native scene-local rest matrix")
         for key, value in lengths.items():
             expected = float(np.linalg.norm(np.asarray(native_rest["rest_local_transforms"][stable(key)])[:3, 3])) * scale
             if type(value) not in (int, float) or not math.isfinite(value) or value <= 0 or value != expected:
@@ -162,7 +174,7 @@ def _read(scene, request):
                 "observed_mesh_ids": observed_mesh, "missing_optional_mesh_ids": sorted(set(optional_mesh) - set(objects)),
                 "layers": {key: {field: layer_rows[key][field] for field in ("locked", "visible", "object_ids")} for key in layers}},
             "provenance": {"structure": "native_model_and_private_current_source",
-                "rest": "native_mesh_dependency_inverse_bind" if native_rest is not None else "not_requested",
+                "rest": native_rest["provenance"]["source"] if native_rest is not None else "not_requested",
                 "semantic_roles": "explicit_declaration", "joint_constraints": "explicit_declaration",
                 "conversion_policy": "explicit_declaration", "native_physical_metadata_verified": False,
                 "write_capability_granted": False},

@@ -69,7 +69,8 @@ class _PlanningService:
 
     def __getattr__(self, name):
         if name not in {"execute_readonly", "capture_source", "validate_source", "recipe_rebind_source", "batch", "observe_key_layout", "verify_key_layout", "observe_motion_capture", "recipe_verify_capture",
-                        "observe_retarget_inputs", "verify_retarget_inputs", "motion_controller_adapter", "verify_controller_targets"}:
+                        "observe_retarget_inputs", "verify_retarget_inputs", "motion_controller_adapter", "verify_controller_targets",
+                        "motion_rotation_adapter"}:
             raise RecipeConflict("Solver attempted an effect outside read-only planning")
         return getattr(self._service, name)
 
