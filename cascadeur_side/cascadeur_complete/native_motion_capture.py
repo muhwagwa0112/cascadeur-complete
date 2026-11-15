@@ -87,6 +87,13 @@ def _ownership(projection, ids, source):
                 owners.setdefault(member, set()).add(obj["id"])
     selected = [owners.get(identifier, set()) for identifier in ids]
     if any(len(found) != 1 for found in selected) or len(set(next(iter(x)) for x in selected)) != 1:
+        # A qualified independent object has identity ownership only. This
+        # does not invent a RigInfo, semantic rig roles or physical metadata.
+        from .native_interpolation_qualification import independent_projection_identity
+        declared = source.get("scope", {}).get("profile", {}).get("character_id")
+        if (len(ids)==1 and source.get("scope", {}).get("object_ids")==ids
+                and declared in (None,ids[0]) and independent_projection_identity(projection,ids[0])):
+            return {ids[0]:ids[0]}
         raise ValueError("CHARACTER_OWNERSHIP_UNVERIFIED: capture requires one unique actual RigInfo owner")
     owner = next(iter(selected[0]))
     declared = source.get("scope", {}).get("profile", {}).get("character_id")
@@ -230,11 +237,15 @@ def observe_motion_capture(scene, arguments):
     canonical = {"context": context, "object_ids": ids, "space": space, "position_m": positions,
                  "rotation_wxyz": rotations, "channel_valid": validity, "source_binding": source}
     capture_digest = guards.digest(canonical)
+    from .native_interpolation_qualification import independent_projection_identity, qualified_models, qualification
+    model_qualification=qualification()
+    qualified=(qualified_models() if len(ids)==1 and independent_projection_identity(projection,ids[0]) else [])
     record = {"canonical_batch": canonical, "capture_digest": capture_digest, "sample_projection": raw,
               "key_layout_source_fingerprint": None, **identity, "runtime_epoch": guards.RUNTIME_EPOCH,
               "native_build": installed_build(), "evaluation_receipt_digest": evaluation["evaluation_receipt_digest"],
               "evaluation": evaluation, "full_projection_digest": guards.digest(projection),
-              "qualified_models": [], "ownership": ownership,
+              "qualified_models": qualified, "ownership": ownership,
+              "model_qualification_digest": guards.digest(model_qualification) if qualified else None,
               "provenance": {"reader": "native-model-assets-v1", "rotation_conversion": "basis_matrix_positive_wxyz_v1",
                              "context_authority": "explicit_declared_conversion_policy", "native_physical_metadata_verified": False,
                              "runtime_fingerprint": guards.LOADED_FINGERPRINT}}

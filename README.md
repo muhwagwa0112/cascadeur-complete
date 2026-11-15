@@ -86,17 +86,39 @@ evaluation receipt. Their FPS, length scale and basis are an explicit conversion
 policy; they do not establish missing native physical metadata. Authored-key
 inspection is separate and optional. Existing keys use layer/frame locators
 because the SDK exposes no persistent key ID. No interpolation model or key
-insertion route is qualified by these observations.
+insertion route is qualified by those earlier observations.
+
+The additional explicit setup commands are:
+
+- `Cascadeur Complete.Qualify independent motion adapter`: finite LINEAR/STEP
+  perturbation and existing position-key writer probes on an owned independent
+  Transform. It requires an empty current tab and never enables key insertion.
+- `Cascadeur Complete.Qualify complete scene adapter`: shipped-file full reader,
+  bootstrap, evaluation and checkpoint in disposable tabs.
+- `Cascadeur Complete.Qualify checkpoint restore adapter`: exact new-tab restore
+  of the active owned checkpoint. Computed readback differences block it.
+  Restoring a real failed request additionally requires its authenticated
+  terminal failure, an observed partial-write contract and the signed permit.
+- `Cascadeur Complete.Qualify independent export adapter`: two real animated
+  selected-object exports with artifact-derived settings and strict FBX readback,
+  after complete-scene qualification. It does not establish target motion quality.
+
+Each command registers only after its actual native observations succeed in the
+current process. A failed probe leaves that route unavailable. These commands
+are included by the source and packaged bridge installers; they are not automatic
+startup work. Exact observed results and remaining limitations are in the memo.
 
 Complete-scene qualification is separate from the default independent-transform
 command. A later diagnostic with the character scene open caused native memory
 growth before its first export artifact; its exact failing SDK call is unknown.
 The process was stopped and recovered with an empty scene. The export diagnostic
 now rejects a populated current scene before scanning it and records native
-call phases. This is not a hard bound on native allocation. An empty-scene static
-fixture produced a real FBX, but structural parser compatibility, animated
-export and target roundtrip remain unqualified. No production export route is
-registered by the diagnostic.
+call phases. This is not a hard bound on native allocation. Subsequent empty-scene
+animated fixtures passed strict FBX structure/settings readback and an actual
+Blender import with five sampled frames. The explicit export qualification can
+register only the observed independent-object profile; production execution also
+requires a durable evaluation receipt. Independent source-rest alignment,
+intent-bound target roundtrip quality and final publication remain unverified.
 
 ## Mocap cleanup
 

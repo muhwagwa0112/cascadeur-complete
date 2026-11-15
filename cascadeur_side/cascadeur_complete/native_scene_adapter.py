@@ -96,6 +96,10 @@ class NativeSceneAdapter:
         projection = read_scene(scene)
         return {"coverage_complete": True, "authored_projection": projection, "sample_projection": projection}
 
+    def prepare_recovery_binding(self, scene, request, result):
+        from .native_checkpoint_restore import prepare_recovery_binding
+        return prepare_recovery_binding(scene, request, result)
+
     def execute(self, scene, arguments, request):
         from .native_adapters import checkpoint
         from . import runtime as rt
@@ -130,15 +134,26 @@ def qualify_scene_adapter():
     if installed_build() != "2026.2.3.0.16863":
         raise ValueError("No observed scene SDK contract for installed build")
     sample = Path(r"C:\Program Files\Cascadeur\samples\Cascy.casc")
+    from .native_export import _QualificationProgress
+    folder = rt.runtime_root() / "snapshots" / ("scene-qualification-" + str(uuid.uuid4()))
+    folder.mkdir(parents=True)
+    progress = _QualificationProgress(folder)
+    progress.mark("scene_manager")
     manager = csc.app.get_application().get_scene_manager()
     previous = manager.current_scene()
+    if previous is not None and rt._domain_scene(previous).model_viewer().get_objects():
+        raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE: populated tabs are not setup inputs")
+    progress.mark("scene_manager", "complete")
+    local_before = dict(vars(guards._LOCAL))
+    progress.mark("create_application_scene")
     disposable = manager.create_application_scene()
+    progress.mark("create_application_scene", "complete")
     created = [disposable]
     try:
         manager.set_current_scene(disposable)
+        progress.mark("empty_source_capture")
         original = read_scene(disposable)
-        folder = rt.runtime_root() / "snapshots" / ("scene-qualification-" + str(uuid.uuid4()))
-        folder.mkdir(parents=True)
+        progress.mark("empty_source_capture", "complete")
         with _locked_input(sample) as manifest:
             arguments = {"input_kind": "casc_file", "input_mode": "new_working_scene", "input_path": str(sample),
                          "input_sha256": manifest["sha256"], "input_length": manifest["length"],
@@ -149,25 +164,33 @@ def qualify_scene_adapter():
         request = {"operations": [{"name": "safety.bootstrap", "arguments": arguments}], "source_binding": source}
         guards.begin_request(request)
         guards.set_write_guard(lambda: read_scene(disposable) == original or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+        progress.mark("file_bootstrap_load_capture_save")
         result, _ = adapter.execute(disposable, arguments, request)
+        progress.mark("file_bootstrap_load_capture_save", "complete")
         child = manager.current_scene()
         created.append(child)
         if guards.scene_instance(child)["document_lineage_id"] == guards.scene_instance(disposable)["document_lineage_id"]:
             raise ValueError("File input falsely inherited unrelated document lineage")
+        progress.mark("loaded_scene_capture")
         loaded = read_scene(child)
+        progress.mark("loaded_scene_capture", "complete")
         evaluation_scope = adapter.required_scope(child, {"operation_name": "animation.interpolation_refresh", "operation_arguments": {}})
         evaluation_source = guards._capture_with_adapter(child, evaluation_scope, source["inputs_digest"], None, None, adapter)
         evaluation_request = {"operations": [{"name": "animation.interpolation_refresh", "arguments": {}}], "source_binding": evaluation_source}
         guards.begin_request(evaluation_request)
         guards.set_write_guard(lambda: read_scene(child) == loaded or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+        progress.mark("native_interpolation")
         evaluation, _ = adapter.execute(child, {}, evaluation_request)
+        progress.mark("native_interpolation", "complete")
         evaluated = read_scene(child)
         next_args = {"checkpoint_path": str(folder / "evaluated-backup.casc"), "working_path": str(folder / "evaluated-working.casc")}
         next_scope = adapter.required_scope(child, {"operation_name": "safety.checkpoint", "operation_arguments": next_args})
         next_source = guards._capture_with_adapter(child, next_scope, source["inputs_digest"], None, None, adapter)
         guards.begin_request({"operations": [{"name": "safety.checkpoint", "arguments": next_args}], "source_binding": next_source})
         guards.set_write_guard(lambda: read_scene(child) == evaluated or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+        progress.mark("successor_checkpoint")
         successor, _ = adapter.execute(child, next_args, {"operations": [{"name": "safety.checkpoint", "arguments": next_args}], "source_binding": next_source})
+        progress.mark("successor_checkpoint", "complete")
         with _locked_input(sample) as after_manifest:
             if after_manifest != manifest or read_scene(disposable) != original:
                 raise ValueError("Original source changed during scene qualification")
@@ -183,10 +206,20 @@ def qualify_scene_adapter():
         qualified = NativeSceneAdapter(path.read_bytes(), path)
         for operation in evidence["operations"]:
             guards.register_adapter(operation, qualified)
+        progress.mark("qualification", "observed")
         return {"adapter_id": "native-model-assets-v1", "evidence_path": str(path),
                 "evidence_sha256": qualified.verification["evidence_sha256"], "operations": evidence["operations"]}
+    except Exception as exc:
+        progress.mark("qualification", "failed", detail=str(exc)[:1000])
+        raise
     finally:
-        if previous is not None:
-            manager.set_current_scene(previous)
-        for scene in reversed(created):
-            manager.remove_application_scene(scene)
+        try:
+            progress.mark("restore_owned_tabs")
+            if previous is not None:
+                manager.set_current_scene(previous)
+            for scene in reversed(created):
+                manager.remove_application_scene(scene)
+            progress.mark("restore_owned_tabs", "complete")
+        finally:
+            vars(guards._LOCAL).clear()
+            vars(guards._LOCAL).update(local_before)

@@ -34,14 +34,32 @@ def verify_snapshot(manifest, source: SourceBinding, snapshots: Path, *, expecte
     if snapshot_id != manifest["snapshot_id"]:
         raise RecoveryError("SNAPSHOT_ID_INVALID")
     root = snapshots.resolve()
-    path = root / (snapshot_id + ".casc")
-    if (str(path) != manifest.get("path") or path.is_symlink() or not path.is_file()
-            or path.resolve().parent != root
+    path = Path(str(manifest.get("path", "")))
+    run_root = root.parent / "state" / "runs"
+    def owned(candidate):
+        if not candidate.is_absolute() or candidate.suffix.lower() != ".casc":
+            return False
+        resolved = candidate.resolve()
+        if candidate != resolved or any(
+                parent.is_symlink() or (parent.exists() and getattr(parent.lstat(), "st_file_attributes", 0) & 0x400)
+                for parent in (candidate, *candidate.parents)):
+            return False
+        if resolved.is_relative_to(root):
+            return True
+        if resolved.is_relative_to(run_root):
+            parts = resolved.relative_to(run_root).parts
+            try:
+                return (len(parts) == 3 and str(uuid.UUID(parts[0])) == parts[0]
+                        and parts[1] in ("workspace", "checkpoints"))
+            except ValueError:
+                return False
+        return False
+    if (not owned(path) or not path.is_file()
             or manifest.get("document_lineage_id") != source.binding.document_lineage_id
             or manifest.get("working_scene_instance_id") != source.binding.scene_instance_id):
         raise RecoveryError("SNAPSHOT_TARGET_OR_LINEAGE_CHANGED")
     working = Path(str(manifest.get("working_path", "")))
-    if (not working.is_absolute() or working.is_symlink() or working.resolve().parent != root
+    if (not owned(working)
             or working.resolve() == path.resolve() or not working.is_file()):
         raise RecoveryError("FAILED_WORKING_SCENE_UNAVAILABLE")
     digest, count = hashlib.sha256(), 0
@@ -55,7 +73,8 @@ def verify_snapshot(manifest, source: SourceBinding, snapshots: Path, *, expecte
         after = os.fstat(stream.fileno())
     if ((before.st_size, before.st_mtime_ns, before.st_ctime_ns) !=
             (after.st_size, after.st_mtime_ns, after.st_ctime_ns)
-            or not count or digest.hexdigest() != manifest.get("sha256")):
+            or not count or digest.hexdigest() != manifest.get("sha256")
+            or ("bytes" in manifest and count != manifest["bytes"])):
         raise RecoveryError("SNAPSHOT_BYTES_CHANGED")
     return path
 
@@ -213,14 +232,52 @@ def recovery_succeeded(result, permit):
             and data.get("working_path") == expected_working)
     if not verified:
         return False
+    observation = data.get("recovery_observation")
+    saved = data.get("working_file")
+    if observation is not None:
+        try:
+            successor = SourceBinding.model_validate(data.get("post_source_binding"))
+        except (TypeError, ValueError):
+            return False
+        projection = permit["snapshot_manifest"].get("authored_projection_digest")
+        if (not isinstance(observation, dict) or not isinstance(saved, dict)
+                or not isinstance(projection, str) or len(projection) != 64
+                or data.get("native_completion") != "observed" or not successor.complete
+                or successor.binding != result.scene_after
+                or result.scene_before != source.binding
+                or successor.inputs_digest != source.inputs_digest
+                or successor.adapter_fingerprint != source.adapter_fingerprint
+                or successor.sample_digest != projection or data.get("restored_projection_digest") != projection
+                or data.get("snapshot_manifest_digest") != canonical_digest(permit["snapshot_manifest"])
+                or observation.get("completion") != "native_observed"
+                or observation.get("dispatch_semantics") != "synchronous_no_yield"
+                or observation.get("runtime_epoch") != source.binding.runtime_epoch
+                or observation.get("runtime_fingerprint") != source.adapter_fingerprint
+                or observation.get("original_request_id") != permit["original_request_id"]
+                or observation.get("recovery_request_id") != result.request_id
+                or observation.get("original_receipt_digest") != permit["original_receipt_digest"]
+                or observation.get("permit_digest") != canonical_digest(permit)
+                or observation.get("snapshot_manifest_digest") != canonical_digest(permit["snapshot_manifest"])
+                or observation.get("restored_projection_digest") != projection
+                or observation.get("working_file") != saved or saved.get("path") != expected_working
+                or observation.get("source_before_digest") != canonical_digest(_json(source))
+                or observation.get("source_after_digest") != canonical_digest(_json(successor))):
+            return False
     path = Path(expected_working)
     if path.is_symlink() or not path.is_file():
         return False
     digest, count = hashlib.sha256(), 0
     with path.open("rb") as stream:
+        before = os.fstat(stream.fileno())
         while block := stream.read(1024 * 1024):
             count += len(block)
             if count > 2 * 1024**3:
                 return False
             digest.update(block)
+        after = os.fstat(stream.fileno())
+    if ((before.st_size, before.st_mtime_ns, before.st_ctime_ns) !=
+            (after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+        return False
+    if observation is not None:
+        return count > 0 and count == saved.get("length") and digest.hexdigest() == saved.get("sha256")
     return count > 0 and digest.hexdigest() == permit["snapshot_manifest"]["sha256"]

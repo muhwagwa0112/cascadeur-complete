@@ -18,7 +18,7 @@ SUPPORTED_BUILD = "2026.2.3.0.16863"
 METHOD = "export_scene_selected_objects"
 _COMPLETIONS = {}
 _SUCCESS_TEXT = "Custom export: animation exported from 0 to 0 (only one frame)"
-_OBSERVED_COMPLETION_RANGE = (0, 0)
+_OBSERVED_COMPLETION_MESSAGES = {(0, 0): _SUCCESS_TEXT}
 _MAX_OBJECTS = 256
 _MAX_FRAMES = 2001
 
@@ -247,14 +247,24 @@ class _LockedArtifact:
         self.stream.close()
 
 
-def _selected_call(scene, path, maximum, fps, up_axis, *, expected_range, progress=None):
+def _selected_call(scene, path, maximum, fps, up_axis, *, expected_range, progress=None, _qualification=False):
     """The sole SDK dispatch implementation, shared with disposable setup."""
     from . import runtime as rt
     import csc
     from events import event_message_manager
-    if tuple(expected_range) != _OBSERVED_COMPLETION_RANGE:
+    expected_range = tuple(expected_range)
+    if (len(expected_range) != 2 or any(type(frame) is not int for frame in expected_range)
+            or expected_range[0] != 0 or not 0 <= expected_range[1] < _MAX_FRAMES):
+        raise NativeExportError('NATIVE_EXPORT_RANGE_UNSUPPORTED', 'Finite exact native frame interval required')
+    expected_message = _OBSERVED_COMPLETION_MESSAGES.get(expected_range)
+    if expected_message is None and not _qualification:
         raise NativeExportError('NATIVE_EXPORT_RANGE_COMPLETION_UNQUALIFIED',
-            'Only the observed selected-export completion for native frames 0..0 is qualified; whole-timeline export remains unsupported')
+            'This exact selected-export completion range has not been independently observed in this runtime')
+    if expected_message is None:
+        # Setup may observe a new finite interval, but cannot register a route.
+        # The exact same-scene event, output and independent conformance still
+        # have to agree before that interval becomes available to an adapter.
+        expected_message = f'Custom export: animation exported from {expected_range[0]} to {expected_range[1]}'
     domain = rt._domain_scene(scene)
     if progress:
         progress.mark('fbx_loader_constructor')
@@ -308,7 +318,7 @@ def _selected_call(scene, path, maximum, fps, up_axis, *, expected_range, progre
         active[0] = False
         event_message_manager.unsubscribe(subscription)
     success = [row for row in messages if row["level"] == "Success"
-               and _SUCCESS_TEXT in (row["full"].strip(), row["simple"].strip())]
+               and expected_message in (row["full"].strip(), row["simple"].strip())]
     errors = [row for row in messages if row["level"] in ("Error", "Warning")]
     if len(success) != 1 or errors or capture_errors:
         raise NativeExportError("NATIVE_COMPLETION_UNKNOWN", "Exactly one same-scene synchronous native success and no warnings/errors required",
@@ -326,13 +336,14 @@ def _selected_call(scene, path, maximum, fps, up_axis, *, expected_range, progre
     return artifact, takes, applied, messages
 
 
-def observe_export_call(scene, arguments, request, profile, *, _progress=None):
+def observe_export_call(scene, arguments, request, profile, *, _progress=None, _qualification=False):
     """Execute once with synchronous native completion; never grants a route."""
     before = inspect_export(scene, arguments, request, profile)
     arguments, request, profile = _request_arguments(arguments, request, profile)
     artifact, takes, applied, messages = _selected_call(scene, arguments['path'], arguments['max_output_bytes'],
         profile['fps_num'] / profile['fps_den'], profile['axes']['up_axis'],
-        expected_range=(profile['first_frame'], profile['last_frame']), progress=_progress)
+        expected_range=(profile['first_frame'], profile['last_frame']), progress=_progress,
+        _qualification=_qualification)
     if takes != [profile['take_name']]:
         raise NativeExportError('EXPORT_TAKE_READBACK_MISMATCH', 'Native output take differs: ' + repr(takes))
     after = inspect_export(scene, arguments, request, profile, _completed_output=True)
@@ -478,19 +489,19 @@ class _QualificationProgress:
             os.fsync(stream.fileno())
 
 
-def qualify_export_disposable(adapter):
+def qualify_export_disposable(adapter, *, animated=True):
     """Observe real SDK completion/settings using an owned independent object.
 
     The supplied full NativeSceneAdapter is a reader, not a caller proof flag.
-    This function never registers a route. Its static fixture does not establish
-    animated channels, a rig, skinning, target import, rest or motion quality.
+    This function never registers a route. The independent fixture cannot
+    establish a rig, skinning, target import, rest or motion quality.
     """
     import uuid
     import csc
-    from commands.add.add_transform import add_transform_mod
     from . import runtime as rt
     from .native_adapters import installed_build
     from .native_scene_adapter import NativeSceneAdapter
+    from .native_fixture import create_disposable_scene, create_independent_transform, release_disposable_scene
     guards.assert_loaded_package()
     if not isinstance(adapter, NativeSceneAdapter) or not callable(getattr(adapter, 'read_scene', None)):
         raise NativeExportError('SOURCE_READER_UNVERIFIED', 'Full code-owned NativeSceneAdapter reader required')
@@ -530,40 +541,25 @@ def qualify_export_disposable(adapter):
             previous_projection = adapter.read_scene(previous)
             progress.mark('previous_scene_capture', 'complete')
         progress.mark('create_application_scene')
-        disposable = manager.create_application_scene()
+        disposable = create_disposable_scene()
         progress.mark('create_application_scene', 'complete')
         progress.mark('activate_disposable')
         manager.set_current_scene(disposable)
         progress.mark('activate_disposable', 'complete')
         domain = rt._domain_scene(disposable)
-        created, callback_completed = [], []
-
-        def create_fixture(model, update, callback_scene, session):
-            if callback_completed or created:
-                raise NativeExportError('NATIVE_EXPORT_FIXTURE_UNAVAILABLE', 'Fixture callback was replayed')
-            progress.mark('installed_add_transform_mod')
-            # Use the installed Add.Transform command's exact callback and its
-            # pycsc part/FbxExport/selector implementation. Unlike PyScene.edit,
-            # domain.modify_with_session passes (model, update, domain, session)
-            # and does not append a whole SceneUpdater.update. A view Scene only
-            # exposes domain_scene(); it does not implement this transaction.
-            identifier = add_transform_mod(model, update, callback_scene, session, False)
-            model.set_object_name(identifier, 'MCPExportQualification')
-            created.append(rt._id_string(identifier))
-            callback_completed.append(True)
-            progress.mark('installed_add_transform_mod', 'complete')
-
         progress.mark('fixture_modify_with_session')
-        transaction = getattr(domain, 'modify_with_session', None)
-        if not callable(transaction):
-            raise NativeExportError('NATIVE_EXPORT_FIXTURE_UNAVAILABLE', 'Native domain Scene lacks modify_with_session')
-        completed = transaction('Create owned MCP export qualification object', create_fixture)
-        progress.mark('fixture_modify_with_session', 'complete', returned=bool(completed),
-                      callback_count=len(callback_completed))
-        if completed is not True or callback_completed != [True]:
-            raise NativeExportError('NATIVE_EXPORT_FIXTURE_UNAVAILABLE', 'Installed Add.Transform transaction did not complete')
-        if len(created) != 1:
-            raise NativeExportError('NATIVE_EXPORT_FIXTURE_UNAVAILABLE', 'Installed pycsc did not create one independent object')
+        fixture = create_independent_transform(disposable, 'MCPExportQualification',
+            keys=[(0, [0., 0., 0.]), (2, [2., 1., 0.]), (4, [0., 2., 1.])] if animated else [(0, [0., 0., 0.])],
+            segment_modes=['LINEAR', 'LINEAR'] if animated else [])
+        created = [fixture['object_id']]
+        progress.mark('fixture_modify_with_session', 'complete')
+        if animated:
+            progress.mark('fixture_evaluation')
+            from .native_interpolation_qualification import evaluate_independent_transform
+            evaluated = evaluate_independent_transform(disposable, fixture)
+            if evaluated.get('native_completion') != 'observed' or evaluated.get('callbacks') != ['interpolation_returned']:
+                raise NativeExportError('NATIVE_EXPORT_FIXTURE_UNAVAILABLE', 'Animated fixture evaluation did not complete exactly once')
+            progress.mark('fixture_evaluation', 'complete')
         progress.mark('fixture_capture')
         before = adapter.read_scene(disposable)
         progress.mark('fixture_capture', 'complete')
@@ -589,8 +585,8 @@ def qualify_export_disposable(adapter):
         guards.begin_request(discovery_request)
         guards.set_write_guard(unchanged)
         progress.mark('discovery_export')
-        artifact, takes, applied, messages = _selected_call(disposable, folder / 'discover.fbx', 64 * 1024**2,
-            30.0, 1, expected_range=(0, frame_count - 1), progress=progress)
+        artifact, takes, applied, messages = _selected_call(disposable, folder / 'raw.fbx', 64 * 1024**2,
+            30.0, 1, expected_range=(0, frame_count - 1), progress=progress, _qualification=True)
         progress.mark('discovery_export', 'complete', artifact_sha256=artifact['sha256'], artifact_bytes=artifact['bytes'])
         progress.mark('discovery_source_capture')
         if adapter.read_scene(disposable) != before:
@@ -598,7 +594,8 @@ def qualify_export_disposable(adapter):
         progress.mark('discovery_source_capture', 'complete')
         progress.mark('discovery_host_readback')
         discovery = _host_readback(folder, 'discover', {'mode': 'discover', 'artifact': artifact,
-            'take_readback': takes, 'source_id': created[0], 'node_path': rows[0]['name'], 'frame_count': frame_count})
+            'take_readback': takes, 'source_id': created[0], 'node_path': rows[0]['name'], 'frame_count': frame_count,
+            'animated': bool(animated)})
         progress.mark('discovery_host_readback', 'complete', status=discovery.get('status'))
         if discovery.get('status') != 'discovered':
             raise NativeExportError('NATIVE_EXPORT_SETTINGS_UNVERIFIED', 'Actual FBX metadata discovery failed', observation=discovery)
@@ -607,7 +604,7 @@ def qualify_export_disposable(adapter):
         confirmed.mkdir()
         # The observed SDK derives the take name from the file basename. Keep
         # that input identical while writing independent, no-clobber bytes.
-        arguments = {'path': str(confirmed / 'discover.fbx'), 'export_profile_digest': guards.digest(profile),
+        arguments = {'path': str(confirmed / 'raw.fbx'), 'export_profile_digest': guards.digest(profile),
                      'max_output_bytes': 64 * 1024**2}
         request = {'request_id': token + '-confirm', 'operations': [{'name': 'io.export_fbx', 'arguments': arguments}],
                    'execution_context': {'run_id': 'qualification-' + token, 'step_id': 'native-export',
@@ -615,7 +612,7 @@ def qualify_export_disposable(adapter):
         guards.begin_request(request)
         guards.set_write_guard(unchanged)
         progress.mark('confirmed_export')
-        native, _ = observe_export_call(disposable, arguments, request, profile, _progress=progress)
+        native, _ = observe_export_call(disposable, arguments, request, profile, _progress=progress, _qualification=True)
         progress.mark('confirmed_export', 'complete')
         progress.mark('confirmed_source_capture')
         actual_after = adapter.read_scene(disposable)
@@ -630,9 +627,12 @@ def qualify_export_disposable(adapter):
         if (readback.get('status') != 'pass' or readback.get('completion_observation_digest') != guards.digest(observation)
                 or readback.get('profile_digest') != guards.digest(profile)):
             raise NativeExportError('NATIVE_EXPORT_SETTINGS_UNVERIFIED', 'Second actual export did not match discovered contract', observation=readback)
+        for row in messages:
+            if row['level'] == 'Success':
+                _OBSERVED_COMPLETION_MESSAGES[(0, frame_count - 1)] = row['full'].strip() or row['simple'].strip()
         progress.mark('qualification', 'observed_structural_only')
         return {'status': 'observed_structural_only', 'qualified_operations': [], 'production_ready': False,
-            'reason_codes': ['ANIMATED_EXPORT_FIXTURE_UNQUALIFIED', 'TARGET_ROUNDTRIP_UNVERIFIED'],
+            'reason_codes': ([] if animated else ['ANIMATED_EXPORT_FIXTURE_UNQUALIFIED']) + ['TARGET_ROUNDTRIP_UNVERIFIED'],
             'profile': profile, 'native_export_observation': observation, 'export_settings_readback': readback,
             'discovery': {'artifact': artifact, 'settings': applied, 'completion_messages': messages},
             'source_before_digest': guards.digest(before), 'source_after_digest': guards.digest(actual_after),
@@ -651,7 +651,7 @@ def qualify_export_disposable(adapter):
                     manager.set_current_scene(previous)
                 progress.mark('restore_previous_scene', 'complete')
                 progress.mark('remove_owned_disposable')
-                manager.remove_application_scene(disposable)
+                release_disposable_scene(disposable)
                 progress.mark('remove_owned_disposable', 'complete')
                 if previous is not None and previous_projection is not None:
                     progress.mark('previous_scene_final_capture')

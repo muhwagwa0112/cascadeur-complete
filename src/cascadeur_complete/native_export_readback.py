@@ -13,7 +13,8 @@ from types import SimpleNamespace
 
 from .export_models import ArtifactRef, ExportExpectation, ExportProfile
 from .export_publisher import canonical_digest
-from .fbx_validation import FbxError, ParseLimits, properties, read_fbx_structure, timebase, validate_fbx_structure
+from .fbx_validation import (FbxError, ParseLimits, properties, read_fbx_structure, take_span,
+                             timebase, validate_fbx_structure)
 
 
 def readback_native_export(artifact: ArtifactRef, profile: ExportProfile, expected: ExportExpectation,
@@ -46,8 +47,9 @@ def _readback(artifact, profile, expected, completion_observation, *, parse_limi
     takes = []
     for node in objects[0].children:
         if node.name == 'AnimationStack':
-            takes.append({'name': str(node.properties[1]).split('\x00', 1)[0].removeprefix('AnimationStack::'),
-                          'properties': properties(node)})
+            name = str(node.properties[1]).split('\x00', 1)[0].removeprefix('AnimationStack::')
+            takes.append({'name': name, 'properties': properties(node),
+                          'interval': take_span(document, name)})
     return {'schema_version': 1, 'status': 'pass', 'artifact_sha256': artifact.sha256,
             'artifact_bytes': artifact.bytes, 'profile_digest': canonical_digest(profile),
             'profile_contract_digest': observed['profile_contract_digest'],
@@ -79,6 +81,17 @@ def qualification_readback(payload: dict):
         take = str(stacks[0].properties[1]).split('\x00', 1)[0].removeprefix('AnimationStack::')
         if payload['take_readback'] != [take]:
             raise ValueError('NATIVE_EXPORT_TAKE_READERS_DISAGREE')
+        take_properties = properties(stacks[0])
+        try:
+            interval = take_span(document, take)
+        except FbxError as exc:
+            # Only explicit artifact metadata can establish the local interval.
+            return {'status': 'unsupported', 'reason_codes': [exc.code], 'detail': str(exc),
+                    'artifact_sha256': document.sha256, 'artifact_bytes': document.byte_length,
+                    'fbx_version': document.version, 'footer_verified': document.footer_verified,
+                    'actual_global_settings': settings,
+                    'actual_takes': [{'name': take, 'properties': take_properties}],
+                    'quality': 'not_evaluated'}
         axes = {key: settings[field] for key, field in (
             ('up_axis', 'UpAxis'), ('up_sign', 'UpAxisSign'), ('front_axis', 'FrontAxis'),
             ('front_sign', 'FrontAxisSign'), ('coord_axis', 'CoordAxis'), ('coord_sign', 'CoordAxisSign'))}
@@ -95,12 +108,16 @@ def qualification_readback(payload: dict):
                            'node_path': payload['node_path'], 'parent_path': None}],
             take_name=take, first_frame=0, last_frame=count - 1, fps_num=30, fps_den=1,
             time_origin='zero', axes=axes, metres_per_export_unit=scale / 100,
-            bake='dense', include_mesh=False, required_channels=[],
+            bake='dense', include_mesh=False, required_channels=(
+                [{'node_path': payload['node_path'], 'property': 'Lcl Translation', 'axis': axis, 'animated': True}
+                 for axis in ('X', 'Y', 'Z')] if payload.get('animated') is True else []),
             root_motion={'node_path': payload['node_path'], 'mode': 'preserve_world'},
             target_adapter='native_qualification_only', target_adapter_fingerprint='unavailable',
             target_import_settings_digest='unavailable', destination=str(Path(artifact.path).parent / 'never-published.fbx'))
         return {'status': 'discovered', 'profile': profile.model_dump(mode='json'),
-                'actual_global_settings': settings, 'quality': 'not_evaluated'}
+                'actual_global_settings': settings,
+                'actual_takes': [{'name': take, 'properties': take_properties, 'interval': interval}],
+                'quality': 'not_evaluated'}
     if payload['mode'] != 'validate':
         raise ValueError('NATIVE_EXPORT_READBACK_MODE_UNSUPPORTED')
     profile = ExportProfile.model_validate(payload['profile'])

@@ -251,15 +251,21 @@ def checkpoint(scene, arguments, request, adapter):
     working.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_file = _save_observed(target, backup)
     working_file = _save_observed(target, working)
-    if reader(target) != expected_target or (target is not scene and (reader(scene) != original or str(scene.get_path_name()) != original_path)):
+    saved_projection = reader(target)
+    if saved_projection != expected_target or (target is not scene and (reader(scene) != original or str(scene.get_path_name()) != original_path)):
         raise ValueError("NATIVE_COMPLETION_UNKNOWN: clone or source changed during checkpoint")
     identity = dict(guards.scene_instance(target))
     snapshot = {"schema_version": 1, "snapshot_id": str(uuid.uuid4()), "path": str(backup),
         "sha256": checkpoint_file["sha256"], "bytes": checkpoint_file["length"],
         "working_path": str(working), "working_scene_instance_id": identity["scene_instance_id"],
         "document_lineage_id": identity["document_lineage_id"], "runtime_epoch": guards.RUNTIME_EPOCH,
-        "adapter_fingerprint": guards.LOADED_FINGERPRINT, "native_completion": "observed"}
+        "adapter_fingerprint": guards.LOADED_FINGERPRINT, "native_completion": "observed",
+        "authored_projection_digest": guards.digest(saved_projection)}
     _WORKSPACES[identity["scene_instance_id"]] = snapshot
+    from .native_scene_adapter import NativeSceneAdapter
+    if isinstance(adapter, NativeSceneAdapter):
+        from .native_checkpoint_restore import remember_checkpoint
+        remember_checkpoint(target, snapshot, saved_projection, run_id=run_id)
     scope = adapter.required_scope(target, source["scope"])
     successor = guards._capture_with_adapter(target, scope, source["inputs_digest"], None, None, adapter)
     observation = {"schema_version": 1, "completion": "native_observed", "checkpoint": checkpoint_file,
@@ -317,6 +323,8 @@ def qualify_disposable(*, include_scene_adapter=False):
     from . import runtime as rt
     manager = csc.app.get_application().get_scene_manager()
     previous = manager.current_scene()
+    if include_scene_adapter and previous is not None and rt._domain_scene(previous).model_viewer().get_objects():
+        raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE")
     disposable = manager.create_application_scene()
     try:
         manager.set_current_scene(disposable)
@@ -370,15 +378,8 @@ def qualify_disposable(*, include_scene_adapter=False):
         for name in ("animation.transform_set", "safety.bootstrap", "safety.checkpoint"):
             guards.register_adapter(name, adapter)
         scene_qualification = {"status": "not_requested", "reason": "Complete-scene qualification is an explicit separate setup action"}
-        if include_scene_adapter:
-            from .native_scene_adapter import qualify_scene_adapter
-            try:
-                scene_qualification = qualify_scene_adapter()
-            except Exception as exc:
-                _ERROR = "Scene adapter qualification failed; only independent Transform is qualified: " + str(exc)
-                raise
         _ERROR = None
-        return {"adapter_id": "independent-transform-key0-v1", "installed_build": installed_build(),
+        result = {"adapter_id": "independent-transform-key0-v1", "installed_build": installed_build(),
                 "evidence_sha256": adapter.verification["evidence_sha256"], "qualified_operations": evidence["operations"],
                 "checkpoint_completion": "observed_native_save_and_clone_equivalence", "scene_adapter": scene_qualification}
     finally:
@@ -387,6 +388,14 @@ def qualify_disposable(*, include_scene_adapter=False):
         if "successor_scene" in locals() and successor_scene is not disposable:
             manager.remove_application_scene(successor_scene)
         manager.remove_application_scene(disposable)
+    if include_scene_adapter:
+        from .native_scene_adapter import qualify_scene_adapter
+        try:
+            result["scene_adapter"] = qualify_scene_adapter()
+        except Exception as exc:
+            _ERROR = "Scene adapter qualification failed; only independent Transform is qualified: " + str(exc)
+            raise
+    return result
 
 
 def ensure_installed():

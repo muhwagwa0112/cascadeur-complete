@@ -50,6 +50,108 @@ def _action_binding(obj, version):
     return action, tuple(bag.fcurves)
 
 
+def _artifact_object_rest(manifest, scene):
+    """Decode static FBX defaults for independent root Nulls, never an Action.
+
+    The fingerprint-pinned Blender importer supplies the same explicit FBX
+    transform formula used by its animation decoder. No evaluated pose enters
+    this path. Parented models, armatures and meshes remain outside its scope.
+    """
+    from io_scene_fbx import import_fbx as reader, parse_fbx, fbx_utils
+    from bpy_extras.io_utils import axis_conversion
+    from mathutils import Matrix
+    profile = manifest['profile']
+    mapping = profile['target_import_settings']['bone_mapping']
+    if (profile['include_mesh'] or profile['allowed_helper_nodes'] or not mapping
+            or any(value[1] is not None for value in mapping.values())):
+        raise ValueError('TARGET_ANIMATED_CONTAINER_REST_UNSUPPORTED')
+    root, version = parse_fbx.parse(manifest['artifact']['path'])
+    if version not in (7400, 7500, 7700):
+        raise ValueError('TARGET_OBJECT_REST_VERSION_UNSUPPORTED')
+
+    def one(parent, name, *, optional=False):
+        found = [node for node in parent.elems if node.id == name]
+        if len(found) > 1 or (not found and not optional):
+            raise ValueError('TARGET_OBJECT_REST_METADATA_AMBIGUOUS')
+        return found[0] if found else reader.fbx_elem_nil
+
+    settings = one(one(root, b'GlobalSettings'), b'Properties70')
+    objects, connections = one(root, b'Objects'), one(root, b'Connections')
+    models = [node for node in objects.elems if node.id == b'Model']
+    if not 0 < len(models) <= 256 or len(models) != len(mapping):
+        raise ValueError('TARGET_OBJECT_REST_SCOPE_UNSUPPORTED')
+    by_name, model_ids = {}, set()
+    for node in models:
+        if (len(node.props) != 3 or node.props_type != b'LSS' or node.props[2] != b'Null'
+                or node.props[0] in model_ids):
+            raise ValueError('TARGET_OBJECT_REST_SCOPE_UNSUPPORTED')
+        name = node.props[1].split(b'\x00', 1)[0].removeprefix(b'Model::').decode('utf-8')
+        if not name or '/' in name or '\\' in name or name in by_name:
+            raise ValueError('TARGET_OBJECT_REST_SCOPE_UNSUPPORTED')
+        by_name[name] = node
+        model_ids.add(node.props[0])
+    if set(by_name) != set(mapping) or any(mapping[name][0] != name for name in mapping):
+        raise ValueError('TARGET_OBJECT_REST_MAPPING_AMBIGUOUS')
+    parents = {identity: [] for identity in model_ids}
+    for edge in connections.elems:
+        if edge.id == b'C' and len(edge.props) >= 3 and edge.props[0] == b'OO' and edge.props[1] in model_ids:
+            parents[edge.props[1]].append(edge.props[2])
+    if any(value != [0] for value in parents.values()):
+        raise ValueError('TARGET_PARENTED_OBJECT_REST_UNSUPPORTED')
+    if any(row['parent_path'] is not None for row in profile['skeleton_map']):
+        raise ValueError('TARGET_PARENTED_OBJECT_REST_UNSUPPORTED')
+    # Match the importer's Model/KFbxNode -> Model/FbxNode template lookup.
+    definitions = one(root, b'Definitions', optional=True)
+    object_types = [node for node in definitions.elems
+                    if node.id == b'ObjectType' and node.props == [b'Model']]
+    if len(object_types) > 1:
+        raise ValueError('TARGET_OBJECT_REST_METADATA_AMBIGUOUS')
+    template = reader.fbx_elem_nil
+    if object_types:
+        for kind in (b'KFbxNode', b'FbxNode'):
+            candidates = [node for node in object_types[0].elems
+                          if node.id == b'PropertyTemplate' and node.props == [kind]]
+            if len(candidates) > 1:
+                raise ValueError('TARGET_OBJECT_REST_METADATA_AMBIGUOUS')
+            if candidates:
+                template = candidates[0]
+                break
+    template_props = one(template, b'Properties70', optional=True)
+    up = (reader.elem_props_get_integer(settings, b'UpAxis'), reader.elem_props_get_integer(settings, b'UpAxisSign'))
+    front = (reader.elem_props_get_integer(settings, b'FrontAxis'), reader.elem_props_get_integer(settings, b'FrontAxisSign'))
+    coord = (reader.elem_props_get_integer(settings, b'CoordAxis'), reader.elem_props_get_integer(settings, b'CoordAxisSign'))
+    axes = {value: key for key, value in fbx_utils.RIGHT_HAND_AXES.items()}.get((up, front, coord))
+    unit = reader.elem_props_get_number(settings, b'UnitScaleFactor')
+    if axes is None or type(unit) not in (float, int) or not math.isfinite(unit) or unit <= 0:
+        raise ValueError('TARGET_OBJECT_REST_BASIS_UNSUPPORTED')
+    if not math.isclose(unit / 100, profile['metres_per_export_unit'], rel_tol=1e-10):
+        raise ValueError('TARGET_OBJECT_REST_UNITS_MISMATCH')
+    axis_up, axis_forward = axes
+    global_matrix = (Matrix.Scale(unit / fbx_utils.units_blender_to_fbx_factor(scene), 4)
+                     @ axis_conversion(from_forward=axis_forward, from_up=axis_up).to_4x4())
+    matrices, provenance = {}, {}
+    for name, node in by_name.items():
+        props = (one(node, b'Properties70', optional=True), template_props)
+        # The importer approximates spherical Euler order; this adapter does not.
+        if reader.elem_props_get_enum(props, b'RotationOrder', 0) not in range(6):
+            raise ValueError('TARGET_OBJECT_REST_ROTATION_ORDER_UNSUPPORTED')
+        transform = reader.blen_read_object_transform_preprocess(props, node, Matrix(), True)
+        local, _, _ = reader.blen_read_object_transform_do(transform)
+        matrix = global_matrix @ local
+        rotation = matrix.to_3x3()
+        gram = rotation.transposed() @ rotation
+        scale2 = sum(gram[index][index] for index in range(3)) / 3
+        if (not all(math.isfinite(value) for row in matrix for value in row) or scale2 <= 0
+                or rotation.determinant() <= 0 or any(abs(gram[i][j] - (scale2 if i == j else 0)) > 1e-7 * scale2
+                                                     for i in range(3) for j in range(3))):
+            raise ValueError('TARGET_OBJECT_REST_NONRIGID_UNSUPPORTED')
+        matrices[name] = matrix
+        provenance[name] = {'source': 'artifact_static_model_and_template', 'model_id': node.props[0],
+                            'artifact_sha256': manifest['artifact']['sha256'],
+                            'blender_rest_matrix': [list(row) for row in matrix]}
+    return matrices, provenance
+
+
 def run(manifest):
     import bpy
     import importlib
@@ -126,13 +228,16 @@ def run(manifest):
         reverse[key] = path
         resolved[path] = (obj, bone)
     parent_paths, rest_rotations, rest_lengths, rest_positions = {}, {}, {}, {}
+    object_rest, object_rest_provenance = {}, {}
     for path, (obj, bone) in resolved.items():
-        # Object-level animated transforms need an independently decoded rest
-        # transform. The classic adapter supports static armature containers;
-        # silently using the first pose as rest would conceal root drift.
+        # An animated object's static defaults come from a separate artifact
+        # decode. An evaluated/imported first pose is never used as its rest.
         action, curves = _action_binding(obj, bpy.app.version)
         if action and any(not curve.data_path.startswith('pose.bones[') for curve in curves):
-            raise ValueError("TARGET_ANIMATED_CONTAINER_REST_UNSUPPORTED")
+            if bone is not None:
+                raise ValueError('TARGET_ANIMATED_CONTAINER_REST_UNSUPPORTED')
+            if not object_rest:
+                object_rest, object_rest_provenance = _artifact_object_rest(manifest, scene)
         if bone is not None:
             parent_bone = bone.parent
             if parent_bone:
@@ -147,7 +252,7 @@ def run(manifest):
             rest_lengths[path] = (obj.matrix_world.to_3x3() @ (bone.bone.tail_local - bone.bone.head_local)).length
         else:
             parent_key = (obj.parent.name, None) if obj.parent else None
-            matrix = obj.matrix_world
+            matrix = object_rest.get(path, obj.matrix_world)
         parent_paths[path] = reverse.get(parent_key)
         rest_rotations[path] = (basis @ matrix.to_3x3().normalized() @ inverse).to_quaternion()
         rest_positions[path] = list(basis @ matrix.translation)
@@ -201,6 +306,7 @@ def run(manifest):
                "rotation_delta_wxyz": {path: [] for path in paths}, "parent_paths": parent_paths,
                "rest_rotation_wxyz": {path: list(value) for path, value in rest_rotations.items()},
                "rest_position_m": rest_positions,
+               'object_rest_provenance': object_rest_provenance,
                "mesh_skin_digest": _canonical(skin_binding) if meshes else None,
                "rest_lengths_m": rest_lengths, "mesh": {path: {"positions_m": [], "triangles": None} for path in meshes}}
     file_start = profile["first_frame"] * profile["fps_den"] / profile["fps_num"] if profile["time_origin"] == "preserve" else 0

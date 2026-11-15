@@ -1561,7 +1561,16 @@ def execute_request(scene, request):
             result["ok"] = False
         if post_source is not None and source is not None:
             old_id, new_id = source["binding"]["scene_instance_id"], post_source["binding"]["scene_instance_id"]
-            if old_id != new_id and name != "safety.bootstrap":
+            approved_restore = False
+            if old_id != new_id and name == "safety.rollback" and observation is not None:
+                restore_adapter = _verified_rollback_adapter()
+                approve = getattr(restore_adapter, "approve_successor", None)
+                if callable(approve):
+                    try:
+                        approved_restore = approve(request, source, post_source, result, observation) is True
+                    except Exception:
+                        approved_restore = False
+            if old_id != new_id and name != "safety.bootstrap" and not approved_restore:
                 outcome = "outcome_unknown"
                 result["ok"] = False
                 result["error_message"] = "SCENE_CHANGED: unapproved native successor"

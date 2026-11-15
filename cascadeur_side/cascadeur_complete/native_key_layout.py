@@ -33,6 +33,7 @@ def read_key_layout(scene,arguments,*,capture_lookup=None):
     from . import guarded_runtime as guards
     from .native_adapters import installed_build
     from .native_scene_reader import MAX_OBJECTS
+    from .native_interpolation_qualification import qualified_export_metadata, qualified_models, qualification
 
     allowed={"ids","space","channel","frames","capture_digest","capture_object_ids","context"}
     if not isinstance(arguments,dict) or set(arguments)-allowed:
@@ -92,7 +93,8 @@ def read_key_layout(scene,arguments,*,capture_lookup=None):
         behaviours=[];parent=None;parent_observed=False
         for behaviour in sorted(bv.get_behaviours(obj),key=rt._id_string):
             name=str(bv.get_behaviour_name(behaviour));links=[]
-            if name not in ("Basic","Node3d","Transform"):
+            export_metadata=(name=="FbxExport" and qualified_export_metadata(bv,dv,behaviour,text))
+            if name not in ("Basic","Node3d","Transform") and not export_metadata:
                 controllers.append({"object_id":text,"behaviour_id":rt._id_string(behaviour),"name":name})
             for prop in sorted(map(str,bv.get_behaviour_property_names(behaviour))):
                 kind=_name(bv.get_property_type(behaviour,prop));entry={"property":prop,"type":kind}
@@ -222,6 +224,10 @@ def read_key_layout(scene,arguments,*,capture_lookup=None):
             affecting=[x for x in observed["sections"] if first<=x["frame"]<last]
             if any(x["interval_mode"]!=mode for x in affecting):driver_reasons.append("INTRA_SEGMENT_SECTION_CHANGE_UNQUALIFIED")
             if any(x["interval_common"]["fixation"]!="Free" for x in affecting):driver_reasons.append("FIXATION_INFLUENCE_UNQUALIFIED")
+            if any(x["interval_common"]["ik_fk"]!="FK" for x in affecting):driver_reasons.append("IK_INTERPOLATION_MODEL_UNQUALIFIED")
+        if any(row.get("mode")!="Continuous" or row.get("key_common",{}).get("ik_fk")!="FK"
+               or row.get("key_common",{}).get("fixation")!="Free" for row in tangents):
+            driver_reasons.append("KEY_TANGENT_OR_COMMON_MODEL_UNQUALIFIED")
         if observed["locked"] or not observed["visible"]:driver_reasons.append("LAYER_NOT_EDITABLE")
         if observed["cycles"]:driver_reasons.append("CYCLE_MODEL_UNQUALIFIED")
         if channel!="position":driver_reasons.append("ROTATION_INTERPOLATION_MODEL_UNQUALIFIED")
@@ -229,6 +235,7 @@ def read_key_layout(scene,arguments,*,capture_lookup=None):
         key_values=[];data_mode=None
         for frame in keys:
             sample,data_mode=value(data_id,frame,channel);key_values.append(sample)
+        if data_mode!="Animation":driver_reasons.append("DRIVER_DATA_MODE_UNQUALIFIED")
         if len(keys)==1:model=CONSTANT_MODEL
         elif set(modes)=={"LINEAR"}:model=LINEAR_MODEL
         elif set(modes)=={"STEP"}:model=STEP_MODEL
@@ -275,9 +282,12 @@ def read_key_layout(scene,arguments,*,capture_lookup=None):
                     and record.get("native_build")==build and record.get("runtime_epoch")==guards.RUNTIME_EPOCH
                     and record.get("scene_instance_id")==instance["scene_instance_id"]
                     and record.get("evaluation_receipt_digest")):
-                qualified=sorted(set(record.get("qualified_models",()))&set(FINITE_MODELS))
+                proof=qualification()
+                if proof is not None and record.get("model_qualification_digest")==guards.digest(proof):
+                    qualified=sorted(set(record.get("qualified_models",()))&set(FINITE_MODELS)&set(qualified_models()))
                 binding={"status":"runtime_issued","capture_digest":capture_digest,
-                    "evaluation_receipt_digest":record["evaluation_receipt_digest"],"source_fingerprint":source_fingerprint}
+                    "evaluation_receipt_digest":record["evaluation_receipt_digest"],"source_fingerprint":source_fingerprint,
+                    "model_qualification_digest":record.get("model_qualification_digest")}
     if binding["status"]!="runtime_issued":reasons.append("RUNTIME_ISSUED_MOTION_CAPTURE_UNAVAILABLE")
     if set(candidate_models)-set(qualified):reasons.append("FINITE_INTERPOLATION_MODEL_NOT_QUALIFIED")
     reasons=sorted(set(reasons))

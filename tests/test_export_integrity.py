@@ -56,6 +56,60 @@ def test_exact_footer_and_tcdefinition(tmp_path, flag, clock):
         read_fbx_structure(path)
 
 
+def test_sdk_timestamp_footer_and_compound_boundaries(tmp_path):
+    from cascadeur_complete.fbx_validation import properties
+    def string(value):
+        encoded = value.encode()
+        return b'S' + struct.pack('<I', len(encoded)) + encoded
+    # Timestamp and independently observed SDK footer ID, not a file-hash allowlist.
+    fields = dict(Year=2026, Month=11, Day=16, Hour=0, Minute=35, Second=5, Millisecond=557)
+    header = lambda b: _node('FBXHeaderExtension', children=[
+        lambda x: _node('CreationTimeStamp', children=[
+            lambda y, k=k, v=v: _node(k, [b'I' + struct.pack('<i', v)], base=y)
+            for k, v in fields.items()], base=x)], base=b)
+    globals_ = lambda b: _node('GlobalSettings', children=[
+        lambda x: _node('Properties70', children=[lambda y: _node('P',
+            [string(v) for v in ('TimeMarker', 'Compound', '', '')], base=y)], base=x)], base=b)
+    path = _file(tmp_path / 'sdk.fbx', [header, globals_])
+    valid = bytearray(path.read_bytes())
+    valid[-160:-144] = bytes.fromhex('fabcab0cd4c9d562b471f8871ffa2979')
+    path.write_bytes(valid)
+    document = read_fbx_structure(path)
+    assert document.footer_verified
+    assert properties(document.nodes[1]) == {'TimeMarker': None}
+    # Checksum, padding, repeated version, terminal signature, timestamp and
+    # truncation are independent fail-closed boundaries of this exact variant.
+    for index in (len(valid) - 160, len(valid) - 144, len(valid) - 140, len(valid) - 1,
+                  valid.index(b'I' + struct.pack('<i', 2026)) + 1):
+        broken = bytearray(valid)
+        broken[index] ^= 1
+        path.write_bytes(broken)
+        with pytest.raises(FbxError, match='FBX_FOOTER_UNSUPPORTED'):
+            read_fbx_structure(path)
+    path.write_bytes(valid[:-1])
+    with pytest.raises(FbxError, match='FBX_FOOTER_UNSUPPORTED'):
+        read_fbx_structure(path)
+    broken = bytearray(valid)
+    struct.pack_into('<I', broken, 23, 7800)
+    path.write_bytes(broken)
+    with pytest.raises(FbxError, match='FBX_VERSION_UNSUPPORTED'):
+        read_fbx_structure(path)
+    path.write_bytes(valid)
+    with pytest.raises(FbxError, match='FBX_RESOURCE_LIMIT'):
+        read_fbx_structure(path, ParseLimits(max_file_bytes=len(valid) - 1))
+
+
+def test_valueless_properties_remain_typed_and_unique():
+    from cascadeur_complete.fbx_validation import properties
+    compound = FbxNode('P', ('TimeMarker', 'Compound', '', ''), ())
+    def container(*rows):
+        return FbxNode('GlobalSettings', (), (FbxNode('Properties70', (), rows),))
+    with pytest.raises(FbxError, match='FBX_PROPERTY_INVALID'):
+        properties(container(FbxNode('P', ('TimeSpanStop', 'KTime', 'Time', ''), ())))
+    with pytest.raises(FbxError, match='FBX_PROPERTY_INVALID'):
+        properties(container(compound, compound))
+
+
 def test_compressed_array_cannot_exceed_declared_or_total_budget(tmp_path):
     compressed = zlib.compress(bytes(100000))
     prop = b"d" + struct.pack("<III", 1, 1, len(compressed)) + compressed

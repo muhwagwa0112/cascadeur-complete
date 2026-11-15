@@ -21,6 +21,7 @@ import numpy as np
 from .export_models import ExportExpectation, ExportProfile, ValidationReport
 
 MAGIC = b"Kaydara FBX Binary  \x00\x1a\x00"
+# Blender/Assimp's fixed-time exporter convention, not a universal signature.
 FOOTER_START = bytes.fromhex("fabcab09d0c8d466b176fb831cf7267e")
 FOOTER_END = bytes.fromhex("f85a8c6adef5d97eece90ce3758f290b")
 LEGACY_KTIME = 46186158000
@@ -197,6 +198,43 @@ def file_sha256(path: str | Path, max_bytes: int | None = None) -> str:
     return digest.hexdigest()
 
 
+def _timestamp_footer_checksum(nodes) -> bytes:
+    """Recompute the SDK footer ID from its header timestamp, never a prefix.
+
+    Algorithm evidence: hamish-milne/FbxWriter Fbx/FbxBinary.cs,
+    GenerateFooterCode/Encrypt. Maintained Assimp FBXExporter.cpp separately
+    documents why its fixed-time GENERIC_FOOTID is only an exporter convention.
+    This checksum is format consistency, not cryptographic authentication.
+    """
+    from datetime import datetime
+    try:
+        header = _one(nodes, 'FBXHeaderExtension')
+        timestamp = _one(header.children, 'CreationTimeStamp')
+        values = {}
+        for field in ('Year', 'Month', 'Day', 'Hour', 'Minute', 'Second', 'Millisecond'):
+            entry = _one(timestamp.children, field)
+            if len(entry.properties) != 1 or type(entry.properties[0]) is not int:
+                raise ValueError('Timestamp components must be single native integers')
+            values[field] = entry.properties[0]
+        if not 0 <= values['Millisecond'] < 1000:
+            raise ValueError('Invalid millisecond')
+        datetime(values['Year'], values['Month'], values['Day'], values['Hour'],
+                 values['Minute'], values['Second'], values['Millisecond'] * 1000)
+        stamp = (f"{values['Second']:02}{values['Month']:02}{values['Hour']:02}"
+                 f"{values['Day']:02}{values['Millisecond'] // 10:02}"
+                 f"{values['Year']:04}{values['Minute']:02}").encode('ascii')
+        state = bytearray.fromhex('58aba9f06ca2d83f4d4749a3b4b2e73d')
+        key = bytes.fromhex('e24f7b5fcde4c86ddbd8fbd74058c678')
+        for mask in (stamp, key, stamp):
+            carry = 64
+            for index in range(16):
+                state[index] ^= carry ^ mask[index]
+                carry = state[index]
+        return bytes(state)
+    except (FbxError, ValueError, OverflowError) as exc:
+        raise FbxError('FBX_FOOTER_UNSUPPORTED', 'Missing/invalid SDK footer timestamp') from exc
+
+
 def read_fbx_structure(path: str | Path, limits: ParseLimits | None = None) -> FbxDocument:
     limits = limits or ParseLimits()
     if any(value <= 0 for name, value in vars(limits).items() if name.startswith("max_")):
@@ -226,14 +264,21 @@ def read_fbx_structure(path: str | Path, limits: ParseLimits | None = None) -> F
         if remaining > 256:
             raise FbxError("FBX_FOOTER_UNSUPPORTED", "Unexpected bytes after root terminator")
         footer = stream.read(remaining)
-        # The supported footer layouts have a timestamp checksum, zero alignment
-        # padding, repeated version, 120 zeros and the fixed terminal signature.
+        # A timestamp-dependent ID precedes zero alignment, repeated version,
+        # 120 zeros and the fixed terminal signature. Never accept arbitrary IDs.
         footer_ok = False
-        if 160 <= len(footer) <= 192 and footer[:16] == FOOTER_START and footer[-16:] == FOOTER_END:
+        if 160 <= len(footer) <= 192 and footer[-16:] == FOOTER_END:
             version_offset = len(footer) - 140
             footer_ok = (footer[16:version_offset] == bytes(version_offset - 16)
                          and footer[version_offset:version_offset + 4] == raw_version
                          and footer[version_offset + 4:-16] == bytes(120))
+            if footer_ok and footer[:16] != FOOTER_START:
+                # Diagnostic parsing can inspect an unsupported ID, but can
+                # never promote it to footer_verified or structural validation.
+                try:
+                    footer_ok = footer[:16] == _timestamp_footer_checksum(nodes)
+                except FbxError:
+                    footer_ok = False
         if limits.require_footer and not footer_ok:
             raise FbxError("FBX_FOOTER_UNSUPPORTED", "Unrecognized/truncated binary footer")
         stream.seek(0)
@@ -256,9 +301,18 @@ def read_fbx_structure(path: str | Path, limits: ParseLimits | None = None) -> F
 def properties(node: FbxNode) -> dict:
     result = {}
     for prop in find(node.children, "P"):
-        if len(prop.properties) < 5 or prop.properties[0] in result:
+        values = prop.properties
+        if (len(values) < 4 or not all(isinstance(value, str) for value in values[:4])
+                or not values[0] or values[0] in result):
             raise FbxError("FBX_PROPERTY_INVALID", "Invalid/duplicate named property")
-        result[prop.properties[0]] = prop.properties[4:] if len(prop.properties) > 5 else prop.properties[4]
+        if len(values) == 4:
+            # Blender fbx_utils.py p_compound/_elem_props_set writes exactly
+            # four strings and no scalar. Keep explicit absence, never zero.
+            if values[1] != 'Compound':
+                raise FbxError('FBX_PROPERTY_INVALID', 'Only Compound may omit its value')
+            result[values[0]] = None
+        else:
+            result[values[0]] = values[4:] if len(values) > 5 else values[4]
     return result
 
 
@@ -279,6 +333,72 @@ def _name(node):
     if len(node.properties) < 2 or not isinstance(node.properties[1], str):
         raise FbxError("FBX_OBJECT_INVALID", "Missing object name")
     return node.properties[1].split("\x00", 1)[0].removeprefix(f"{node.name}::")
+
+
+def _time_span(values, detail):
+    if (len(values) != 2 or any(type(value) is not int or not -(2**63) <= value < 2**63
+                                for value in values) or values[0] > values[1]):
+        raise FbxError("EXPORT_TIME_SPAN_INVALID", detail)
+    return tuple(values)
+
+
+def take_span(doc: FbxDocument, take_name: str) -> dict:
+    """Read explicit local clip metadata; never infer it from curves or globals.
+
+    FbxTakeInfo.mLocalTimeSpan and FbxAnimStack.LocalStart/LocalStop describe
+    the local take interval. Reference time is separate and may be offset.
+    https://help.autodesk.com/cloudhelp/2020/ENU/FBX-API-Reference/cpp_ref/class_fbx_take_info.html
+    """
+    stacks = [node for node in _one(doc.nodes, "Objects").children
+              if node.name == "AnimationStack"]
+    if len(stacks) != 1 or _name(stacks[0]) != take_name:
+        raise FbxError("EXPORT_TAKE_MATCH", "Exact single requested take required")
+    stack = properties(stacks[0])
+
+    def named_pair(start, stop):
+        if start not in stack and stop not in stack:
+            return None
+        if start not in stack or stop not in stack:
+            raise FbxError("EXPORT_TIME_SPAN_INVALID", f"Partial {start}/{stop}")
+        return _time_span((stack[start], stack[stop]), f"AnimationStack.{start}/{stop}")
+
+    local = named_pair("LocalStart", "LocalStop")
+    reference = named_pair("ReferenceStart", "ReferenceStop")
+    sources = ["Objects/AnimationStack/LocalStart+LocalStop"] if local is not None else []
+    take_nodes = [node for node in doc.nodes if node.name == "Takes"]
+    if len(take_nodes) > 1:
+        raise FbxError("EXPORT_TAKE_AMBIGUOUS", "Duplicate Takes containers")
+    if take_nodes:
+        takes = [node for node in take_nodes[0].children if node.name == "Take"]
+        if (len(takes) != 1 or takes[0].properties != (take_name,)):
+            raise FbxError("EXPORT_TAKE_AMBIGUOUS", "Exact single matching Takes/Take required")
+        current = [node for node in take_nodes[0].children if node.name == "Current"]
+        if len(current) > 1 or (current and current[0].properties not in (("",), (take_name,))):
+            raise FbxError("EXPORT_TAKE_AMBIGUOUS", "Current take disagrees with the requested take")
+
+        def take_pair(name, required=False):
+            matches = [node for node in takes[0].children if node.name == name]
+            if not matches and not required:
+                return None
+            if len(matches) != 1:
+                raise FbxError("EXPORT_TIME_SPAN_INVALID", f"Unique Takes/Take/{name} required")
+            return _time_span(matches[0].properties, f"Takes/Take/{name}")
+
+        take_local = take_pair("LocalTime", required=True)
+        take_reference = take_pair("ReferenceTime")
+        if local is not None and local != take_local:
+            raise FbxError("EXPORT_TAKE_SPAN_DISAGREEMENT", "Stack and take local intervals differ")
+        if reference is not None and take_reference is not None and reference != take_reference:
+            raise FbxError("EXPORT_TAKE_SPAN_DISAGREEMENT", "Stack and take reference intervals differ")
+        local = take_local
+        reference = take_reference if take_reference is not None else reference
+        sources.append("Takes/Take/LocalTime")
+    if local is None:
+        raise FbxError("EXPORT_TAKE_SPAN_UNVERIFIED", "No explicit local take interval")
+    return {"name": take_name, "local_start": local[0], "local_stop": local[1],
+            "reference_start": reference[0] if reference is not None else None,
+            "reference_stop": reference[1] if reference is not None else None,
+            "sources": sources}
 
 
 def _round_tick(value: Fraction) -> int:
@@ -347,9 +467,10 @@ def validate_fbx_structure(doc: FbxDocument, profile: ExportProfile,
             np.diff(expected.time_s), profile.fps_den / profile.fps_num, rtol=0, atol=1e-9)) and math.isclose(
             expected.time_s[-1] - expected.time_s[0], (len(ticks) - 1) * profile.fps_den / profile.fps_num,
             abs_tol=1e-9), "EXPORT_DURATION_MATCH", "Expected physical duration differs from profile")
-        for key, tick in (("TimeSpanStart", ticks[0]), ("TimeSpanStop", ticks[-1])):
-            require(key in settings and abs(settings[key] - int(tick)) <= profile.tolerances.ticks,
-                    "EXPORT_GLOBAL_SPAN", key)
+        # GlobalSettings is the scene's default timeline, not the selected clip.
+        # SDK FbxGlobalSettings.GetTimelineDefaultTimeSpan documents this distinction.
+        global_span = _time_span((settings.get("TimeSpanStart"), settings.get("TimeSpanStop")),
+                                 "GlobalSettings.TimeSpanStart/TimeSpanStop")
         objects = _one(doc.nodes, "Objects").children
         by_id = {}
         for node in objects:
@@ -406,10 +527,12 @@ def validate_fbx_structure(doc: FbxDocument, profile: ExportProfile,
         require(len(stacks) == 1 and _name(stacks[0]) == profile.take_name,
                 "EXPORT_TAKE_MATCH", "Exact single requested take required")
         stack_id = stacks[0].properties[0]
-        span = properties(stacks[0])
-        for key, tick in (("LocalStart", ticks[0]), ("LocalStop", ticks[-1])):
-            require(key in span and abs(span[key] - int(tick)) <= profile.tolerances.ticks,
+        span = take_span(doc, profile.take_name)
+        for key, tick in (("local_start", ticks[0]), ("local_stop", ticks[-1])):
+            require(abs(span[key] - int(tick)) <= profile.tolerances.ticks,
                     "EXPORT_TAKE_SPAN", key)
+        require(global_span[0] <= span["local_start"] <= span["local_stop"] <= global_span[1],
+                "EXPORT_GLOBAL_SPAN", "Explicit take interval lies outside the scene timeline")
         # FBX connections run child -> parent: curve -> curve node -> layer -> stack.
         layers = {e[1] for e in edges if e[0] == "OO" and e[2] == stack_id
                   and by_id[e[1]].name == "AnimationLayer"}
