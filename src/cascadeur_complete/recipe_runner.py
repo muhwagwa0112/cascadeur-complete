@@ -255,6 +255,9 @@ class RecipeRunner:
         run = self.store.adopt(run_id)
         if run.state in TERMINAL_RUNS:
             return run_view(run)
+        run = self._retain_actual_readback_failure(run)
+        if run.state in TERMINAL_RUNS:
+            return run_view(run)
         if run.cancel_requested:
             return self._continue_cancellation(run_id)
         if authorization_id is not None and authorization_id != run.authorization_id:
@@ -355,12 +358,35 @@ class RecipeRunner:
         return self._step_update(run, updated, artifacts=[item.model_dump(mode="json") for item in (*run.artifacts, ref)],
                                  **transition)
 
+    def _retain_actual_readback_failure(self, run):
+        # Older workers marked the readback step succeeded even when its
+        # immutable observation failed. Preserve that terminal record, but do
+        # not allow resume (including its early publish branch) to skip it.
+        for record in run.steps:
+            if not record.step_id.endswith("-actual_readback") or record.result is None:
+                continue
+            ref = next((item for item in reversed(record.artifact_refs) if item.kind == record.step_id), None)
+            if ref is None:
+                raise RecipeConflict("ACTUAL_READBACK_EVIDENCE_MISSING")
+            observation = self.store.read_artifact(run.run_id, ref)
+            verification = observation.get("verification")
+            if not isinstance(verification, dict) or "status" not in verification:
+                raise RecipeConflict("ACTUAL_READBACK_EVIDENCE_MISSING")
+            if verification["status"] != "pass":
+                return self._update(run, state="failed", blocked_reason="ACTUAL_READBACK_FAILED")
+        if run.blocked_reason == "ACTUAL_READBACK_FAILED":
+            raise RecipeConflict("ACTUAL_READBACK_EVIDENCE_MISSING")
+        return run
+
     def advance_once(self, run_id):
         with store_lock(self.store.run_dir(run_id) / ".execution.lock"):
             run = self.store.read(run_id)
             if run.owner_host_instance_id != HOST_INSTANCE_ID:
                 raise RecipeConflict("Only the active host lease can advance this run")
             if run.state in TERMINAL_RUNS or run.state == "blocked":
+                return run
+            run = self._retain_actual_readback_failure(run)
+            if run.state in TERMINAL_RUNS:
                 return run
             plan = self.store.read_plan(run.plan_id)
             pending = next((item for item in run.steps if item.state not in TERMINAL_STEPS), None)
@@ -546,7 +572,8 @@ class RecipeRunner:
                 verification = self._verify_actual(run, plan, value)
                 value["verification"] = verification
                 if verification["status"] != "pass":
-                    return self._persist_result(run, record, value, state="blocked",
+                    record = record.model_copy(update={"verification_status": "fail"})
+                    return self._persist_result(run, record, value, step_state="failed", state="failed",
                                                 blocked_reason="ACTUAL_READBACK_FAILED",
                                                 current_binding=binding.model_dump(mode="json"))
             return self._persist_result(run, record, value, current_binding=binding.model_dump(mode="json"))

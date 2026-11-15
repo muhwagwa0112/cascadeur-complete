@@ -38,6 +38,90 @@ def allocated(tmp_path):
     return paths, store, plan, grant, run
 
 
+def allocated_readback(tmp_path, *, export=False):
+    """Persist host-state fixtures; no native failure or quality evidence."""
+    from cascadeur_complete.motion_context import IntentConstraints, RigProfile
+    from cascadeur_complete.motion_quality import required_motion_metrics
+    value = spec_dict()
+    value["cleanup"] = [{"kind": "foot_contacts", "object_ids": ["root"]}]
+    required = required_motion_metrics(RigProfile(**value["character"]["rig_profile"]),
+                                       IntentConstraints.model_validate(value["intent"]))
+    value["quality"].update(required_metrics=sorted(required), limits_si={name: 0 for name in required})
+    if export:
+        value["export"] = {"character_ref": "hero", "skeleton_map": [
+            {"role": "root", "node_path": "Root", "source_id": "root"}], "take_name": "Take",
+            "first_frame": 5, "last_frame": 7, "fps_num": 24,
+            "axes": {"up_axis": 1, "up_sign": 1, "front_axis": 2, "front_sign": 1,
+                     "coord_axis": 0, "coord_sign": 1}, "metres_per_export_unit": .01,
+            "root_motion": {"node_path": "Root"}, "target_adapter": "host-test-only",
+            "target_adapter_fingerprint": "unqualified", "target_import_settings_digest": "unqualified",
+            "destination": str(tmp_path / "unused.fbx")}
+    paths = RuntimePaths.discover(tmp_path)
+    paths.ensure()
+    store = RecipeRunStore(paths)
+    plan = store.save_plan(build_plan(RecipeSpec.model_validate(value), []))
+    grant = store.authorize(plan, time.time() + 300)
+    run = store.create(plan, grant, "readback-boundary")
+    record = next(item for item in run.steps if item.step_id.endswith("-actual_readback"))
+    steps = [item.model_copy(update={"state": "skipped"}) if item.step_id < record.step_id else item
+             for item in run.steps]
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+        transition={"state": "running", "steps": [item.model_dump(mode="json") for item in steps]})
+    return paths, store, plan, run, next(item for item in run.steps if item.step_id == record.step_id)
+
+
+def test_failed_actual_readback_persists_failed_step_and_run(tmp_path):
+    """A capture/verification double exercises persistence, not native execution."""
+    from cascadeur_complete.models import SourceBinding
+    paths, store, plan, run, record = allocated_readback(tmp_path)
+    source = SourceBinding(binding=plan.spec.input.binding, scope={}, sample_digest="sample",
+                           inputs_digest="inputs", adapter_fingerprint="fingerprint", complete=True)
+    runner = RecipeRunner(SimpleNamespace(paths=paths))
+    runner._capture = lambda *args, **kwargs: {"global": {"source_binding": source.model_dump(mode="json")}}
+    runner._verify_actual = lambda *args: {"status": "fail", "reason_codes": ["DRIVER_READBACK_MISMATCH:position_readback_m"]}
+    step = next(item for item in plan.steps if item.step_id == record.step_id)
+    runner._host_step(run, record, step, plan)
+    failed = store.read(run.run_id)
+    saved = next(item for item in failed.steps if item.step_id == record.step_id)
+    assert failed.state == saved.state == "failed" and saved.verification_status == "fail"
+    assert failed.blocked_reason == "ACTUAL_READBACK_FAILED"
+    observation = store.read_artifact(run.run_id, saved.artifact_refs[-1])
+    assert observation["verification"]["status"] == "fail"
+    runner._schedule = lambda *_: pytest.fail("Failed readback cannot schedule another worker")
+    runner.resume(run.run_id)
+    assert store.read(run.run_id) == failed
+
+
+@pytest.mark.parametrize("entry", ["resume", "advance", "resume_publish"])
+def test_legacy_success_marked_failed_readback_cannot_resume_past_its_artifact(tmp_path, entry):
+    paths, store, _, run, record = allocated_readback(tmp_path, export=entry == "resume_publish")
+    observation = {"verification": {"status": "fail", "reason_codes": ["DRIVER_READBACK_MISMATCH:position_readback_m"]}}
+    ref = store.artifact(run.run_id, record.step_id, observation)
+    legacy = record.model_copy(update={"state": "succeeded", "result": observation, "artifact_refs": (ref,)})
+    steps = [legacy if item.step_id == record.step_id else item for item in run.steps]
+    if entry == "resume_publish":
+        intent = tmp_path / "already-journaled-publish.intent.json"
+        intent.write_text("{}", encoding="utf-8")
+        steps = [item.model_copy(update={"state": "awaiting_result", "stage_data": {"intent_path": str(intent)}})
+                 if item.step_id.endswith("-publish") else item for item in steps]
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+        transition={"state": "running" if entry == "advance" else "blocked",
+            "blocked_reason": "ACTUAL_READBACK_FAILED", "steps": [item.model_dump(mode="json") for item in steps],
+            "artifacts": [ref.model_dump(mode="json")]})
+    runner = RecipeRunner(SimpleNamespace(paths=paths))
+    def forbidden(*args, **kwargs):
+        pytest.fail("Failed readback must precede preflight, dispatch and early publish")
+    runner._check_plan = runner._schedule = runner._prepare = runner._export_host_step = forbidden
+    if entry == "advance":
+        runner.advance_once(run.run_id)
+    else:
+        runner.resume(run.run_id)
+    stopped = store.read(run.run_id)
+    assert stopped.state == "failed" and stopped.blocked_reason == "ACTUAL_READBACK_FAILED"
+    assert stopped.steps == run.steps and stopped.artifacts == run.artifacts
+    assert store.read_artifact(run.run_id, ref) == observation
+
+
 def test_r4_checkpoint_steps_and_derived_identity_are_explicit():
     from cascadeur_complete.recipe_planning import compile_steps
     value = spec_dict()

@@ -7,7 +7,23 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 늦은 실패 복구 연결과 native crash 정정
+### 최신 추가: actual readback 실패의 재개 우회 차단
+
+실제값이 candidate와 어긋나 `DRIVER_READBACK_MISMATCH`가 발생해도, 기존 runner는 run만 `blocked/ACTUAL_READBACK_FAILED`로 쓰고 step은 기본 `succeeded`로 저장했다. resume가 이 blocked reason을 유지하지 않아 이미 완료 표시된 readback을 건너뛰고 다음 checkpoint·quality로 진행할 수 있었다. 원 intent의 correction envelope 안인 불일치라면 뒤의 quality만으로 앞선 candidate 검증 실패가 사라질 수 있었다.
+
+- 새 readback 실패는 관측 artifact와 `verification_status=fail`, step/run `failed`로 저장한다. 원 native request나 실패 관측을 성공으로 바꾸지 않는다.
+- 이전 코드로 이미 `succeeded`가 된 readback은 원 terminal step을 고치지 않는다. resume/advance가 소유 run의 hash·길이를 확인한 immutable artifact를 읽고 실패가 있으면 run을 `failed/ACTUAL_READBACK_FAILED`로 종결한다. 이 확인은 승인 갱신·취소 계속 진행·early publish보다 앞선다. 관측 누락/무결성 오류는 차단하며 새 native dispatch나 게시를 실행하지 않는다. 이미 terminal인 과거 run을 다시 쓰지는 않는다.
+- 필요한 대상만 실행했다: 새 실패 저장과 legacy resume/advance/early-publish 세 경로, `4 passed`. 실제 store/artifact 저장을 사용하는 host 상태 회귀이며 capture/verification double은 실제 native 실패 증거가 아니다. 전체 suite/build/CI는 실행하지 않았다.
+
+### 실제 파일 닫기의 별도 관찰
+
+아래 crash의 root cause를 확인할 native stack은 확보하지 못했다. 설치 SDK `samples/change_visibility_data_type.py`는 `DataSourceManager.load_scene` 뒤 `close_scene`을 사용하고, `samples/casc_import_export.py`는 `ProjectLoader.load_from` 뒤 `SceneManager.remove_application_scene`을 사용한다. 둘 중 하나의 API 자체가 금지됐다고 단정할 근거는 없다. 직전 복원 helper가 한 callback에서 새 파일 load/save 후 서로 다른 세 소유 탭을 연속 제거한 사실만 확인했다.
+
+PID `7452`의 새 epoch `e23c2520-9a66-4dd6-bba9-7c35b7bf1da1`에서, 기존의 14,001-byte 단일 객체 소유 fixture를 새로운 `working.casc`로 복사해 제품 `load_project_copy`로 로드하고 `_save_observed`로 저장했다. 별도 callback에서 원 빈 탭을 활성화한 뒤, 다시 원 탭의 idle callback에서 SDK `DataSourceManager.close_scene`으로 새 탭 하나만 닫았다. 그 다음 callback에서 원 탭·projection·inventory 보존을 확인했고, 이후 main window와 PID도 응답했다. bridge fingerprint는 `dfbd3b9afbd68e7d80606d5a57b9d88505d8fbc4e38de80ebb32c1e15d862e99`였다.
+
+ignored 근거는 `artifacts/native-r4/isolated-runtime/snapshots/project-close-observation-577d94ee-2c41-4de9-872f-3eb656d24ffe/{load-observation,close-started,close-returned,next-callback}.json`과 `artifacts/native-r4/project-close-*-response.json`이다. 이 관찰은 단일 파일의 로드·저장·닫기 경로만 다루며, 앞선 연속 복원/정리 crash의 원인이나 해결·장시간 안정성 증거가 아니다. 제품 native 코드는 이 가설로 변경하지 않았고, production operation은 하나도 등록하지 않았다. 현재 앱은 원 빈 탭이며 사용자의 autosave·전역 인증키·기존 unknown은 변경하지 않았다.
+
+### 이전 추가: 늦은 실패 복구 연결과 native crash 정정
 
 소스 추적에서 타임아웃 후 늦은 `failed_after_dispatch/recovery_eligible` receipt를 받은 경우 자동 조건부 복구가 빠지는 결함을 확인했다. `commit_change`의 consumed-token 재호출은 기존 request 조회만 했고, recipe resume도 원 실패만 terminal로 기록했다.
 

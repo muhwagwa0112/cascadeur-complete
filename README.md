@@ -178,6 +178,8 @@ Cascadeur after changing bridge code; an old process cannot certify new code.
 | `recipe_artifacts(run_id)` | List content-hashed captures, receipts, quality, and checkpoint artifacts. |
 
 Recipes accept a strict declarative schema, not arbitrary operations or Python.
+An actual readback failure ends the run as failed. Resume also checks retained
+failure artifacts from older runs before continuing or publishing.
 Required acceptance metrics come from the rig, original intent, contacts and
 declared geometry as well as the caller's policy; a policy that omits a mandatory
 metric is blocked. Missing observations cannot become a pass through a narrower
