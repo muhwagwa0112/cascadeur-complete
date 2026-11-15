@@ -584,8 +584,21 @@ class RecipeRunner:
         valid = self.service.validate_source(binding)
         if not valid.ok:
             raise RecipeConflict("SOURCE_CHANGED: actual quality capture is no longer the live source")
-        report = evaluate_actual_quality(original, batch, rig, plan.spec.intent, plan.spec.quality,
+        full_policy = plan.spec.quality
+        # These two observations exist only after the independent consumer has
+        # imported the sealed export. Every other approved metric remains a
+        # native obligation, including unknown/unmeasured metric names.
+        deferred = tuple(name for name in full_policy.required_metrics
+                         if plan.spec.export is not None and name in {"position_readback_m", "rotation_readback_rad"})
+        native_policy = full_policy.model_copy(update={
+            "required_metrics": tuple(name for name in full_policy.required_metrics if name not in deferred)})
+        report = evaluate_actual_quality(original, batch, rig, plan.spec.intent, native_policy,
             supports=self._supports(plan.spec), capture_verifier=getattr(self.service, "recipe_verify_capture", None)).as_dict()
+        report.update(quality_scope="pre_export_native" if plan.spec.export is not None else "native",
+            approved_quality_policy_digest=digest(full_policy),
+            evaluated_required_metrics=list(native_policy.required_metrics),
+            deferred_metric_obligations={name: {"status": "pending_export_roundtrip", "limit": full_policy.limits_si[name]}
+                                         for name in deferred})
         violations = self._original_constraints(plan, metrics)
         if violations:
             report["status"] = "fail"

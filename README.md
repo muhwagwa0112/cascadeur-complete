@@ -123,8 +123,32 @@ call phases. This is not a hard bound on native allocation. Subsequent empty-sce
 animated fixtures passed strict FBX structure/settings readback and an actual
 Blender import with five sampled frames. The explicit export qualification can
 register only the observed independent-object profile; production execution also
-requires a durable evaluation receipt. Independent source-rest alignment,
-intent-bound target roundtrip quality and final publication remain unverified.
+requires a durable evaluation receipt. On installed Cascadeur 2026.2.3.0.16863
+and Blender 4.5.8, a fresh public recipe completed file bootstrap, evaluation,
+native quality, checkpoint, selected export, independent source-rest/intent
+roundtrip validation and final publication for one parentless Transform over
+frames 0..4. This finite observation does not qualify general rigs or meshes.
+
+The finite independent export route now binds an initially empty selector and
+its observed pivot position/rotation, temporarily selects only the approved
+profile object, and restores those observations before reporting completion.
+The full authored projection must remain identical. A nonempty original
+selection is unsupported; the SDK does not expose pivot identity, so hidden
+pivot identity restoration is explicitly unobserved. Sealing checks the native
+selection lifecycle against the dispatch's authenticated source.
+
+For animated parentless FBX Nulls, the Blender decoder separates the importer's
+root frame `G` from the explicit Blender-to-canonical basis `B`, using
+`B @ R_blender @ (B @ G).T` for rest and sampled rotations. Static artifact rest
+is independently decoded and compared with native source rest. This finite
+rule does not change armature/mesh decoding or qualify other transform domains.
+Pre-export native quality explicitly defers only the two consumer readback
+metrics; final export validation still requires the complete approved policy
+and the original motion intent.
+The observed roundtrip measured at most `4.9981e-10 m` position error and
+`1.6293e-7 rad` rotation error against limits declared before import (`1e-6`
+for each). The sealed and published FBX hashes matched. See the memo for the
+run identity, preserved blocked attempts and remaining runtime limitations.
 
 ## Mocap cleanup
 

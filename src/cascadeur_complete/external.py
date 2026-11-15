@@ -335,7 +335,7 @@ def _compare_target_capture(capture: dict, expected: ExportExpectation, profile:
         rotation_errors.extend(errors)
     for name, errors, limit, worst in (("target_position_m", position_errors, profile.tolerances.position_m, worst_position),
                                        ("target_rotation_rad", rotation_errors, profile.tolerances.rotation_rad, worst_rotation)):
-        checks.append({"id": name, "ok": bool(errors) and max(errors) <= limit,
+        checks.append({"id": name, "ok": bool(errors) and bool(max(errors) <= limit),
                        "max": float(max(errors)) if errors else None,
                        "p95": float(np.percentile(errors, 95)) if errors else None,
                        "limit": limit, "worst": worst, "sample_count": len(errors)})

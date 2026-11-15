@@ -96,6 +96,26 @@ def seal_export(stage: ExportStage, receipt, budget) -> ArtifactRef:
     if (any(receipt.get(key) != binding[key] for key in ('request_id', 'run_id', 'step_id', 'attempt_id', 'lease_epoch', 'operation_digest'))
             or receipt.get('scene_before') != binding['source_binding'].get('binding', binding['source_binding'])):
         raise ExportPublicationError("EXPORT_RECEIPT_MISMATCH", "Receipt belongs to another export stage")
+    source = binding['source_binding']
+    scope = source.get('scope', {})
+    if scope.get('adapter_id') == 'native-selected-export-v1':
+        observation = native.get('completion_observation')
+        transition = native.get('selection_transition')
+        if (not isinstance(observation, dict) or not isinstance(transition, dict)
+                or observation.get('selection_transition') != transition
+                or canonical_digest(observation) != native.get('completion_observation_digest')
+                or transition.get('policy') != 'temporary_empty_selection_observed_restore'
+                or transition.get('status') != 'observed_restored'
+                or transition.get('policy') != scope.get('export_selection_policy')
+                or transition.get('before') != scope.get('export_selection_before')
+                or transition.get('after') != transition.get('before')
+                or transition.get('before', {}).get('ids') != []
+                or transition.get('export_selected_ids') != scope.get('export_selected_ids')
+                or transition.get('during', {}).get('ids') != scope.get('export_selected_ids')
+                or transition.get('authored_projection_before_digest') != source.get('sample_digest')
+                or transition.get('authored_projection_after_digest') != source.get('sample_digest')):
+            raise ExportPublicationError('EXPORT_SELECTION_RESTORATION_UNVERIFIED',
+                'Native receipt must preserve the bound empty selector/pivot observations and full authored source')
     maximum = budget.get("output_bytes") if isinstance(budget, dict) else getattr(budget, "output_bytes", None)
     if type(maximum) is not int or maximum <= 0:
         raise ValueError("An explicit positive output_bytes budget is required")

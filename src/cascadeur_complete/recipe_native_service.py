@@ -5,6 +5,7 @@ Native capability claims come only from the live bridge and its observation ledg
 """
 from __future__ import annotations
 
+import math
 import time
 from pathlib import Path
 
@@ -51,6 +52,18 @@ def _assert_export_source(source, spec):
             or digest(arguments['export_profile']) != digest(profile)):
         raise RecipeConflict('EXPORT_SOURCE_UNVERIFIED: exact export profile and arguments differ from recipe')
     mapped = sorted(item.source_id for item in profile.skeleton_map)
+    selection = scope.get('export_selection_before')
+    if (scope.get('export_selection_policy') != 'temporary_empty_selection_observed_restore'
+            or not isinstance(selection, dict)
+            or set(selection) != {'ids', 'ordered_ids', 'pivot_position_native', 'pivot_rotation_wxyz', 'pivot_identity_status'}
+            or selection['ids'] != [] or selection['ordered_ids'] != []
+            or selection['pivot_identity_status'] != 'unobserved'):
+        raise RecipeConflict('EXPORT_SOURCE_UNVERIFIED: observed empty-selection restore contract required')
+    for key, size in (('pivot_position_native', 3), ('pivot_rotation_wxyz', 4)):
+        values = selection[key]
+        if (not isinstance(values, list) or len(values) != size
+                or any(type(value) not in (int, float) or not math.isfinite(value) for value in values)):
+            raise RecipeConflict('EXPORT_SOURCE_UNVERIFIED: finite observed selection pivot required')
     path = Path(arguments['path'])
     if (len(mapped) != 1 or mapped != sorted(spec.character.object_ids)
             or scope.get('object_ids') != mapped or scope.get('export_selected_ids') != mapped

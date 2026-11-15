@@ -21,7 +21,7 @@ class NativeExportAdapter(NativeSceneAdapter):
 
     def _scope(self, scene, scope):
         from . import runtime as rt
-        from .native_export import profile_contract
+        from .native_export import profile_contract, empty_selection_observation
         from .native_interpolation_qualification import independent_projection_identity
         if Path(self.verification['evidence_path']).read_bytes() != self.evidence_bytes:
             raise ValueError('NATIVE_EXPORT_ADAPTER_UNVERIFIED: qualification bytes changed')
@@ -33,12 +33,12 @@ class NativeExportAdapter(NativeSceneAdapter):
                 or guards.digest(profile_contract(profile)) != self.export_observation['profile_contract_digest']):
             raise ValueError('NATIVE_EXPORT_PROFILE_UNQUALIFIED: exact observed settings contract required')
         projection = self.read_scene(scene)
-        selected = sorted(rt._id_string(x) for x in rt._domain_scene(scene).selector().selected().ids)
+        selection_before = empty_selection_observation(scene)
         requested = sorted(row['source_id'] for row in profile['skeleton_map'])
-        if (selected != requested or len(selected) != 1
-                or not independent_projection_identity(projection, selected[0])
+        if (len(requested) != 1
+                or not independent_projection_identity(projection, requested[0])
                 or projection['frames'] != profile['last_frame'] + 1):
-            raise ValueError('NATIVE_EXPORT_SCOPE_UNQUALIFIED: selection and interval must match profile')
+            raise ValueError('NATIVE_EXPORT_SCOPE_UNQUALIFIED: independent profile object and interval required')
         # The qualification fixture proves independent transforms, not unknown
         # controller graphs, parenting, rotational interpolation or skinning.
         data = {row['id']: row for row in projection['data']}
@@ -63,16 +63,18 @@ class NativeExportAdapter(NativeSceneAdapter):
                     raise ValueError('NATIVE_EXPORT_SCOPE_UNQUALIFIED: identity rotation and unit scale required')
         if projection['assets'] or projection['cycles']:
             raise ValueError('NATIVE_EXPORT_SCOPE_UNQUALIFIED: assets/cycles outside fixture domain')
-        return arguments, profile, projection, selected
+        return arguments, profile, projection, requested, selection_before
 
     def required_scope(self, scene, scope):
         from .native_adapters import _WORKSPACES
-        arguments, profile, projection, selected = self._scope(scene, scope)
+        from .native_export import SELECTION_POLICY
+        arguments, profile, projection, selected, selection_before = self._scope(scene, scope)
         result = {'operation_name': 'io.export_fbx', 'operation_arguments': arguments,
                 'operation_arguments_digest': guards.digest(arguments), 'adapter_id': 'native-selected-export-v1',
                 'object_ids': [row['id'] for row in projection['objects']],
                 'layer_ids': [row['id'] for row in projection['layers']],
                 'frames': [0, projection['frames'] - 1], 'export_selected_ids': selected,
+                'export_selection_before': selection_before, 'export_selection_policy': SELECTION_POLICY,
                 'profile': profile, 'input_files': []}
         manifest = _WORKSPACES.get(guards.scene_instance(scene)['scene_instance_id'])
         if manifest is not None:
@@ -80,9 +82,9 @@ class NativeExportAdapter(NativeSceneAdapter):
         return result
 
     def capture(self, scene, scope):
-        _, _, projection, selected = self._scope(scene, scope)
+        _, _, projection, _, selection_before = self._scope(scene, scope)
         return {'coverage_complete': True,
-                'authored_projection': {'native': projection, 'selected_ids': selected},
+                'authored_projection': {'native': projection, 'export_selection_before': selection_before},
                 'sample_projection': projection}
 
     def execute(self, scene, arguments, request):
@@ -107,6 +109,14 @@ def qualify_and_register_export():
     observed = qualify_export_disposable(base, animated=True)
     if observed['reason_codes'] != ['TARGET_ROUNDTRIP_UNVERIFIED']:
         raise ValueError('NATIVE_EXPORT_ADAPTER_UNVERIFIED: animated conformance missing')
+    from .native_export import SELECTION_POLICY
+    transition = observed['native_export_observation'].get('selection_transition', {})
+    if (transition.get('policy') != SELECTION_POLICY or transition.get('status') != 'observed_restored'
+            or transition.get('before', {}).get('ids') != []
+            or transition.get('before') != transition.get('after')
+            or transition.get('during', {}).get('ids') != transition.get('export_selected_ids')
+            or transition.get('authored_projection_before_digest') != transition.get('authored_projection_after_digest')):
+        raise ValueError('NATIVE_EXPORT_ADAPTER_UNVERIFIED: empty selection transition/restoration unobserved')
     material = {**observed, 'operations': ['io.export_fbx'],
                 'base_reader_evidence_sha256': hashlib.sha256(base.evidence_bytes).hexdigest()}
     path = Path(observed['retained_directory']) / 'qualification.json'

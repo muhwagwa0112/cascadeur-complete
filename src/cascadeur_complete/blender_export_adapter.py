@@ -149,6 +149,10 @@ def _artifact_object_rest(manifest, scene):
     axis_up, axis_forward = axes
     global_matrix = (Matrix.Scale(unit / fbx_utils.units_blender_to_fbx_factor(scene), 4)
                      @ axis_conversion(from_forward=axis_forward, from_up=axis_up).to_4x4())
+    # The importer prepends this frame to root objects. It changes world
+    # coordinates but leaves the object's local axes in the FBX frame (it is
+    # not a change-of-basis conjugation). Keep it separate from authored rest.
+    root_frame = global_matrix.to_3x3().normalized()
     matrices, provenance = {}, {}
     for name, node in by_name.items():
         props = (one(node, b'Properties70', optional=True), template_props)
@@ -168,8 +172,11 @@ def _artifact_object_rest(manifest, scene):
         matrices[name] = matrix
         provenance[name] = {'source': 'artifact_static_model_and_template', 'model_id': node.props[0],
                             'artifact_sha256': manifest['artifact']['sha256'],
+                            'domain': 'independent_parentless_fbx_null',
+                            'fbx_static_rest_matrix': [list(row) for row in local],
+                            'importer_root_frame': [list(row) for row in root_frame],
                             'blender_rest_matrix': [list(row) for row in matrix]}
-    return matrices, provenance
+    return matrices, provenance, root_frame
 
 
 def run(manifest):
@@ -244,7 +251,8 @@ def run(manifest):
         reverse[key] = path
         resolved[path] = (obj, bone)
     parent_paths, rest_rotations, rest_lengths, rest_positions = {}, {}, {}, {}
-    object_rest, object_rest_provenance = {}, {}
+    object_rest, object_rest_provenance, object_local_inverse = {}, {}, {}
+    animated_containers = []
     for path, (obj, bone) in resolved.items():
         # An animated object's static defaults come from a separate artifact
         # decode. An evaluated/imported first pose is never used as its rest.
@@ -252,8 +260,27 @@ def run(manifest):
         if action and any(not curve.data_path.startswith('pose.bones[') for curve in curves):
             if bone is not None:
                 raise ValueError('TARGET_ANIMATED_CONTAINER_REST_UNSUPPORTED')
-            if not object_rest:
-                object_rest, object_rest_provenance = _artifact_object_rest(manifest, scene)
+            animated_containers.append(path)
+    if animated_containers:
+        object_rest, object_rest_provenance, root_frame = _artifact_object_rest(manifest, scene)
+        # B maps Blender world vectors to canonical vectors. G maps FBX world
+        # vectors to Blender world, so B G maps the unchanged FBX local axes to
+        # canonical axes. R_blender = G R_fbx for these root Nulls, therefore
+        # R_canonical = B R_blender (B G)^T, not B R_blender B^T. Both the
+        # independently decoded static rest and evaluated animation use this
+        # same frame rule; neither is substituted for native source rest.
+        local_to_canonical = basis @ root_frame
+        for path, (obj, bone) in resolved.items():
+            if bone is not None or obj.type != 'EMPTY' or obj.parent is not None:
+                raise ValueError('TARGET_OBJECT_REST_SCOPE_UNSUPPORTED')
+            object_local_inverse[path] = local_to_canonical.transposed()
+            object_rest_provenance[path].update({
+                'canonical_rotation_formula': 'B @ R_blender @ (B @ G).T',
+                'blender_world_to_canonical_basis': [list(row) for row in basis],
+                'fbx_local_to_canonical_basis': [list(row) for row in local_to_canonical],
+                'native_source_rest_requirement': 'independent_host_observation_and_comparison',
+            })
+    for path, (obj, bone) in resolved.items():
         if bone is not None:
             parent_bone = bone.parent
             if parent_bone:
@@ -270,7 +297,8 @@ def run(manifest):
             parent_key = (obj.parent.name, None) if obj.parent else None
             matrix = object_rest.get(path, obj.matrix_world)
         parent_paths[path] = reverse.get(parent_key)
-        rest_rotations[path] = (basis @ matrix.to_3x3().normalized() @ inverse).to_quaternion()
+        rest_rotations[path] = (basis @ matrix.to_3x3().normalized()
+                                @ object_local_inverse.get(path, inverse)).to_quaternion()
         rest_positions[path] = list(basis @ matrix.translation)
         if parent_paths[path] != expected["parent_paths"][path]:
             raise ValueError("EXPORT_SKELETON_TOPOLOGY")
@@ -338,7 +366,8 @@ def run(manifest):
             if any(not math.isfinite(value) or value <= 0 for value in scale) or max(scale) - min(scale) > 1e-6:
                 raise ValueError("EXPORT_NONRIGID_TRANSFORM")
             position = basis @ matrix.translation
-            rotation = (basis @ matrix.to_3x3().normalized() @ inverse).to_quaternion()
+            rotation = (basis @ matrix.to_3x3().normalized()
+                        @ object_local_inverse.get(path, inverse)).to_quaternion()
             delta = rotation @ rest_rotations[path].inverted()
             capture["position_m"][path].append(list(position))
             capture["rotation_delta_wxyz"][path].append(list(delta))

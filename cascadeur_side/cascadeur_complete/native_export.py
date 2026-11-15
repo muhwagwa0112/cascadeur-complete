@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 
@@ -21,6 +22,7 @@ _SUCCESS_TEXT = "Custom export: animation exported from 0 to 0 (only one frame)"
 _OBSERVED_COMPLETION_MESSAGES = {(0, 0): _SUCCESS_TEXT}
 _MAX_OBJECTS = 256
 _MAX_FRAMES = 2001
+SELECTION_POLICY = 'temporary_empty_selection_observed_restore'
 
 
 def _source_installation():
@@ -121,7 +123,126 @@ def _request_arguments(arguments, request, profile, *, _completed_output=False):
     return arguments, request, profile
 
 
-def inspect_export(scene, arguments, request, profile, *, _completed_output=False):
+def selection_observation(scene):
+    """Read exposed selector state, without inventing an unexposed pivot ID.
+
+    The installed Pivot API exposes position/rotation/select, not its identity.
+    This bounded route preserves those observable values and explicitly makes
+    no claim about a hidden pivot identity or arbitrary nonempty selection.
+    """
+    import csc
+    from . import runtime as rt
+    selector = rt._domain_scene(scene).selector()
+    selected = selector.selected()
+    ids, ordered = list(selected.ids), list(selected.ordered_ids)
+    if any(not isinstance(value, csc.model.ObjectId) or value.is_null() for value in ids + ordered):
+        raise NativeExportError('EXPORT_SELECTION_UNSUPPORTED', 'Only native model object selection is observable in this route')
+    import numpy as np
+    pivot = selector.pivot()
+    position = np.asarray(pivot.position(), dtype=float)
+    if position.shape not in ((3,), (3, 1)) or not np.isfinite(position).all():
+        raise NativeExportError('EXPORT_SELECTION_UNOBSERVED', 'Finite native pivot position required')
+    rotation = pivot.rotation()
+    quaternion = [float(getattr(rotation, key)()) for key in ('w', 'x', 'y', 'z')]
+    if not all(math.isfinite(value) for value in quaternion):
+        raise NativeExportError('EXPORT_SELECTION_UNOBSERVED', 'Finite native pivot rotation required')
+    strings, order = sorted(rt._id_string(value) for value in ids), [rt._id_string(value) for value in ordered]
+    if len(set(strings)) != len(strings) or len(set(order)) != len(order) or set(strings) != set(order):
+        raise NativeExportError('EXPORT_SELECTION_UNOBSERVED', 'Selector membership and ordered membership disagree')
+    return {'ids': strings, 'ordered_ids': order, 'pivot_position_native': position.reshape(3).tolist(),
+            'pivot_rotation_wxyz': quaternion, 'pivot_identity_status': 'unobserved'}
+
+
+def empty_selection_observation(scene):
+    observed = selection_observation(scene)
+    if observed['ids'] or observed['ordered_ids']:
+        raise NativeExportError('EXPORT_SELECTION_UNSUPPORTED', 'Temporary export currently qualifies only an empty original selection')
+    return observed
+
+
+def _set_selection(scene, object_ids):
+    """Official session selector; null is a clear COMMAND, not observed pivot ID."""
+    import csc
+    from . import runtime as rt
+    from .native_fixture import _modify
+    domain = rt._domain_scene(scene)
+    native = {rt._id_string(value): value for value in domain.model_viewer().get_objects()}
+    if len(object_ids) > 1 or not set(object_ids) <= set(native):
+        raise NativeExportError('EXPORT_SELECTION_UNSUPPORTED', 'Exact independent object or empty restoration required')
+    ids = {native[value] for value in object_ids}
+    pivot_command = native[object_ids[0]] if object_ids else csc.model.ObjectId.null()
+    def select(_model, _update, _scene, session):
+        session.take_selector().select(ids, pivot_command)
+    _modify(domain.modify_with_session, 'Temporary selected FBX export' if ids else 'Restore empty FBX export selection', select)
+
+
+class _TemporarySelection:
+    """Internal selection transaction; never changes/removes the runtime guard."""
+    def __init__(self, scene, object_ids, reader):
+        if len(object_ids) != 1:
+            raise NativeExportError('EXPORT_SELECTION_UNSUPPORTED', 'Single independent export object required')
+        self.scene, self.object_ids, self.reader = scene, list(object_ids), reader
+        self.before = empty_selection_observation(scene)
+        self.authored = reader(scene)
+        self.started, self.during, self.after = False, None, None
+
+    def begin(self):
+        guards.assert_loaded_package()
+        # Source authentication must run while the original empty selector is
+        # still intact, before the very first selection or export side effect.
+        guards.before_write()
+        if empty_selection_observation(self.scene) != self.before or self.reader(self.scene) != self.authored:
+            raise NativeExportError('SCENE_CHANGED', 'Original export source changed before selection')
+        self.started = True
+        _set_selection(self.scene, self.object_ids)
+        self.during = selection_observation(self.scene)
+        self.before_export()
+
+    def before_export(self):
+        guards.assert_loaded_package()
+        if (not self.started or guards.write_observation()[0] != 'started'
+                or self.during is None or self.during['ids'] != self.object_ids
+                or selection_observation(self.scene) != self.during or self.reader(self.scene) != self.authored):
+            raise NativeExportError('NATIVE_COMPLETION_UNKNOWN', 'Temporary export selection or authored source changed')
+
+    def restore(self):
+        if not self.started:
+            return
+        try:
+            _set_selection(self.scene, [])
+            self.after = empty_selection_observation(self.scene)
+            if self.after != self.before or self.reader(self.scene) != self.authored:
+                raise ValueError('Original observed selector/pivot or full authored projection changed')
+        except Exception as exc:
+            raise NativeExportError('NATIVE_COMPLETION_UNKNOWN', 'Temporary export selection restoration is unverified') from exc
+        finally:
+            self.started = False
+
+    def observation(self):
+        actual = self.reader(self.scene)
+        if (self.after != self.before or self.during is None or actual != self.authored
+                or empty_selection_observation(self.scene) != self.after):
+            raise NativeExportError('NATIVE_COMPLETION_UNKNOWN', 'No completed selector restoration observation')
+        return {'policy': SELECTION_POLICY, 'status': 'observed_restored',
+                'before': self.before, 'during': self.during, 'after': self.after,
+                'export_selected_ids': self.object_ids, 'restoration_command': 'official_clear_selection_null',
+                'authored_projection_before_digest': guards.digest(self.authored),
+                'authored_projection_after_digest': guards.digest(actual),
+                'pivot_identity_restoration': 'unobserved'}
+
+
+def _preserving_selected_call(scene, object_ids, reader, dispatch):
+    transaction = _TemporarySelection(scene, object_ids, reader)
+    try:
+        transaction.begin()
+        result = dispatch(transaction)
+        transaction.before_export()
+    finally:
+        transaction.restore()
+    return result, transaction.observation()
+
+
+def inspect_export(scene, arguments, request, profile, *, _completed_output=False, _require_selected=True):
     """Read the exact selection/export flags; never change selection or settings."""
     arguments, request, profile = _request_arguments(arguments, request, profile, _completed_output=_completed_output)
     from . import runtime as rt
@@ -137,7 +258,7 @@ def inspect_export(scene, arguments, request, profile, *, _completed_output=Fals
         raise NativeExportError("RESOURCE_BUDGET_EXCEEDED", "Scene object closure exceeds 10000")
     selected = sorted(rt._id_string(obj) for obj in domain.selector().selected().ids)
     mapping = {row["source_id"]: row for row in profile["skeleton_map"]}
-    if set(selected) != set(mapping) or not set(mapping) <= set(native):
+    if (_require_selected and set(selected) != set(mapping)) or not set(mapping) <= set(native):
         raise NativeExportError("EXPORT_SELECTION_MISMATCH", "Current selection must equal the exact profile object closure")
     count = int(domain.layers_viewer().frames_count())
     if count != profile["last_frame"] + 1:
@@ -152,7 +273,7 @@ def inspect_export(scene, arguments, request, profile, *, _completed_output=Fals
         parent = behaviours.get_behaviour_object(basic, "parent")
         parents[key] = None if parent.is_null() else rt._id_string(parent)
     rows = []
-    for key in selected:
+    for key in sorted(mapping):
         obj = native[key]
         names = set(str(behaviours.get_behaviour_name(behaviour)) for behaviour in behaviours.get_behaviours(obj))
         if any("mesh" in name.lower() for name in names):
@@ -203,7 +324,7 @@ def inspect_export(scene, arguments, request, profile, *, _completed_output=Fals
         raise NativeExportError("NATIVE_EXPORT_LICENSE_UNAVAILABLE", "Installed application reports export unavailable")
     return {"schema_version": 1, "installed_build": SUPPORTED_BUILD, "runtime_epoch": guards.RUNTIME_EPOCH,
             "runtime_fingerprint": guards.LOADED_FINGERPRINT, "scene": dict(guards.scene_instance(scene)),
-            "method": METHOD, "selected_ids": selected, "frame_count": count, "objects": rows,
+            "method": METHOD, "selected_ids": selected, "export_selected_ids": sorted(mapping), "frame_count": count, "objects": rows,
             "profile_digest": guards.digest(profile), "profile_contract_digest": guards.digest(profile_contract(profile)),
             "request_id": request["request_id"], "execution_context": request["execution_context"],
             "operation_digest": guards.digest(request["operations"]),
@@ -247,7 +368,8 @@ class _LockedArtifact:
         self.stream.close()
 
 
-def _selected_call(scene, path, maximum, fps, up_axis, *, expected_range, progress=None, _qualification=False):
+def _selected_call(scene, path, maximum, fps, up_axis, *, expected_range, progress=None, _qualification=False,
+                   _selection_session=None):
     """The sole SDK dispatch implementation, shared with disposable setup."""
     from . import runtime as rt
     import csc
@@ -302,7 +424,12 @@ def _selected_call(scene, path, maximum, fps, up_axis, *, expected_range, progre
 
     subscription = event_message_manager.subscribe(message)
     try:
-        guards.before_write()
+        if _selection_session is None:
+            guards.before_write()
+        elif type(_selection_session) is _TemporarySelection and _selection_session.scene is scene:
+            _selection_session.before_export()
+        else:
+            raise NativeExportError('EXPORT_SELECTION_UNSUPPORTED', 'Code-owned active selection transaction required')
         if progress:
             progress.mark('fbx_set_settings')
         loader.set_settings(settings)
@@ -336,26 +463,33 @@ def _selected_call(scene, path, maximum, fps, up_axis, *, expected_range, progre
     return artifact, takes, applied, messages
 
 
-def observe_export_call(scene, arguments, request, profile, *, _progress=None, _qualification=False):
+def observe_export_call(scene, arguments, request, profile, *, _progress=None, _qualification=False, _reader=None):
     """Execute once with synchronous native completion; never grants a route."""
-    before = inspect_export(scene, arguments, request, profile)
+    from .native_scene_reader import read_scene
+    reader = _reader or read_scene
+    before = inspect_export(scene, arguments, request, profile, _require_selected=False)
     arguments, request, profile = _request_arguments(arguments, request, profile)
-    artifact, takes, applied, messages = _selected_call(scene, arguments['path'], arguments['max_output_bytes'],
-        profile['fps_num'] / profile['fps_den'], profile['axes']['up_axis'],
-        expected_range=(profile['first_frame'], profile['last_frame']), progress=_progress,
-        _qualification=_qualification)
+    def dispatch(selection):
+        output = _selected_call(scene, arguments['path'], arguments['max_output_bytes'],
+            profile['fps_num'] / profile['fps_den'], profile['axes']['up_axis'],
+            expected_range=(profile['first_frame'], profile['last_frame']), progress=_progress,
+            _qualification=_qualification, _selection_session=selection)
+        after = inspect_export(scene, arguments, request, profile, _completed_output=True)
+        if (after['selected_ids'] != before['export_selected_ids']
+                or any(after[key] != before[key] for key in ('frame_count', 'objects', 'scene'))):
+            raise NativeExportError('NATIVE_COMPLETION_UNKNOWN', 'Export changed observed object closure')
+        return output, after
+    ((artifact, takes, applied, messages), after), selection_transition = _preserving_selected_call(
+        scene, before['export_selected_ids'], reader, dispatch)
     if takes != [profile['take_name']]:
         raise NativeExportError('EXPORT_TAKE_READBACK_MISMATCH', 'Native output take differs: ' + repr(takes))
-    after = inspect_export(scene, arguments, request, profile, _completed_output=True)
-    for key in ("selected_ids", "frame_count", "objects", "scene"):
-        if after[key] != before[key]:
-            raise NativeExportError("NATIVE_COMPLETION_UNKNOWN", "Export changed observed scene/selection closure")
     observation = {"schema_version": 1, "native_completion": "observed", "installed_build": SUPPORTED_BUILD,
         "runtime_epoch": guards.RUNTIME_EPOCH, "runtime_fingerprint": guards.LOADED_FINGERPRINT,
         "method": METHOD, "request_id": request["request_id"], "execution_context": request["execution_context"],
         "operation_digest": guards.digest(request["operations"]), "profile_contract_digest": before["profile_contract_digest"],
         "profile_digest": guards.digest(profile), "artifact": artifact, "take_readback": takes,
         "sdk_settings_object_readback": applied, "scope_before": before, "scope_after_digest": guards.digest(after["objects"]),
+        "selection_transition": selection_transition,
         "completion_messages": messages, "dispatch_semantics": "synchronous_no_yield",
         "artifact_settings_readback_required": True}
     digest = guards.digest(observation)
@@ -373,6 +507,7 @@ def observe_export_call(scene, arguments, request, profile, *, _progress=None, _
     return {"native_completion": "observed", "export_profile_digest": guards.digest(profile),
             "raw_path": artifact["path"], "artifact_sha256": artifact["sha256"], "artifact_bytes": artifact["bytes"],
             "settings": applied, "take_readback": takes, "selection_closure": before["objects"],
+            "selection_transition": selection_transition,
             "exported_closure": "requires_bounded_artifact_validation", "settings_readback": "requires_bounded_artifact_validation",
             "completion_observation_digest": digest, "completion_observation": observation}, []
 
@@ -388,6 +523,12 @@ def execute_export(scene, arguments, request, profile, *, adapter):
     if (registered is not adapter or not isinstance(evidence, bytes)
             or hashlib.sha256(evidence).hexdigest() != proof.get("evidence_sha256")
             or not observed or observed["runtime_epoch"] != guards.RUNTIME_EPOCH
+            or observed.get('selection_transition', {}).get('policy') != SELECTION_POLICY
+            or observed.get('selection_transition', {}).get('status') != 'observed_restored'
+            or observed.get('selection_transition', {}).get('before', {}).get('ids') != []
+            or observed.get('selection_transition', {}).get('before') != observed.get('selection_transition', {}).get('after')
+            or observed.get('selection_transition', {}).get('authored_projection_before_digest')
+                != observed.get('selection_transition', {}).get('authored_projection_after_digest')
             or observed["runtime_fingerprint"] != guards.LOADED_FINGERPRINT
             or observed["profile_contract_digest"] != guards.digest(profile_contract(profile))
             or not isinstance(readback, dict) or readback.get("status") != "pass"
@@ -403,7 +544,7 @@ def execute_export(scene, arguments, request, profile, *, adapter):
     _assert_stage(arguments, request, profile)
     guards.assert_loaded_package()
     guards.assert_source(scene, request.get("source_binding"), operation_name="io.export_fbx", arguments=arguments)
-    return observe_export_call(scene, arguments, request, profile)
+    return observe_export_call(scene, arguments, request, profile, _reader=adapter.read_scene)
 
 
 def _assert_stage(arguments, request, profile):
@@ -502,6 +643,7 @@ def qualify_export_disposable(adapter, *, animated=True):
     from .native_adapters import installed_build
     from .native_scene_adapter import NativeSceneAdapter
     from .native_fixture import create_disposable_scene, create_independent_transform, release_disposable_scene
+    from .native_scene_reader import read_scene as read_empty_scene
     guards.assert_loaded_package()
     if not isinstance(adapter, NativeSceneAdapter) or not callable(getattr(adapter, 'read_scene', None)):
         raise NativeExportError('SOURCE_READER_UNVERIFIED', 'Full code-owned NativeSceneAdapter reader required')
@@ -538,7 +680,10 @@ def qualify_export_disposable(adapter, *, animated=True):
                 raise NativeExportError('NATIVE_EXPORT_QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE',
                     'Select an empty scene before explicit qualification; a populated current scene is never fully scanned by fixture setup')
             progress.mark('previous_scene_capture')
-            previous_projection = adapter.read_scene(previous)
+            # This is preservation of the already checked empty setup tab,
+            # not qualification of an empty production target. A narrow
+            # one-object adapter correctly rejects that tab as a write source.
+            previous_projection = read_empty_scene(previous)
             progress.mark('previous_scene_capture', 'complete')
         progress.mark('create_application_scene')
         disposable = create_disposable_scene()
@@ -560,6 +705,13 @@ def qualify_export_disposable(adapter, *, animated=True):
             if evaluated.get('native_completion') != 'observed' or evaluated.get('callbacks') != ['interpolation_returned']:
                 raise NativeExportError('NATIVE_EXPORT_FIXTURE_UNAVAILABLE', 'Animated fixture evaluation did not complete exactly once')
             progress.mark('fixture_evaluation', 'complete')
+        # Official creation selects the new object. Qualification deliberately
+        # starts each shared production transaction from an empty selector,
+        # proving the bootstrap case instead of depending on UI session state.
+        progress.mark('fixture_clear_selection')
+        _set_selection(disposable, [])
+        fixture_selection_before = empty_selection_observation(disposable)
+        progress.mark('fixture_clear_selection', 'complete', observation=fixture_selection_before)
         progress.mark('fixture_capture')
         before = adapter.read_scene(disposable)
         progress.mark('fixture_capture', 'complete')
@@ -569,14 +721,10 @@ def qualify_export_disposable(adapter, *, animated=True):
         frame_count = int(domain.layers_viewer().frames_count())
         if not 1 <= frame_count <= _MAX_FRAMES:
             raise NativeExportError('NATIVE_EXPORT_RANGE_UNSUPPORTED', 'Disposable frame interval exceeds finite route')
-        selected = [rt._id_string(obj) for obj in domain.selector().selected().ids]
-        if selected != created:
-            raise NativeExportError('EXPORT_SELECTION_MISMATCH', 'Installed selector did not retain exact fixture object')
-
         def unchanged():
             guards.assert_loaded_package()
             progress.mark('first_write_source_capture')
-            if adapter.read_scene(disposable) != before:
+            if adapter.read_scene(disposable) != before or empty_selection_observation(disposable) != fixture_selection_before:
                 raise NativeExportError('SCENE_CHANGED', 'Disposable source changed before native export')
             progress.mark('first_write_source_capture', 'complete')
 
@@ -585,11 +733,14 @@ def qualify_export_disposable(adapter, *, animated=True):
         guards.begin_request(discovery_request)
         guards.set_write_guard(unchanged)
         progress.mark('discovery_export')
-        artifact, takes, applied, messages = _selected_call(disposable, folder / 'raw.fbx', 64 * 1024**2,
-            30.0, 1, expected_range=(0, frame_count - 1), progress=progress, _qualification=True)
+        (artifact, takes, applied, messages), discovery_selection = _preserving_selected_call(
+            disposable, created, adapter.read_scene, lambda selection: _selected_call(
+                disposable, folder / 'raw.fbx', 64 * 1024**2, 30.0, 1,
+                expected_range=(0, frame_count - 1), progress=progress, _qualification=True,
+                _selection_session=selection))
         progress.mark('discovery_export', 'complete', artifact_sha256=artifact['sha256'], artifact_bytes=artifact['bytes'])
         progress.mark('discovery_source_capture')
-        if adapter.read_scene(disposable) != before:
+        if adapter.read_scene(disposable) != before or empty_selection_observation(disposable) != fixture_selection_before:
             raise NativeExportError('NATIVE_COMPLETION_UNKNOWN', 'Discovery export changed the full authored source')
         progress.mark('discovery_source_capture', 'complete')
         progress.mark('discovery_host_readback')
@@ -612,11 +763,12 @@ def qualify_export_disposable(adapter, *, animated=True):
         guards.begin_request(request)
         guards.set_write_guard(unchanged)
         progress.mark('confirmed_export')
-        native, _ = observe_export_call(disposable, arguments, request, profile, _progress=progress, _qualification=True)
+        native, _ = observe_export_call(disposable, arguments, request, profile, _progress=progress,
+                                       _qualification=True, _reader=adapter.read_scene)
         progress.mark('confirmed_export', 'complete')
         progress.mark('confirmed_source_capture')
         actual_after = adapter.read_scene(disposable)
-        if actual_after != before:
+        if actual_after != before or empty_selection_observation(disposable) != fixture_selection_before:
             raise NativeExportError('NATIVE_COMPLETION_UNKNOWN', 'Confirmed export changed full authored source')
         progress.mark('confirmed_source_capture', 'complete')
         observation = native['completion_observation']
@@ -634,7 +786,8 @@ def qualify_export_disposable(adapter, *, animated=True):
         return {'status': 'observed_structural_only', 'qualified_operations': [], 'production_ready': False,
             'reason_codes': ([] if animated else ['ANIMATED_EXPORT_FIXTURE_UNQUALIFIED']) + ['TARGET_ROUNDTRIP_UNVERIFIED'],
             'profile': profile, 'native_export_observation': observation, 'export_settings_readback': readback,
-            'discovery': {'artifact': artifact, 'settings': applied, 'completion_messages': messages},
+            'discovery': {'artifact': artifact, 'settings': applied, 'completion_messages': messages,
+                          'selection_transition': discovery_selection},
             'source_before_digest': guards.digest(before), 'source_after_digest': guards.digest(actual_after),
             'retained_directory': str(folder), 'quality': 'not_evaluated'}
     except Exception as exc:
@@ -655,7 +808,7 @@ def qualify_export_disposable(adapter, *, animated=True):
                 progress.mark('remove_owned_disposable', 'complete')
                 if previous is not None and previous_projection is not None:
                     progress.mark('previous_scene_final_capture')
-                    if adapter.read_scene(previous) != previous_projection:
+                    if read_empty_scene(previous) != previous_projection:
                         raise NativeExportError('QUALIFICATION_ORIGINAL_SCENE_CHANGED', 'Original full authored source changed')
                     progress.mark('previous_scene_final_capture', 'complete')
         finally:

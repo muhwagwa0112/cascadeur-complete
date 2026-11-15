@@ -7,7 +7,34 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 입력 자동 구성, 실제 host retarget와 소비자 프로필 준비
+### 최신 추가: 실제 export 선택 복원과 소비자 좌표 연결
+
+원격 개선안은 다시 fetch했으며 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`다. r4의 기존 16개 목표를 유지한다. 이번에는 독립 Transform의 저장된 원본 → 작업 복제 → 실제 평가·품질 → FBX → Blender → 게시 연결을 진행했다. 일반 리그와 설치 교체까지 완료한 것으로 보지 않는다.
+
+- export qualification이 이미 비어 있다고 확인한 이전 탭을 한 객체 전용 reader로 읽어 차단하던 문제를 고쳤다. 이전 빈 탭 보존에는 전체 reader를 사용하며 실제 fixture와 production target의 독립 객체 제한은 유지한다.
+- 첫 레시피 `a266c9c7-ed74-4afe-a383-d9232cef775a`는 native 품질·후속 checkpoint 성공 뒤 `SOURCE_REATTESTATION_FAILED`로 차단됐다. `.casc` 파일 bootstrap이 UI session의 선택을 복원하지 않아 export 어댑터의 기존 선택 일치 조건에 걸렸다. FBX dispatch 전이며 원 run·승인·receipt·checkpoint를 보존했다.
+- export scope에 실제 초기 빈 selector, ordered IDs, pivot position/rotation을 결합한다. 원 source guard를 첫 선택 변경 전에 실행하고 승인된 단일 객체만 잠시 선택한다. 공식 clear 명령으로 빈 선택을 복원한 뒤 관측값과 전체 authored projection이 정확히 같아야 완료를 발행한다. 복원 실패는 `NATIVE_COMPLETION_UNKNOWN`이다. host sealing도 dispatch source와 completion에 봉인된 복원 proof를 대조한다. 비어 있지 않은 최초 선택은 지원하지 않는다. SDK는 pivot ID를 노출하지 않으므로 hidden pivot identity 복원은 `unobserved`로 남긴다.
+- Blender의 animated parentless Null 경로는 importer root frame `G`와 명시 canonical basis `B`를 분리하고 rest/실제 sampled 회전에 `B @ R_blender @ (B @ G).T`를 적용한다. artifact static model/template에서 rest를 별도 decode하고 실제 native model-pose rest와 비교한다. native rest를 FBX 기본값으로 대체하지 않으며 armature/mesh 경로에는 적용하지 않는다.
+- native 품질 단계에서 소비자 전용 `position_readback_m/rotation_readback_rad`를 요구해 export에 도달할 수 없던 순환을 고쳤다. 승인된 전체 policy/digest/threshold는 유지하고 두 지표만 `pending_export_roundtrip`으로 명시한다. 최종 consumer 검증에서는 원래 intent와 전체 필수 지표를 모두 요구한다.
+
+중간 새 프로세스의 실제 qualification에서 `Quaternion.w/x/y/z`를 값으로 읽는 오류를 발견했고 설치 공식 stub의 메서드 호출로 수정했다. export 전에 실패했으며 해당 process도 정상 종료했다. native hot reload 없이 다시 시작한 **PID 34864**, build `2026.2.3.0.16863`, bridge fingerprint `68458d4d8812fc216bdb9bb9e49025ab1bed492479e0e06e3fb47708761cb7da`, epoch `ba16f4aa-3354-4d7d-bd4d-bd4d70f6f3a3`에서 scene/motion을 재자격 확인했다. 같은 프로세스의 실제 animated export 두 번에서 선택 전환·관측 복원·전체 projection 동일성과 FBX 설정/구조 읽기를 통과해 `io.export_fbx`를 등록했다. export qualification 증거는 `export-qualification-796a4ab8-95b1-4767-b23b-3c261c2636ad/qualification.json`, SHA-256 `76964e0990e2723c6e25dc98900b153035a21539f512970d0ac8e534032ac2d7`이다. 이 qualification 자체의 품질은 `not_evaluated`, consumer roundtrip은 `unverified`다.
+
+실제 recipe `b44ae572-600a-41f4-b4a6-9a01f1fb865b`는 native 품질·checkpoint·export 및 선택 복원 proof sealing까지 성공했지만 consumer 결과 저장에서 `WORKER_EXCEPTION:PydanticSerializationError`로 차단됐다. 저장된 원본 capture와 sealed FBX로 host 단계만 재현한 결과 `external._compare_target_capture`의 비교식이 `numpy.bool`을 결과의 `ok`에 남기는 것이 원인이었다. 판정 조건과 threshold를 유지하고 Python `bool`로 반환하도록 수정했다. 보존된 FBX SHA-256 `79090c480eaa398f91d46cb3dd164cb715b4b64cb435f0d8ca435aa038ecac5c`로 실제 Blender 재검증 및 validation JSON 저장은 성공했다. 원 run의 성공 native effect는 replay하지 않았으며 원 manifest/승인/receipt도 수정하지 않았다. 구현 pin이 바뀌었으므로 종단 게시 확인에는 별도 새 작업 복제·새 plan/승인을 사용한다.
+
+별도 새 recipe `11fb359a-c07a-408a-bb87-09dd1200dc62`는 `succeeded / quality=pass / export=published`로 끝났다. 동일 loaded bridge에서 실제 `.casc` 입력 → 새 작업 복제 → 초기 checkpoint → 평가 → source/baseline capture → native 품질 → checkpoint → selected FBX → strict 구조 → 실제 Blender capture → original-intent 품질 → 게시를 완료했다. `input/rig/motion` 단계의 `skipped`는 이 보존 레시피에서 변환을 요청하지 않았기 때문이며 새 retarget나 cleanup 성공의 증거가 아니다.
+
+| 실제 확인 | 결과와 범위 |
+|---|---|
+| 입력 보존 | `export-source-66063891-5f64-4871-a1fa-a333ccd5ed29/source.casc`, 13,966 bytes, SHA-256 `2797e96df6ed7279331c9cfc32a2dbb862d31fe94ad8ca2ae34fe260fb10ed4b`, 실행 뒤 동일 |
+| 유한 target | `MCPActualExportRoot`, object ID `394917b4-db75-427c-bb3d-c2f95976b0af`, parentless·identity model rest·unit scale·mesh 없음, 0..4 다섯 sampled frames |
+| 명시 policy | FPS 30/1, 0.01m/scene unit, scene basis identity는 author policy다. consumer basis/import offset도 명시했다. 실제 native 물리 metadata 관측으로 주장하지 않는다. import 전에 선언한 위치·회전·root·correction limit은 각 `1e-6 m/rad`, duration `1e-9 s`, envelope 위반 count `0`이며 관측 후 완화하지 않았다 |
+| 소비자 품질 | Blender `[4,5,8]`의 pinned executable/importer를 사용했다. 원 native model-pose rest 비교와 original-intent 전체 8개 필수 지표가 measured pass. 위치 readback/root/correction max `4.998001410623543e-10 m`, 회전 readback/root/correction max `1.6292067073209145e-7 rad`, duration max `0 s`, envelope 위반 `0` |
+| validation 기록 | `state/runs/11fb359a-c07a-408a-bb87-09dd1200dc62/artifacts/960eeec47e8b9518e6893d83c23dd24ccbf7a77242e413bf21a87046e8709fa5.json`; SHA-256는 파일명과 같음. raw/canonical capture와 인증 provenance는 같은 export stage의 `target-noykddkg`에 보관 |
+| 최종 게시 | 같은 source 폴더의 새 `final.fbx`, 22,176 bytes. sealed artifact·publication receipt·실제 destination SHA-256 모두 `b1aeddffd92750e29a359a617dac99ff751f9976d8b219345434fe4a7ef129b1`로 일치. 승인된 `fail_if_exists` 게시 경로 사용 |
+
+직접 확인에 필요한 native qualification과 위 레시피/오류 재현만 실행했으며 전체 suite/build/CI는 실행하지 않았다. 실제 자료는 ignored `artifacts/native-r4/isolated-runtime`에 보관한다. 확인한 범위는 단일 독립 객체·sampled frames이며 humanoid/mesh·연속 시간 품질, 비어 있지 않은 초기 selector, hidden pivot ID, 일반 관절 axes/limits, final-root readonly graph, 실제 partial failure의 조건부 복구, 설치 상태 이전의 실기 확인은 남아 있다. 기존 unknown 요청 `ffb7fc8e-417c-454c-a669-48625a086eda`와 global runtime/auth/receipt는 건드리지 않았다. 아래 섹션은 각 이전 시점의 관측이며 당시 남아 있던 독립 객체 consumer frame 문제는 위 유한 경로에서 해결했다.
+
+### 이전 추가: 입력 자동 구성, 실제 host retarget와 소비자 프로필 준비
 
 원격 개선안 SHA `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`가 현재도 최신임을 확인했다. 기존 16개 r4 목표를 유지하며 R4-02 입력 수집, R4-10 host controller와 R4-13 소비자 준비를 이어 연결했다. 전체 목표는 아직 진행 중이다.
 
