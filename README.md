@@ -252,6 +252,15 @@ schedule. Styling requires explicit styling intent. Missing rotation, geometry,
 controller, key interpolation, or authored dependency access blocks the affected
 pass instead of selecting a guessed rig or reporting predicted quality as actual.
 
+The raw `animation.mesh_sample` reader uses the installed SDK entry
+`csc.domain.calc_skinned_mesh` and accepts its declared `(vertices, 3, 1)`
+position vectors as well as the existing flat-vector representation. The NPZ
+layout and skin-weight metadata remain compatible. This reader does not
+certify coordinate space, evaluation freshness or reskin completion. Its file
+hash and vertex count cannot supply the authenticated canonical geometry
+manifest required by actual mesh quality; that integration remains blocked
+until those native observations are available.
+
 The bridge protocol is `3.0`. Scene revision checks, single-use change tokens,
 durable request receipts, and a verified native guard apply to protected changes,
 including evaluation refresh. Install matching host and bridge bytes and restart

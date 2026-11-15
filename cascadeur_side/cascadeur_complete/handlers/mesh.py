@@ -33,6 +33,10 @@ def mesh_sample(scene, arguments, _request, context):
     chest and fingers) to see an arm pass through the body. The file holds
     float32 positions per requested frame, the triangle list, the joint names
     the mesh is bound to and each vertex's dominant joint index.
+
+    The SDK calculation returns the sampled surface directly. This read does
+    not refresh interpolation or certify its coordinate space, a completed
+    reskin operation, or canonical actual-geometry provenance.
     """
     import numpy
 
@@ -101,8 +105,12 @@ def mesh_sample(scene, arguments, _request, context):
         raise ValueError("RESOURCE_BUDGET_EXCEEDED: mesh capture requires %s bytes" % estimated_bytes)
     positions = numpy.empty((len(frames), len(weights), 3), dtype=numpy.float32)
     for row, frame in enumerate(frames):
-        skinned = _value(csc.domain.assets.calc_skinned_mesh(domain, object_id, frame), "positions")
+        skinned = _value(csc.domain.calc_skinned_mesh(domain, object_id, frame), "positions")
         values = numpy.asarray(skinned, dtype=numpy.float32)
+        # SkinnedMeshCalcResult.positions is declared as float32[3, 1]
+        # vectors. Retain the existing flat-vector payload contract as well.
+        if values.shape == (len(weights), 3, 1):
+            values = values[:, :, 0]
         if values.ndim != 2 or values.shape[0] != len(weights) or values.shape[1] < 3 or not numpy.isfinite(values[:, :3]).all():
             raise ValueError("INCOMPLETE_CAPTURE: evaluated mesh vertex coverage is invalid")
         positions[row] = values[:, :3]

@@ -7,7 +7,21 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: unbaking의 명시적 topology 권한과 예산 연결
+### 최신 추가: 설치 SDK의 실제 mesh 계산 경로 수정
+
+현재 checkout의 원격 개선안은 앞 절과 같은 r4이며 전체 목표를 축소하지 않았다. 실제 앱 PID `2328`이 이번 CIM 조회에 다시 반환됐다. 앞선 빈 조회 결과는 종료 증거가 아니며, 현재 실행 중인 앱에 설치를 강행하거나 bridge를 hot reload하지 않았다.
+
+설치 `resources/scripts/stubs/csc/domain/__init__.pyi:636`은 `csc.domain.calc_skinned_mesh(Scene, ObjectId, int) -> SkinnedMeshCalcResult`를 선언한다. 기존 `animation.mesh_sample` handler는 이 함수를 `csc.domain.assets`에서 찾고 있어 실제 typed namespace와 맞지 않았다. 설치 stub의 `positions` 선언(`565–567`)은 `float32[3,1]` 목록인데 기존 handler는 `(N,3)` 배열만 받았다. 호출 namespace를 정정하고 정확한 `(N,3,1)` 배열을 `(N,3)`으로 정규화했다. 기존 NPZ·triangle·joint/skin-weight·frame·hash·반환 계약은 유지했다. 의심했던 vertex 필드는 실제 SDK property가 `position_index`이므로 변경하지 않았다.
+
+이 결함에는 직접 호출 경계 확인이 필요하여 작은 SDK-shaped double에서 실제 handler와 NPZ 쓰기/읽기만 실행했다. `tests/test_native_mesh_sample.py -q`는 **`5 passed in 0.46s`**였다. 두 좌표 배열 형태에서 정확한 frame별 호출·기하/skin 배열·파일 SHA를 확인했고, 잘못된 layout/vertex coverage/nonfinite 값은 파일 생성 전에 거절했다. 이는 실제 설치된 Cascadeur에서 mesh API를 실행한 결과가 아니다. 새 native bytes의 실앱 qualification, 전체 suite/build/CI는 실행하지 않았다.
+
+**남은 연결의 구체적 한계:** 설치 stub과 Python source에는 이 mesh 결과의 world/local 좌표계, reskin 완료·평가 신선도·operation-correlated 완료 계약이 없다. 현재 interpolation receipt는 mesh 계산을 관찰하지 않는다. 따라서 raw 파일 hash/count를 global canonical metres 또는 `native_actual` geometry manifest로 인증하지 않았다. `actual_mesh_metrics`가 요구하는 원 source/successor·motion capture·완료 receipt·topology/skin/window hash 연결은 이 실제 관측이 없으면 활성화할 수 없다. 기존 consumer의 finite parentless Transform 경로에는 원본 baseline/rest/intent/policy → 공통 roundtrip → 동일 sealed artifact 게시 연결이 이미 있으며, 일반 animated armature container/mesh는 해당 native/rest 관측이 더 필요하다. 이 조사에서 consumer 코드는 변경하지 않았다.
+
+두 원 runtime의 인증키로 기존 request/receipt MAC·identity·sequence·result digest를 읽기 전용 확인했다. global `ffb7fc8e-417c-454c-a669-48625a086eda`는 terminal `outcome_unknown`, dispatched true, write phase `not_started`, recovery false다. isolated `fcf3352a-483c-4f9c-bc18-8b61a58822eb`는 terminal `outcome_unknown`, dispatched true, write phase `completed`, recovery false다. 어느 write phase도 완료 불명을 임의로 미실행/실패로 바꿀 근거가 아니다. 키·원 요청·receipt·unknown·소비 기록은 수정하지 않았다. 이 barrier는 여러 이전 목표 턴부터 계속 존재하며, 원 완료 근거 없이 새 capture/mutation/복구로 우회할 수 없다. 실제 부분 실패의 private attestation/recovery 연결 코드는 이미 있으나 기존 unknown을 그러한 실패로 바꾸어 적용할 수 없다.
+
+추가 실앱 qualification·실제 설치 교체/재시작 후 상태 연속성은 현재 환경에서 미완료·차단 상태다. 앱 종료만으로 unknown이 해결되지는 않는다. 원 요청의 권위 있는 완료 근거와 지원 operation/좌표계의 실제 SDK 관측 없이, 새 root·직접 setter·receipt 수정으로 목표 완료를 만들어 내지 않는다.
+
+### 이전 추가: unbaking의 명시적 topology 권한과 예산 연결
 
 원격 개선안의 live SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하며, 전체 16개 목표를 유지한다. 설치 실행 파일의 ProductVersion/FileVersion은 `2026.2.3.0.16863`으로 다시 확인했다. 이번 `Win32_Process` 조회에는 Cascadeur 항목이 반환되지 않았다. 앞 절들의 PID `2328` 실행 관찰은 당시 기록이며, 이번에 앱 종료 원인·정상 종료·새 프로세스의 loaded bridge를 관찰한 것은 아니다. 전역 설치 교체나 실제 unbaking은 실행하지 않았다.
 
