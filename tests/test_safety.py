@@ -162,3 +162,35 @@ def test_only_playback_tokens_may_omit_the_scene_revision(tmp_path):
         manager.consume(edit.token, scene_id="scene", scene_revision="r1", selection_fingerprint="selection")
     with pytest.raises(SafetyError):
         manager.consume(playback.token, scene_id="other", scene_revision="moving", selection_fingerprint="selection")
+
+
+def _prepared(manager, ttl=300.0):
+    return manager.prepare(
+        feature_id="scene_new",
+        scene_id="scene-1",
+        scene_revision="rev-1",
+        selection_fingerprint="sel-1",
+        operation=Operation(name="scene.new"),
+        impact={},
+        backup_path=None,
+        ttl=ttl,
+    )
+
+
+def test_cancel_requires_the_exact_signed_token(tmp_path):
+    manager = ChangeManager(RuntimePaths.discover(tmp_path / "runtime"))
+    record = _prepared(manager)
+    nonce, signature = record.token.split(".", 1)
+    forged = nonce + "." + ("0" if signature[0] != "0" else "1") + signature[1:]
+    assert manager.cancel(forged) is False
+    assert manager.cancel("not-a-token") is False
+    assert manager.load(record.token).token == record.token
+    assert manager.cancel(record.token) is True
+    assert manager.cancel(record.token) is False
+
+
+def test_cancel_removes_an_expired_token(tmp_path, monkeypatch):
+    manager = ChangeManager(RuntimePaths.discover(tmp_path / "runtime"))
+    record = _prepared(manager, ttl=30.0)
+    monkeypatch.setattr(time, "time", lambda: record.expires_at + 1)
+    assert manager.cancel(record.token) is True

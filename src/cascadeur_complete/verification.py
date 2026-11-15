@@ -11,7 +11,7 @@ from typing import Any
 from .atomic_queue import atomic_write_json, read_json
 from .product_catalog import PRODUCT_CATALOG, ProductFeature
 
-EVIDENCE_SCHEMA_VERSION = 2
+EVIDENCE_SCHEMA_VERSION = 3
 
 
 def _canonical(value: Any) -> str:
@@ -20,6 +20,19 @@ def _canonical(value: Any) -> str:
 
 def _fingerprint(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def _sha256(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def _runtime_context_complete(context: Mapping[str, Any]) -> bool:
+    # Installation presence or a local source-tree digest cannot stand in for
+    # bytes actually loaded by the adapter. The runtime must supply this value.
+    return (context.get("runtime_available") is True
+            and _sha256(context.get("loaded_adapter_fingerprint"))
+            and _sha256(context.get("adapter_settings_digest"))
+            and isinstance(context.get("environment"), dict) and bool(context["environment"]))
 
 
 def _observed_postconditions(
@@ -63,8 +76,11 @@ class LiveEvidenceStore:
         except (OSError, ValueError):
             return self._empty()
         if payload.get("schema_version") != EVIDENCE_SCHEMA_VERSION or not isinstance(payload.get("records"), list):
-            # V1 entries did not bind source/tests/fixtures or prove postconditions.
-            return self._empty()
+            # V1/V2 did not bind actual source, test and fixture bytes. They are
+            # readable historical data, never current schema-3 proof.
+            migrated = self._empty()
+            migrated["historical_payload"] = payload
+            return migrated
         return payload
 
     @staticmethod
@@ -74,13 +90,20 @@ class LiveEvidenceStore:
         version: str,
         license_name: str,
         dependencies: Mapping[str, Any],
+        runtime_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # Normalize tuples before storage/comparison, so JSON roundtrips retain
+        # precisely the same manifest representation.
+        material = json.loads(_canonical(feature.binding_material()))
         binding = {
             "product_version": PRODUCT_CATALOG.product_version,
             "cascadeur_version": version,
             "license": license_name.strip().lower(),
             "dependencies": dict(sorted(dependencies.items())),
-            **feature.binding_hashes(),
+            **feature.binding_hashes(material),
+            "byte_manifest": material,
+            "byte_manifest_complete": feature.binding_complete(material),
+            "runtime_context": dict(runtime_context or {}),
         }
         binding["fingerprint"] = _fingerprint(binding)
         return binding
@@ -93,11 +116,15 @@ class LiveEvidenceStore:
         version: str,
         license_name: str | None,
         dependencies: Mapping[str, Any] | None,
+        runtime_context: Mapping[str, Any] | None = None,
     ) -> bool:
         if record.get("feature_id") != feature.id or record.get("valid") is not True:
             return False
         recorded_binding = record.get("binding")
         if not isinstance(recorded_binding, dict):
+            return False
+        if (runtime_context is None or not _runtime_context_complete(runtime_context)
+                or recorded_binding.get("runtime_context") != dict(runtime_context)):
             return False
         recorded_license = str(recorded_binding.get("license", ""))
         recorded_dependencies = recorded_binding.get("dependencies")
@@ -112,8 +139,12 @@ class LiveEvidenceStore:
             version=version,
             license_name=recorded_license,
             dependencies=recorded_dependencies,
+            runtime_context=recorded_binding.get("runtime_context"),
         )
-        if recorded_binding != expected:
+        if recorded_binding != expected or not expected["byte_manifest_complete"]:
+            return False
+        context = expected["runtime_context"]
+        if not _runtime_context_complete(context):
             return False
         required = set(feature.postconditions)
         observed = set(record.get("observed_postconditions", ()))
@@ -125,6 +156,7 @@ class LiveEvidenceStore:
         *,
         license_name: str | None = None,
         dependencies: Mapping[str, Any] | None = None,
+        runtime_context: Mapping[str, Any] | None = None,
     ) -> set[str]:
         payload = self._load()
         catalog = PRODUCT_CATALOG.by_id
@@ -139,6 +171,7 @@ class LiveEvidenceStore:
                 version=version,
                 license_name=license_name,
                 dependencies=dependencies,
+                runtime_context=runtime_context,
             ):
                 verified.add(feature.id)
         return verified
@@ -157,6 +190,8 @@ class LiveEvidenceStore:
         observed_postconditions: Mapping[str, bool] | Iterable[str] | None = None,
         fixture_id: str | None = None,
         test_id: str | None = None,
+        runtime_context: Mapping[str, Any] | None = None,
+        evidence_grade: str = "execution_observed",
     ) -> dict[str, Any]:
         feature = PRODUCT_CATALOG.by_id.get(feature_id)
         if feature is None:
@@ -167,6 +202,7 @@ class LiveEvidenceStore:
             version=version,
             license_name=license_name,
             dependencies=dependency_state,
+            runtime_context=runtime_context,
         )
         observed = _observed_postconditions(evidence, observed_postconditions)
         required = set(feature.postconditions)
@@ -182,7 +218,18 @@ class LiveEvidenceStore:
             context_complete = context_complete and license_name.strip().lower() in {"pro", "indie", "teams"}
         if feature.dependency:
             context_complete = context_complete and dependency_state.get(feature.dependency) is True
-        valid = bool(required) and required <= observed and identities_match and context_complete
+        if evidence_grade not in {"execution_observed", "quality_verified", "export_roundtrip_verified"}:
+            raise ValueError("Unknown evidence grade")
+        bound_runtime = dict(runtime_context or {})
+        context_complete = context_complete and _runtime_context_complete(bound_runtime)
+        if evidence_grade in {"quality_verified", "export_roundtrip_verified"}:
+            context_complete = context_complete and all(_sha256(bound_runtime.get(key)) for key in (
+                "capture_digest", "quality_policy_digest", "intent_digest"))
+        if evidence_grade == "export_roundtrip_verified":
+            context_complete = context_complete and all(_sha256(bound_runtime.get(key)) for key in (
+                "export_profile_digest", "target_adapter_fingerprint", "sealed_artifact_digest"))
+        valid = (bool(required) and required <= observed and identities_match and context_complete
+                 and binding["byte_manifest_complete"])
         record = {
             "record_id": hashlib.sha256(
                 f"{feature_id}\0{time.time_ns()}\0{binding['fingerprint']}".encode()
@@ -198,6 +245,12 @@ class LiveEvidenceStore:
             "test_id": test_id,
             "binding": binding,
             "valid": valid,
+            "evidence_grade": evidence_grade,
+            "runtime_available": bound_runtime.get("runtime_available") is True,
+            "implemented": feature.implementation_status == "implemented",
+            "execution_observed": valid,
+            "quality_verified": valid and evidence_grade in {"quality_verified", "export_roundtrip_verified"},
+            "export_roundtrip_verified": valid and evidence_grade == "export_roundtrip_verified",
             "verified_at": time.time(),
         }
         with self._lock:

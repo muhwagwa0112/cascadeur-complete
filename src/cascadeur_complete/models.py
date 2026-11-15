@@ -3,9 +3,63 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-PROTOCOL_VERSION = "2.0"
+PROTOCOL_VERSION = "3.0"
+
+
+class WireModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+class SceneBinding(WireModel):
+    schema_version: Literal[1] = 1
+    runtime_epoch: str
+    scene_instance_id: str
+    document_lineage_id: str
+    revision_kind: Literal["scope_digest"] = "scope_digest"
+    scope_digest: str
+    content_revision: str
+    selection_digest: str | None = None
+
+
+class SourceBinding(WireModel):
+    schema_version: Literal[1] = 1
+    binding: SceneBinding
+    scope: dict[str, Any]
+    sample_digest: str
+    inputs_digest: str
+    adapter_fingerprint: str
+    complete: bool = False
+
+
+class RequestReceipt(WireModel):
+    schema_version: Literal[1] = 1
+    request_id: str
+    request_digest: str
+    operation_digest: str
+    session_id: str
+    runtime_epoch: str
+    host_instance_id: str
+    run_id: str | None = None
+    step_id: str | None = None
+    attempt_id: str | None = None
+    lease_epoch: int | None = None
+    phase: Literal["created", "queued", "claimed", "dispatch_started", "applied_observed", "terminal"]
+    outcome: Literal["pending", "rejected_pre_dispatch", "canceled_pre_dispatch", "succeeded", "failed_after_dispatch", "outcome_unknown"]
+    dispatched: bool | None = None
+    scene_before: SceneBinding | None = None
+    scene_after: SceneBinding | None = None
+    effect_class: Literal["none", "evaluation", "scene", "file", "mixed"] = "none"
+    write_phase: Literal["not_started", "started", "completed", "unknown"] = "not_started"
+    failure_kind: str | None = None
+    recovery_eligible: bool = False
+    mutation_observed: bool | None = None
+    terminal_result: dict[str, Any] | None = None
+    result_digest: str | None = None
+    recovery: dict[str, Any] | None = None
+    seq: int
+    mac: str = ""
 
 
 class ExecutionMode(StrEnum):
@@ -63,6 +117,7 @@ class SafetyContext(BaseModel):
 
 
 class BridgeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     protocol_version: str = PROTOCOL_VERSION
     request_id: str
     feature_id: str
@@ -76,6 +131,11 @@ class BridgeRequest(BaseModel):
     session_id: str = ""
     nonce: str = ""
     mac: str = ""
+    host_instance_id: str = ""
+    runtime_epoch: str | None = None
+    adapter_fingerprint: str | None = None
+    source_binding: SourceBinding | None = None
+    execution_context: dict[str, Any] | None = None
 
 
 class Evidence(BaseModel):
@@ -109,6 +169,19 @@ class ResultEnvelope(BaseModel):
     session_id: str | None = None
     nonce: str | None = None
     mac: str | None = None
+    receipt_id: str | None = None
+    phase: str | None = None
+    outcome: str | None = None
+    dispatched: bool | None = None
+    recovery_state: str | None = None
+    write_phase: str | None = None
+    failure_kind: str | None = None
+    recovery_eligible: bool = False
+    scene_before: SceneBinding | None = None
+    scene_after: SceneBinding | None = None
+    execution: str = "not_dispatched"
+    quality: Literal["pass", "fail", "unverified", "not_applicable"] = "unverified"
+    export: Literal["not_requested", "staged", "validated", "published", "failed", "outcome_unknown"] = "not_requested"
 
 
 class FeatureRecord(BaseModel):
@@ -142,10 +215,15 @@ class FeatureRecord(BaseModel):
     truth_layer: Literal["product", "discovered"] = "discovered"
     arguments: dict[str, str] = Field(default_factory=dict)
     fixed_arguments: dict[str, Any] = Field(default_factory=dict)
+    implemented: bool = False
+    runtime_available: bool = False
+    execution_observed: bool = False
+    quality_verified: bool = False
+    export_roundtrip_verified: bool = False
 
 
 class ChangeToken(BaseModel):
-    schema_version: int = 2
+    schema_version: int = 3
     token: str
     feature_id: str
     scene_id: str | None
@@ -157,6 +235,12 @@ class ChangeToken(BaseModel):
     expires_at: float
     used: bool = False
     used_at: float | None = None
+    mutation_request_id: str | None = None
+    source_binding: SourceBinding | None = None
+    scene_binding: SceneBinding | None = None
+    execution_context: dict[str, Any] | None = None
+    snapshot_manifest_id: str | None = None
+    adapter_fingerprint: str | None = None
 
 
 class JobRecord(BaseModel):
@@ -177,3 +261,8 @@ class JobRecord(BaseModel):
     timeout: float = 300
     attempt: int = 1
     retry_of: str | None = None
+    state_version: int = 0
+    owner_host_instance_id: str | None = None
+    owner_process_started_at: str | None = None
+    heartbeat_at: float | None = None
+    execution_outcome: str | None = None

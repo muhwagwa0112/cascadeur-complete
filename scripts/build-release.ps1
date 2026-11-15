@@ -83,6 +83,8 @@ if (-not $InstallerOnly) {
     New-Item -ItemType Directory -Path $BridgeStage -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete') -Destination $BridgeStage -Recurse
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete_events') -Destination $BridgeStage -Recurse
+    & $Python -m cascadeur_complete.package_fingerprint --bridge-root (Join-Path $BridgeStage 'cascadeur_complete') --output (Join-Path $AppStage 'bridge-package.json')
+    if ($LASTEXITCODE -ne 0) { throw 'Bridge package fingerprint failed' }
 
     $Server = Join-Path $AppStage 'cascadeur-complete.exe'
     $previousSmokeRoot = $env:CASCADEUR_MCP_ROOT

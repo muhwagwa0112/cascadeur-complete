@@ -127,7 +127,7 @@ def edit_section(scene, arguments, request, context):
     frame = int(arguments["frame"])
     operation = str(arguments["operation"])
     bound = {"animation.interpolation_set": "interpolation", "animation.tangent_set": "tangent"}.get(
-        str((request.get("operations") or [{}])[0].get("name", ""))
+        str(context.get("operation_name") or (request.get("operations") or [{}])[0].get("name", ""))
     )
     if bound is not None and operation != bound:
         raise ValueError("operation argument " + operation + " does not match the requested bridge operation")
@@ -249,12 +249,76 @@ def rotation_from_euler_xyz(csc, euler):
 
     converter = getattr(csc.math, "euler_angles_to_quaternion_x_y_z", None)
     if converter is None:
-        return csc.math.Rotation.from_euler(*euler)
+        raise RuntimeError("RIG_ADAPTER_UNVERIFIED: matching XYZ quaternion converter is unavailable")
     quaternion = converter(numpy.array([float(value) for value in euler], dtype=numpy.float32))
     return csc.math.Rotation.from_quaternion(quaternion)
 
 
 MAX_ROTATION_KEY_WRITES = 60000
+
+
+def _quaternion_error(first, second):
+    import math
+    if (not isinstance(first, (list, tuple)) or not isinstance(second, (list, tuple))
+            or len(first) != 4 or len(second) != 4
+            or any(type(v) not in (int, float) or not math.isfinite(v) for v in [*first, *second])):
+        raise ValueError("INCOMPLETE_CAPTURE: invalid quaternion")
+    n1, n2 = math.sqrt(sum(v*v for v in first)), math.sqrt(sum(v*v for v in second))
+    if min(n1, n2) < 1e-12:
+        raise ValueError("INCOMPLETE_CAPTURE: zero quaternion")
+    dot = min(1., abs(sum(a*b for a,b in zip(first, second)) / (n1*n2)))
+    return 2 * math.acos(dot)
+
+
+def _validated_writes(writes, channel):
+    import math
+    if not isinstance(writes, list) or not writes or len(writes) > MAX_ROTATION_KEY_WRITES:
+        raise ValueError("INVALID_WRITE_SCOPE: write count outside supported budget")
+    seen = set()
+    for item in writes:
+        frame = item.get("frame")
+        raw_id = item.get("id")
+        values = item.get(channel)
+        if (not isinstance(raw_id, str) or not raw_id or type(frame) is not int or frame < 0
+                or not isinstance(values, (list, tuple)) or len(values) != 3
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in values)):
+            raise ValueError("INVALID_WRITE_SCOPE: finite vector, stable id and integer frame required")
+        key = (raw_id, frame)
+        if key in seen:
+            raise ValueError("INVALID_WRITE_SCOPE: duplicate object/frame")
+        seen.add(key)
+    return writes
+
+
+def _position_tolerance(request):
+    import math
+    context = (request.get("source_binding") or {}).get("scope", {}).get("context", {})
+    scale = context.get("metres_per_scene_unit")
+    if type(scale) not in (float, int) or not math.isfinite(scale) or scale <= 0:
+        raise ValueError("MISSING_CLIP_METADATA: position readback requires verified length scale")
+    return 0.0005 / scale, scale
+
+
+def _complete_readback(rows, expected_ids):
+    if (not isinstance(rows, list) or len(rows) != len(expected_ids)
+            or {row.get("id") for row in rows} != set(expected_ids)):
+        raise ValueError("INCOMPLETE_CAPTURE: exact write readback coverage required")
+    return {row["id"]: row for row in rows}
+
+
+def _position_error(actual, expected):
+    import math
+    if (not isinstance(actual, (list, tuple)) or len(actual) != 3
+            or any(type(v) not in (int, float) or not math.isfinite(v) for v in actual)):
+        raise ValueError("INCOMPLETE_CAPTURE: finite position readback required")
+    return math.sqrt(sum((a - b)**2 for a, b in zip(actual, expected, strict=True)))
+
+
+def _finish_interpolation(scene_updater):
+    interpolator = scene_updater.get_interpolator()
+    interpolator.reload()
+    interpolator.interpolate()
+
 
 
 @handler("animation.rotation_keys_set", postconditions=("rotation_keys_equal_request",))
@@ -271,7 +335,7 @@ def rotation_keys_set(scene, arguments, _request, context):
 
     csc = context["csc"]
     domain = context["domain_scene"](scene)
-    writes = list(arguments.get("writes") or [])
+    writes = _validated_writes(arguments.get("writes"), "rotation_euler_xyz_radians")
     space = str(arguments.get("space", "local"))
     if space not in ("local", "global"):
         raise ValueError("space must be local or global")
@@ -288,6 +352,10 @@ def rotation_keys_set(scene, arguments, _request, context):
         euler = [float(value) for value in item["rotation_euler_xyz_radians"]]
         if len(euler) != 3:
             raise ValueError("rotation_euler_xyz_radians must contain exactly three numbers")
+        expected = item.get("expected_quaternion_wxyz")
+        converted = _quaternion_list(rotation_from_euler_xyz(csc, euler))
+        if expected is None or _quaternion_error(converted, expected) > 1e-5:
+            raise ValueError("RIG_ADAPTER_UNVERIFIED: native Euler conversion differs from planned quaternion")
         if raw_id not in targets:
             object_id = context["object_id"](raw_id)
             data_ids = _transform_data_ids(domain, object_id, space)
@@ -328,25 +396,26 @@ def rotation_keys_set(scene, arguments, _request, context):
                     editor.set_data_value(data_id, frame, rotation)
                     changed.add(data_id)
             scene_updater.run_update(changed, frame)
+        _finish_interpolation(scene_updater)
 
     transact(domain.modify_update, "Cascadeur Complete: set rotation keys", edit)
-    refresh_interpolation(domain)
     worst = 0.0
     for frame, items in by_frame.items():
-        observed = {row["id"]: row for row in _read_transforms(domain, [raw for raw, _ in items], frame, space)}
+        ids = [raw for raw, _ in items]
+        observed = _complete_readback(_read_transforms(domain, ids, frame, space), ids)
         for raw_id, euler in items:
             expected = _quaternion_list(rotation_from_euler_xyz(csc, euler))
             actual = observed[str(raw_id)]["rotation"]["quaternion_wxyz"]
-            error = abs(1.0 - abs(sum(a * b for a, b in zip(expected, actual, strict=True))))
+            error = _quaternion_error(expected, actual)
             worst = max(worst, error)
-            if error > 1e-4:
+            if error > 0.003490659:
                 raise AssertionError(f"POSTCONDITION_FAILED: rotation differs for {raw_id} at frame {frame}")
     return {
         "space": space,
         "write_count": len(writes),
         "object_count": len(targets),
         "frame_count": len(by_frame),
-        "max_quaternion_error": worst,
+        "max_rotation_error_rad": worst,
     }, []
 
 
@@ -381,24 +450,18 @@ def position_keys_set(scene, arguments, _request, context):
     Used for contact cleanup (pinning a sliding foot's points in place): only
     existing keys on each object's own layer are rewritten, through the
     update-graph position node when the object has one. Every write is read
-    back; the host re-reads a sample in a separate request as well.
+    back; the host re-reads all writes in bounded separate requests as well.
     """
     from ..runtime import _read_transforms, _transform_data_ids
 
     domain = context["domain_scene"](scene)
-    writes = list(arguments.get("writes") or [])
+    writes = _validated_writes(arguments.get("writes"), "position")
     space = str(arguments.get("space", "global"))
     if space not in ("local", "global"):
         raise ValueError("space must be local or global")
-    # Rig constraints (IK limb lengths) may trim a requested position slightly;
-    # callers that move whole limbs pass an explicit, bounded tolerance.
-    tolerance = float(arguments.get("tolerance_cm", 0.05))
-    if not 0.0 < tolerance <= 10.0:
-        raise ValueError("tolerance_cm must be in (0, 10]")
-    # Helper points the rig re-derives (e.g. a leg AdditionalPoint that follows
-    # the limb direction) are written so the rig starts from the moved pose, but
-    # are reported instead of verified against the tolerance.
-    rig_solved = {str(item) for item in arguments.get("rig_solved_ids") or []}
+    tolerance, metres_per_unit = _position_tolerance(_request)
+    if arguments.get("rig_solved_ids"):
+        raise ValueError("INVALID_POLICY: rig-derived controls require explicit relation verification; no id exemptions")
     if not writes:
         raise ValueError("writes must be a non-empty list of {id, frame, position}")
     if len(writes) > MAX_ROTATION_KEY_WRITES:
@@ -452,25 +515,26 @@ def position_keys_set(scene, arguments, _request, context):
                     editor.set_data_value(data_id, frame, value)
                     changed.add(data_id)
             scene_updater.run_update(changed, frame)
+        _finish_interpolation(scene_updater)
 
     transact(domain.modify_update, "Cascadeur Complete: set position keys", edit)
-    refresh_interpolation(domain)
     worst = 0.0
     mismatched = {}
     adjusted = {}
     for frame, items in by_frame.items():
-        observed = {row["id"]: row for row in _read_transforms(domain, [raw for raw, _ in items], frame, space)}
+        ids = [raw for raw, _ in items]
+        observed = _complete_readback(_read_transforms(domain, ids, frame, space), ids)
         for raw_id, position in items:
             actual = observed[str(raw_id)]["position"]
-            error = max(abs(a - b) for a, b in zip(actual, position, strict=True))
+            error = _position_error(actual, position)
             worst = max(worst, error)
             if error > 0.01:
                 adjusted[raw_id] = max(adjusted.get(raw_id, 0.0), error)
-            if error > tolerance and raw_id not in rig_solved:
+            if error > tolerance:
                 mismatched[raw_id] = max(mismatched.get(raw_id, 0.0), error)
     if mismatched:
-        # Rig-derived points (e.g. direction points) are recomputed from their
-        # drivers; report every one so the caller can drop them from the plan.
+        # Report every mismatch; dependency-coupled controls cannot be silently
+        # removed from a previously authorized correction.
         detail = ", ".join(f"{key} ({value:.2f})" for key, value in sorted(mismatched.items()))
         raise AssertionError(f"POSTCONDITION_FAILED: position differs for {len(mismatched)} object(s): {detail}")
     return {
@@ -479,6 +543,6 @@ def position_keys_set(scene, arguments, _request, context):
         "object_count": len(targets),
         "frame_count": len(by_frame),
         "max_position_error": worst,
-        "tolerance_cm": tolerance,
+        "position_tolerance_m": tolerance * metres_per_unit,
         "adjusted_by_rig": {key: round(value, 3) for key, value in sorted(adjusted.items())},
     }, []

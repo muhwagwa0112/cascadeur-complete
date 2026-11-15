@@ -10,6 +10,8 @@ ADAPTER_ID = "cascadeur_2026_1.timeline.set_frame"
 POSTCONDITION = "frame_equals_requested"
 LIVE_TEST_ID = "tests/test_verification.py::test_live_evidence_is_append_only_and_requires_all_postconditions"
 FIXTURE_ID = "pytest:tmp_path"
+RUNTIME_CONTEXT = {"runtime_available": True, "loaded_adapter_fingerprint": "d" * 64,
+                   "adapter_settings_digest": "e" * 64, "environment": {"platform": "test"}}
 
 
 def _enable_test_live_binding(monkeypatch):
@@ -17,6 +19,7 @@ def _enable_test_live_binding(monkeypatch):
         PRODUCT_CATALOG.by_id[FEATURE_ID],
         live_test_id=LIVE_TEST_ID,
         fixture_id=FIXTURE_ID,
+        fixture_files=("tests/test_verification.py",),
     )
     catalog = replace(
         PRODUCT_CATALOG,
@@ -36,6 +39,7 @@ def _record(store: LiveEvidenceStore, **overrides):
         "observed_postconditions": {POSTCONDITION: True},
         "test_id": LIVE_TEST_ID,
         "fixture_id": FIXTURE_ID,
+        "runtime_context": RUNTIME_CONTEXT,
     }
     arguments.update(overrides)
     return store.record(FEATURE_ID, **arguments)
@@ -48,11 +52,14 @@ def test_live_evidence_is_append_only_and_requires_all_postconditions(tmp_path, 
     accepted = _record(store)
 
     payload = json.loads(store.path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert len(payload["records"]) == 2
     assert rejected["valid"] is False
     assert accepted["valid"] is True
-    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic") == {FEATURE_ID}
+    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic", runtime_context=RUNTIME_CONTEXT) == {FEATURE_ID}
+    assert store.verified_features(SUPPORTED_BUILD, runtime_context={**RUNTIME_CONTEXT,
+        "adapter_settings_digest": "f" * 64}) == set()
+    assert store.verified_features(SUPPORTED_BUILD) == set()
 
 
 def test_live_evidence_is_invalidated_by_version_license_dependency_or_binding(tmp_path, monkeypatch):
@@ -60,14 +67,14 @@ def test_live_evidence_is_invalidated_by_version_license_dependency_or_binding(t
     store = LiveEvidenceStore(tmp_path / "live_evidence.json")
     _record(store)
 
-    assert store.verified_features("2026.1.2.0.other", license_name="Basic") == set()
-    assert store.verified_features(SUPPORTED_BUILD, license_name="Pro") == set()
-    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic", dependencies={"plugin": True}) == set()
+    assert store.verified_features("2026.1.2.0.other", license_name="Basic", runtime_context=RUNTIME_CONTEXT) == set()
+    assert store.verified_features(SUPPORTED_BUILD, license_name="Pro", runtime_context=RUNTIME_CONTEXT) == set()
+    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic", dependencies={"plugin": True}, runtime_context=RUNTIME_CONTEXT) == set()
 
     payload = json.loads(store.path.read_text(encoding="utf-8"))
     payload["records"][0]["binding"]["source_hash"] = "stale"
     store.path.write_text(json.dumps(payload), encoding="utf-8")
-    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic") == set()
+    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic", runtime_context=RUNTIME_CONTEXT) == set()
 
 
 def test_legacy_or_incomplete_evidence_cannot_mark_feature_supported(tmp_path, monkeypatch):
@@ -83,15 +90,47 @@ def test_legacy_or_incomplete_evidence_cannot_mark_feature_supported(tmp_path, m
         encoding="utf-8",
     )
     store = LiveEvidenceStore(path)
-    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic") == set()
+    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic", runtime_context=RUNTIME_CONTEXT) == set()
 
     incomplete = _record(store, license_name="unknown")
     assert incomplete["valid"] is False
-    assert store.verified_features(SUPPORTED_BUILD) == set()
+    assert store.verified_features(SUPPORTED_BUILD, runtime_context=RUNTIME_CONTEXT) == set()
 
 
 def test_catalog_without_live_test_and_fixture_cannot_be_supported(tmp_path):
     store = LiveEvidenceStore(tmp_path / "live_evidence.json")
     record = _record(store)
     assert record["valid"] is False
-    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic") == set()
+    assert store.verified_features(SUPPORTED_BUILD, license_name="Basic", runtime_context=RUNTIME_CONTEXT) == set()
+
+
+def test_source_test_and_fixture_byte_changes_invalidate_evidence(tmp_path, monkeypatch):
+    _enable_test_live_binding(monkeypatch)
+    source, fixture, test = (tmp_path / name for name in ("handler.py", "fixture.casc", "test_contract.py"))
+    for path in (source, fixture, test):
+        path.write_bytes(b"original bytes")
+    feature = replace(verification.PRODUCT_CATALOG.by_id[FEATURE_ID],
+                      implementation_files=(str(source),), fixture_files=(str(fixture),),
+                      contract_test_ids=(str(test) + "::test_contract",))
+    monkeypatch.setattr(verification, "PRODUCT_CATALOG", replace(verification.PRODUCT_CATALOG,
+        features=tuple(feature if item.id == FEATURE_ID else item for item in verification.PRODUCT_CATALOG.features)))
+    store = LiveEvidenceStore(tmp_path / "live.json")
+    assert _record(store)["valid"]
+    for path in (source, fixture, test):
+        path.write_bytes(b"changed bytes, same IDs")
+        assert store.verified_features(SUPPORTED_BUILD, runtime_context=RUNTIME_CONTEXT) == set()
+        path.write_bytes(b"original bytes")
+        assert store.verified_features(SUPPORTED_BUILD, runtime_context=RUNTIME_CONTEXT) == {FEATURE_ID}
+
+
+def test_v2_and_unavailable_runtime_never_promote(tmp_path, monkeypatch):
+    _enable_test_live_binding(monkeypatch)
+    store = LiveEvidenceStore(tmp_path / "live.json")
+    row = _record(store)
+    store.path.write_text(json.dumps({"schema_version": 2, "records": [row]}), encoding="utf-8")
+    assert store.verified_features(SUPPORTED_BUILD) == set()
+    rejected = _record(store, runtime_context={"runtime_available": False})
+    assert not rejected["valid"]
+    assert store.verified_features(SUPPORTED_BUILD) == set()
+    payload = json.loads(store.path.read_text(encoding="utf-8"))
+    assert payload["historical_payload"]["schema_version"] == 2

@@ -18,7 +18,7 @@ from ..handler_registry import handler
     },
 )
 def create_render_object(scene, _arguments, request, context):
-    operation = str((request.get("operations") or [{}])[0].get("name", ""))
+    operation = str(context.get("operation_name") or (request.get("operations") or [{}])[0].get("name", ""))
     runners = {
         "render.camera_create": ("commands.add.camera.add_camera", "Camera"),
         "render.camera_aim": ("commands.add.camera.add_camera_with_aim", "Camera"),

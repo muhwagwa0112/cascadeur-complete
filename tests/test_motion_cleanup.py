@@ -5,7 +5,7 @@ import pytest
 
 from cascadeur_complete import motion_cleanup as mc
 from cascadeur_complete.cleanup_workflow import CleanupError, CleanupWorkflow
-from cascadeur_complete.models import ResultEnvelope
+from cascadeur_complete.models import Operation, ResultEnvelope
 
 FRAMES = 120
 RIG = mc.FootRig()
@@ -166,6 +166,9 @@ class _FakeService:
     def __init__(self, client):
         self.client = client
         self.prepared = None
+
+    def batch(self, feature_id, operations, *, scene_id, expected_revision, timeout):
+        return self.client.execute(feature_id, [Operation.model_validate(item) for item in operations])
 
     def prepare_change(self, feature_id, operation_name, arguments, ttl):
         self.prepared = (feature_id, operation_name, arguments)

@@ -22,9 +22,7 @@ class SafetyError(ValueError):
     pass
 
 
-def _absolute_local_path(
-    value: str, *, allow_unc_paths: bool = False, allow_device_paths: bool = False
-) -> Path:
+def _absolute_local_path(value: str, *, allow_unc_paths: bool = False, allow_device_paths: bool = False) -> Path:
     raw = value.strip()
     lowered = raw.lower()
     if not raw:
@@ -48,12 +46,8 @@ def _absolute_local_path(
     return resolved
 
 
-def validate_local_input_path(
-    value: str, *, allow_unc_paths: bool = False, allow_device_paths: bool = False
-) -> Path:
-    resolved = _absolute_local_path(
-        value, allow_unc_paths=allow_unc_paths, allow_device_paths=allow_device_paths
-    )
+def validate_local_input_path(value: str, *, allow_unc_paths: bool = False, allow_device_paths: bool = False) -> Path:
+    resolved = _absolute_local_path(value, allow_unc_paths=allow_unc_paths, allow_device_paths=allow_device_paths)
     if not resolved.is_file():
         raise SafetyError("Input file does not exist")
     return resolved
@@ -66,9 +60,7 @@ def validate_local_path(
     allow_unc_paths: bool = False,
     allow_device_paths: bool = False,
 ) -> Path:
-    resolved = _absolute_local_path(
-        value, allow_unc_paths=allow_unc_paths, allow_device_paths=allow_device_paths
-    )
+    resolved = _absolute_local_path(value, allow_unc_paths=allow_unc_paths, allow_device_paths=allow_device_paths)
     if resolved.exists() and not allow_overwrite:
         raise SafetyError("Existing destination requires explicit overwrite confirmation")
     return resolved
@@ -103,7 +95,7 @@ class ChangeManager:
 
     @staticmethod
     def _approval_payload(record: ChangeToken) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": record.schema_version,
             "feature_id": record.feature_id,
             "scene_id": record.scene_id,
@@ -114,6 +106,11 @@ class ChangeManager:
             "backup_path": record.backup_path,
             "expires_at": record.expires_at,
         }
+        if record.schema_version >= 3:
+            for name in ("mutation_request_id", "source_binding", "scene_binding", "execution_context", "snapshot_manifest_id", "adapter_fingerprint"):
+                value = getattr(record, name)
+                payload[name] = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+        return payload
 
     def _signature(self, nonce: str, record: ChangeToken) -> str:
         canonical = json.dumps(
@@ -123,7 +120,7 @@ class ChangeManager:
             separators=(",", ":"),
             allow_nan=False,
         )
-        message = f"cascadeur-complete-change-v2:{nonce}:".encode() + canonical.encode("utf-8")
+        message = f"cascadeur-complete-change-v{record.schema_version}:{nonce}:".encode() + canonical.encode("utf-8")
         return hmac.new(self._secret, message, hashlib.sha256).hexdigest()
 
     @staticmethod
@@ -136,13 +133,17 @@ class ChangeManager:
             raise SafetyError("Malformed confirmation token")
         return nonce, signature
 
-    def _verify_record(self, nonce: str, signature: str, path: Path) -> ChangeToken:
+    def _authentic_record(self, nonce: str, signature: str, path: Path) -> ChangeToken:
         record = ChangeToken.model_validate(read_json(path))
         if record.token != f"{nonce}.{signature}":
             raise SafetyError("Confirmation token record does not match token")
         expected = self._signature(nonce, record)
         if not hmac.compare_digest(signature, expected):
             raise SafetyError("Invalid confirmation token signature")
+        return record
+
+    def _verify_record(self, nonce: str, signature: str, path: Path) -> ChangeToken:
+        record = self._authentic_record(nonce, signature, path)
         if record.used:
             raise SafetyError("Confirmation token was already used")
         if record.expires_at < time.time():
@@ -160,6 +161,10 @@ class ChangeManager:
         impact: dict[str, Any],
         backup_path: str | None,
         ttl: float = 300.0,
+        source_binding=None,
+        execution_context=None,
+        mutation_request_id: str | None = None,
+        snapshot_manifest_id: str | None = None,
     ) -> ChangeToken:
         nonce = secrets.token_urlsafe(24)
         expires_at = time.time() + min(max(ttl, 30.0), 1800.0)
@@ -173,6 +178,12 @@ class ChangeManager:
             impact=impact,
             backup_path=backup_path,
             expires_at=expires_at,
+            mutation_request_id=mutation_request_id,
+            source_binding=source_binding,
+            scene_binding=source_binding.binding if source_binding else None,
+            execution_context=execution_context,
+            snapshot_manifest_id=snapshot_manifest_id,
+            adapter_fingerprint=source_binding.adapter_fingerprint if source_binding else None,
         )
         token_value = f"{nonce}.{self._signature(nonce, record)}"
         record.token = token_value
@@ -188,10 +199,23 @@ class ChangeManager:
             raise SafetyError("Unknown confirmation token")
         return self._verify_record(nonce, signature, path)
 
+    def consumed(self, token: str) -> ChangeToken | None:
+        """Authenticate an old approval for observation only; never reopen it."""
+        nonce, signature = self._parts(token)
+        path = self.paths.tokens / f"{nonce}.used"
+        if not path.is_file():
+            return None
+        record = self._authentic_record(nonce, signature, path)
+        if not record.used:
+            raise SafetyError("Consumed token record is not terminal")
+        return record
+
     @staticmethod
     def _scene_matches(record: ChangeToken, scene_id: str | None, scene_revision: str | None) -> bool:
         if record.scene_id != scene_id:
             return False
+        if record.schema_version == 3 and record.source_binding is not None:
+            return record.scene_binding == record.source_binding.binding
         if record.scene_revision is None:
             # Only playhead-only operations are bound to the scene identity alone.
             return record.operation.name == "timeline.playback"
@@ -204,7 +228,7 @@ class ChangeManager:
         record = self.load(token)
         if not self._scene_matches(record, scene_id, scene_revision):
             raise SafetyError("Scene identity or revision changed after preparation")
-        if record.selection_fingerprint != selection_fingerprint:
+        if record.selection_fingerprint is not None and record.selection_fingerprint != selection_fingerprint:
             raise SafetyError("Selection changed after preparation")
         marker = self.paths.seen / f"change-{nonce}"
         try:
@@ -226,7 +250,7 @@ class ChangeManager:
             record = self._verify_record(nonce, signature, claimed)
             if not self._scene_matches(record, scene_id, scene_revision):
                 raise SafetyError("Scene identity or revision changed during token claim")
-            if record.selection_fingerprint != selection_fingerprint:
+            if record.selection_fingerprint is not None and record.selection_fingerprint != selection_fingerprint:
                 raise SafetyError("Selection changed during token claim")
             record.used = True
             record.used_at = time.time()
@@ -236,9 +260,14 @@ class ChangeManager:
             claimed.unlink(missing_ok=True)
 
     def cancel(self, token: str) -> bool:
-        nonce, _signature = self._parts(token)
-        path = self.paths.tokens / f"{nonce}.json"
-        if not path.is_file():
+        """Delete an unused token, but only for its exact signed value (an expired one included)."""
+        try:
+            nonce, signature = self._parts(token)
+            path = self.paths.tokens / f"{nonce}.json"
+            if not path.is_file():
+                return False
+            self._authentic_record(nonce, signature, path)
+        except (SafetyError, OSError, ValueError):
             return False
-        path.unlink()
+        path.unlink(missing_ok=True)
         return True

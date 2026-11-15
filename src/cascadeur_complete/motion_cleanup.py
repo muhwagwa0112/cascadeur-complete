@@ -15,6 +15,16 @@ from typing import Any
 
 import numpy as np
 
+from .motion_context import MotionInputError, SolverResult
+from .motion_math import (
+    align_vectors,
+    hemisphere_continuous,
+    normalise_quaternions,
+    rotation_mean,
+    solve_two_bone,
+    temporal_operators,
+)
+
 SIDES = ("Left", "Right")
 FINGERS = ("Thumb", "Index", "Middle", "Ring", "Pinky")
 
@@ -439,8 +449,10 @@ def _soft_limit(values, limit):
 
 
 def _steps_deg(rest, rotation):
-    rotvec = (rest.inv() * rotation).as_rotvec()
-    return np.degrees(np.linalg.norm(np.diff(rotvec, axis=0), axis=1))
+    del rest  # Relative rotations avoid an artificial jump at the rest-chart pi boundary.
+    if len(rotation) < 2:
+        return np.empty(0)
+    return np.degrees((rotation[:-1].inv() * rotation[1:]).magnitude())
 
 
 def _range(values):
@@ -466,10 +478,9 @@ def finger_cleanup(quaternions_wxyz: dict[str, np.ndarray], spike_deg: float = 1
         if parts is None:
             continue
         _, finger, segment = parts
-        xyzw = np.asarray(quaternion, dtype=float)[:, [1, 2, 3, 0]]
+        xyzw = hemisphere_continuous(quaternion)[:, [1, 2, 3, 0]]
         rotation = Rotation.from_quat(xyzw)
-        rest_quat = np.median(xyzw * np.sign(xyzw[:, [3]]), axis=0)
-        rest = Rotation.from_quat(rest_quat / np.linalg.norm(rest_quat))
+        rest = _median_rotation(rotation)
         curl, spread, twist = np.degrees((rest.inv() * rotation).as_euler("ZYX")).T
         if finger == "Thumb":
             new = [_smooth(curl, 3, 1.0), _smooth(spread, 3, 1.0), _smooth(twist, 3, 1.0)]
@@ -487,7 +498,7 @@ def finger_cleanup(quaternions_wxyz: dict[str, np.ndarray], spike_deg: float = 1
             ]
         cleaned = rest * Rotation.from_euler("ZYX", np.radians(np.stack(new, 1)))
         despiked = False
-        if _steps_deg(rest, cleaned).max() > spike_deg:
+        if _steps_deg(rest, cleaned).max(initial=0.0) > spike_deg:
             new = [_smooth(values, 5, 1.5) for values in new]
             cleaned = rest * Rotation.from_euler("ZYX", np.radians(np.stack(new, 1)))
             despiked = True
@@ -500,7 +511,7 @@ def finger_cleanup(quaternions_wxyz: dict[str, np.ndarray], spike_deg: float = 1
                 "joint": name[:-4],
                 "spread_range_deg": [round(_range(spread), 1), round(_range(new[1]), 1)],
                 "twist_range_deg": [round(_range(twist), 1), round(_range(new[2]), 1)],
-                "max_step_deg": [round(float(before.max()), 1), round(float(after.max()), 1)],
+                "max_step_deg": [round(float(before.max(initial=0.0)), 1), round(float(after.max(initial=0.0)), 1)],
                 "steps_over_spike": [int((before > spike_deg).sum()), int((after > spike_deg).sum())],
                 "change_p95_deg": round(float(np.percentile(change, 95)), 1),
                 "change_max_deg": round(float(change.max()), 1),
@@ -518,10 +529,9 @@ def finger_stats(quaternions_wxyz: dict[str, np.ndarray], spike_deg: float = 10.
     for name, quaternion in sorted(quaternions_wxyz.items()):
         if finger_parts(name) is None:
             continue
-        xyzw = np.asarray(quaternion, dtype=float)[:, [1, 2, 3, 0]]
+        xyzw = hemisphere_continuous(quaternion)[:, [1, 2, 3, 0]]
         rotation = Rotation.from_quat(xyzw)
-        rest_quat = np.median(xyzw * np.sign(xyzw[:, [3]]), axis=0)
-        rest = Rotation.from_quat(rest_quat / np.linalg.norm(rest_quat))
+        rest = _median_rotation(rotation)
         _, spread, twist = np.degrees((rest.inv() * rotation).as_euler("ZYX")).T
         steps = _steps_deg(rest, rotation)
         rows.append(
@@ -529,7 +539,7 @@ def finger_stats(quaternions_wxyz: dict[str, np.ndarray], spike_deg: float = 10.
                 "joint": name[:-4],
                 "spread_range_deg": round(_range(spread), 1),
                 "twist_range_deg": round(_range(twist), 1),
-                "max_step_deg": round(float(steps.max()), 1),
+                "max_step_deg": round(float(steps.max(initial=0.0)), 1),
                 "steps_over_spike": int((steps > spike_deg).sum()),
             }
         )
@@ -701,103 +711,71 @@ class CapsuleSurface:
 
 
 class MeshSurface:
-    """Arm clearance against the character's own skinned mesh.
+    """Triangle-based legacy predictor; ambiguous topology never counts as clear.
 
-    The obstacle is every vertex not bound to this arm (or its shoulder), so
-    the torso, hips, head, legs and the other arm all count. A test vertex is
-    inside when it lies behind the nearest obstacle vertex's outward normal.
-    Arm vertices follow the solve by blending the elbow and wrist offsets
-    along the bones; the mesh is re-sampled after the write to verify.
+    Native reskinning is still required for actual quality. Skin ownership is
+    validated before classification; unknown influences cannot index joints[-1].
     """
-
     def __init__(self, positions, triangles, dominant, joints, side, shoulder, elbow, wrist, params: ArmParams):
-        from scipy.spatial import cKDTree
-
+        from .motion_geometry import TriangleSurface
         self.params = params
-        names = np.array([str(item) for item in joints])[np.asarray(dominant)]
-        upper = np.char.startswith(names, side + "Arm")
-        fore = np.char.startswith(names, side + "ForeArm") | np.char.startswith(names, side + "WristTwist")
-        hand = np.char.startswith(names, side + "Hand")
-        own = upper | fore | hand | np.char.startswith(names, side + "Shoulder")
-        obstacle = np.where(~own)[0]
-        faces = triangles[(~own)[triangles].all(1)]
-        first = positions[0].astype(float)
-        volume = np.einsum("ij,ij->i", first[triangles[:, 0]], np.cross(first[triangles[:, 1]], first[triangles[:, 2]]))
-        sign = 1.0 if volume.sum() > 0 else -1.0
-        import scipy.sparse as sp
-
-        corner_count = len(faces)
-        gather = sp.csr_matrix(
-            (np.ones(3 * corner_count), (faces.T.reshape(-1), np.tile(np.arange(corner_count), 3))),
-            shape=(len(first), corner_count),
-        )
-        self.frames = []
-        # Vertices constrained once stay constrained: dropping one as soon as it
-        # clears the surface lets the next solve relax straight back inside.
-        self.active: list[np.ndarray] = []
-        for f in range(len(positions)):
-            vertices = positions[f].astype(float)
-            face_normal = sign * np.cross(
-                vertices[faces[:, 1]] - vertices[faces[:, 0]], vertices[faces[:, 2]] - vertices[faces[:, 0]]
-            )
-            normal = _unit(gather @ face_normal)[obstacle]
+        positions, triangles = np.asarray(positions, dtype=float), np.asarray(triangles)
+        dominant = np.asarray(dominant)
+        if (positions.ndim != 3 or positions.shape[2] != 3 or not np.isfinite(positions).all()
+                or dominant.shape != (positions.shape[1],) or dominant.dtype.kind not in 'iu'
+                or np.any(dominant < 0) or np.any(dominant >= len(joints))):
+            raise MotionInputError('UNKNOWN_SKIN_OWNERSHIP', 'complete valid skin ownership is required')
+        if triangles.ndim != 2 or triangles.shape[1] != 3 or triangles.dtype.kind not in 'iu' or np.any(triangles < 0) or np.any(triangles >= positions.shape[1]):
+            raise MotionInputError('INVALID_MESH', 'triangle indices outside vertex coverage')
+        names = np.asarray([str(item) for item in joints])[dominant]
+        upper = np.char.startswith(names, side + 'Arm')
+        fore = np.char.startswith(names, side + 'ForeArm') | np.char.startswith(names, side + 'WristTwist')
+        hand = np.char.startswith(names, side + 'Hand')
+        own = upper | fore | hand | np.char.startswith(names, side + 'Shoulder')
+        faces = triangles[(~own)[triangles].all(axis=1)]
+        if not len(faces):
+            raise MotionInputError('COLLISION_GEOMETRY_UNAVAILABLE', 'no obstacle triangles')
+        self.frames, self.active = [], []
+        for f, vertices in enumerate(positions):
             groups = []
-            upper_axis = elbow[f] - shoulder[f]
-            fore_axis = wrist[f] - elbow[f]
-            index = np.where(upper)[0]
-            t = ((vertices[index] - shoulder[f]) @ upper_axis) / (upper_axis @ upper_axis)
-            keep = t >= 0.5  # the half next to the shoulder always touches the torso
-            groups.append((vertices[index[keep]], np.clip(t[keep], 0, 1), np.zeros(int(keep.sum()))))
-            index = np.where(fore)[0]
-            t = np.clip(((vertices[index] - elbow[f]) @ fore_axis) / (fore_axis @ fore_axis), 0, 1)
-            groups.append((vertices[index], 1.0 - t, t))
+            for mask, origin, axis, upper_group in ((upper, shoulder[f], elbow[f]-shoulder[f], True),
+                                                    (fore, elbow[f], wrist[f]-elbow[f], False)):
+                norm = float(axis @ axis)
+                if norm <= 1e-16:
+                    raise MotionInputError('INVALID_BONE_LENGTH', 'arm predictor has a zero length bone')
+                index = np.where(mask)[0]
+                t = np.clip(((vertices[index] - origin) @ axis)/norm, 0, 1)
+                if upper_group:
+                    keep = t >= .5
+                    groups.append((vertices[index[keep]], t[keep], np.zeros(int(keep.sum()))))
+                else:
+                    groups.append((vertices[index], 1-t, t))
             index = np.where(hand)[0]
             groups.append((vertices[index], np.zeros(len(index)), np.ones(len(index))))
-            self.frames.append(
-                {
-                    "tree": cKDTree(vertices[obstacle]),
-                    "surface": vertices[obstacle],
-                    "normal": normal,
-                    "points": np.concatenate([g[0] for g in groups]),
-                    "we": np.concatenate([g[1] for g in groups]),
-                    "ww": np.concatenate([g[2] for g in groups]),
-                }
-            )
+            self.frames.append({'surface': TriangleSurface(vertices, faces, semantics='volume'),
+                                'points': np.concatenate([g[0] for g in groups]),
+                                'we': np.concatenate([g[1] for g in groups]),
+                                'ww': np.concatenate([g[2] for g in groups])})
             self.active.append(np.zeros(0, dtype=int))
 
     def _signed(self, frame, offsets, f):
-        moved = frame["points"] + frame["we"][:, None] * offsets[0][f] + frame["ww"][:, None] * offsets[1][f]
-        distance, nearest = frame["tree"].query(moved)
-        normal = frame["normal"][nearest]
-        signed = np.einsum("ij,ij->i", moved - frame["surface"][nearest], normal)
-        # Further than ``reach`` from any surface is outside, whatever the nearest normal says.
-        signed[distance > self.params.reach] = self.params.reach
-        return signed, normal
+        moved = frame['points'] + frame['we'][:,None]*offsets[0][f] + frame['ww'][:,None]*offsets[1][f]
+        values = [frame['surface'].closest(point) for point in moved]
+        if any(value.signed_distance_m is None for value in values):
+            raise MotionInputError('COLLISION_SIGN_UNVERIFIED', 'open or ambiguous obstacle surface requires explicit collision semantics')
+        return np.asarray([v.signed_distance_m for v in values]), np.asarray([v.oriented_normal for v in values])
 
-    def depth(self, offsets) -> np.ndarray:
-        out = np.zeros(len(self.frames))
-        for f, frame in enumerate(self.frames):
-            signed, _ = self._signed(frame, offsets, f)
-            if len(signed):
-                out[f] = max(0.0, float(-signed.min()))
-        return out
+    def depth(self, offsets):
+        return np.asarray([max(0., float(-self._signed(frame, offsets, f)[0].min(initial=0.))) for f,frame in enumerate(self.frames)])
 
     def constraints(self, offsets):
         rows = []
-        params = self.params
-        for f, frame in enumerate(self.frames):
-            signed, normal = self._signed(frame, offsets, f)
-            if not len(signed):
-                continue
-            if signed.min() <= -params.allow:
-                near = np.where(signed < params.band)[0]
-                order = near[np.argsort(signed[near])]
-                deepest = order[: params.per_frame // 2]
-                rest = order[params.per_frame // 2 :]
-                spread = rest[:: max(1, len(rest) // max(1, params.per_frame // 2))]
-                self.active[f] = np.union1d(self.active[f], np.concatenate([deepest, spread])).astype(int)
+        for f,frame in enumerate(self.frames):
+            signed,normal = self._signed(frame, offsets, f)
+            near = np.where(signed < self.params.band)[0]
+            self.active[f] = np.union1d(self.active[f], near).astype(int)
             for i in self.active[f]:
-                rows.append((f, float(frame["we"][i]), float(frame["ww"][i]), normal[i], params.margin - signed[i]))
+                rows.append((f,float(frame['we'][i]),float(frame['ww'][i]),normal[i],self.params.margin-signed[i]))
         return rows
 
 
@@ -830,13 +808,16 @@ def solve_arm_offsets(
 
     params = params or ArmParams()
     frames = len(shoulder)
+    if (frames<1 or any(np.asarray(value).shape!=(frames,3) or not np.isfinite(value).all() for value in (shoulder,elbow,wrist))
+            or not np.isfinite(spacing) or spacing<=0):
+        raise MotionInputError("INVALID_POLICY","finite nonempty arm tracks and positive physical spacing required")
     size = 6 * frames
 
     def var(block, frame, axis):
         return block * 3 * frames + frame * 3 + axis
 
-    second = sp.diags([1.0, -2.0, 1.0], [0, 1, 2], shape=(frames - 2, frames))
-    first = sp.diags([-1.0, 1.0], [0, 1], shape=(frames - 1, frames))
+    second = sp.diags([1.0, -2.0, 1.0], [0, 1, 2], shape=(frames - 2, frames)) if frames>=3 else sp.csr_matrix((0,frames))
+    first = sp.diags([-1.0, 1.0], [0, 1], shape=(frames - 1, frames)) if frames>=2 else sp.csr_matrix((0,frames))
     smooth = (params.smoothness / spacing**3) * (second.T @ second) + (params.velocity / spacing) * (first.T @ first)
     per_block = spacing * sp.identity(3 * frames) + sp.kron(smooth, sp.identity(3))
     hessian = sp.triu(sp.block_diag([per_block, per_block]) * 2).tocsc()
@@ -936,14 +917,24 @@ def solve_arm_offsets(
         )
         result = solver.solve(raise_error=False)
         log[-1]["status"] = str(result.info.status)
-        if log[-1]["status"] not in ("solved", "solved inaccurate"):
+        if (log[-1]["status"] not in ("solved", "solved inaccurate") or result.x is None
+                or not np.isfinite(result.x).all() or max(result.info.prim_res,result.info.dual_res)>1e-3):
             break
         offsets = result.x[:size].reshape(2, frames, 3)
+    after=surface.depth(on_frames(offsets))
+    residual=max(float(np.max(np.abs(np.linalg.norm(elbow+offsets[0]-shoulder,axis=1)-np.linalg.norm(elbow-shoulder,axis=1)))),
+                 float(np.max(np.abs(np.linalg.norm(wrist+offsets[1]-elbow-offsets[0],axis=1)-np.linalg.norm(wrist-elbow,axis=1)))))
+    good=np.isfinite(after).all() and after.max(initial=0)<=params.allow and residual<=.01
+    status=("no_change" if np.max(np.abs(offsets))<1e-10 else "candidate") if good else "failed"
     return {
+        "status":status,
+        "reason_codes":[] if good else ["ARM_CLEARANCE_RESIDUAL_UNSATISFIED"],
+        "bone_length_residual_cm":residual,
+        "runtime_quality":"unverified",
         "elbow": offsets[0],
         "wrist": offsets[1],
         "depth_before": before,
-        "depth_after": surface.depth(on_frames(offsets)),
+        "depth_after": after,
         "iterations": log,
     }
 
@@ -970,6 +961,12 @@ def linear_interpolation(frames: np.ndarray, keys: np.ndarray):
 
     frames = np.asarray(frames, dtype=float)
     keys = np.asarray(keys, dtype=float)
+    if (frames.ndim != 1 or keys.ndim != 1 or not len(keys) or not np.isfinite(frames).all()
+            or not np.isfinite(keys).all() or np.any(np.diff(keys) <= 0)):
+        raise MotionInputError("KEY_LAYOUT_INSUFFICIENT", "a finite unique ordered key grid is required")
+    if len(keys) == 1:
+        return sp.csr_matrix((np.ones(len(frames)), (np.arange(len(frames)), np.zeros(len(frames), dtype=int))),
+                             shape=(len(frames), 1))
     right = np.clip(np.searchsorted(keys, frames, side="left"), 1, len(keys) - 1)
     left = right - 1
     share = np.clip((frames - keys[left]) / np.maximum(keys[right] - keys[left], 1e-9), 0.0, 1.0)
@@ -1013,31 +1010,33 @@ class HandPoseParams:
 def _rotation(wxyz):
     from scipy.spatial.transform import Rotation
 
-    return Rotation.from_quat(np.asarray(wxyz, dtype=float)[..., [1, 2, 3, 0]])
+    value = np.asarray(wxyz, dtype=float)
+    single = value.ndim == 1
+    value = normalise_quaternions(value.reshape(-1, 4))[:, [1, 2, 3, 0]]
+    return Rotation.from_quat(value[0] if single else value)
 
 
 def _median_rotation(rotation):
     from scipy.spatial.transform import Rotation
 
-    q = rotation.as_quat()
-    q = q * np.sign(q[:, [3]] + 1e-12)
-    middle = np.median(q, axis=0)
-    return Rotation.from_quat(middle / np.linalg.norm(middle))
+    q = np.atleast_2d(rotation.as_quat())
+    middle = rotation_mean(q[:, [3, 0, 1, 2]])
+    return Rotation.from_quat(middle[[1, 2, 3, 0]])
 
 
 def _align(a, b):
     """Minimal rotation(s) taking unit vector(s) a to b."""
     from scipy.spatial.transform import Rotation
 
-    a, b = _unit(np.atleast_2d(a)), _unit(np.atleast_2d(b))
-    axis = np.cross(a, b)
-    sine = np.linalg.norm(axis, axis=1)
-    angle = np.arctan2(sine, (a * b).sum(1))
-    return Rotation.from_rotvec(axis / np.maximum(sine, 1e-9)[:, None] * angle[:, None])
+    a, b = np.broadcast_arrays(np.atleast_2d(a), np.atleast_2d(b))
+    rotations = [align_vectors(first, second).as_rotvec() for first, second in zip(a, b, strict=True)]
+    return Rotation.from_rotvec(np.asarray(rotations))
 
 
 def soft_limit(values, knee, limit):
     """Leave |x| <= knee alone and squeeze the rest smoothly under ``limit``."""
+    if not np.isfinite([knee, limit]).all() or not 0 <= knee < limit or not np.isfinite(values).all():
+        raise MotionInputError("INVALID_POLICY", "soft limit requires finite values and 0 <= knee < limit")
     magnitude = np.abs(values)
     over = np.maximum(magnitude - knee, 0)
     return np.sign(values) * np.where(
@@ -1222,11 +1221,11 @@ def wrist_summary(hand: HandGeometry, params: WristParams | None = None) -> dict
         "frames_over_flex_limit": int((np.abs(flexion) > params.flex_limit + 5).sum()),
         "frames_over_deviation_limit": int((np.abs(deviation) > params.deviation_limit + 5).sum()),
         "max_bend_deg": round(float(bend.max())),
-        "max_bend_change_per_frame_deg": round(float(np.abs(np.diff(bend)).max()), 1),
+        "max_bend_change_per_frame_deg": round(float(np.abs(np.diff(bend)).max(initial=0)), 1),
     }
 
 
-def _solve_thumb(hand: HandGeometry, closure: np.ndarray, fist: dict[str, list]) -> dict[str, Any]:
+def _solve_thumb(hand: HandGeometry, closure: np.ndarray, fist: dict[str, list], *, timeout_s=2., max_evaluations=1500) -> dict[str, Any]:
     """Relaxed thumb pose (median over open frames) and a thumb wrapped over the index and middle of the fist."""
     from scipy.optimize import minimize
     from scipy.spatial.transform import Rotation
@@ -1262,7 +1261,17 @@ def _solve_thumb(hand: HandGeometry, closure: np.ndarray, fist: dict[str, list])
             Rotation.from_rotvec(hinges[1] * x[4]) * relaxed[2],
         ]
 
+    import time
+    deadline=time.monotonic()+timeout_s
+    evaluations=0
+    class ThumbBudgetExceeded(RuntimeError):
+        pass
+
     def cost(x):
+        nonlocal evaluations
+        evaluations+=1
+        if evaluations>max_evaluations or time.monotonic()>deadline:
+            raise ThumbBudgetExceeded()
         joints = _chain_joints(origin, bones, pose(x))
         value = np.sum((joints[3] - tip_target) ** 2) + 0.5 * np.sum((joints[2] - joint_target) ** 2)
         value += 2.0 * np.sum(x[:3] ** 2) + 5.0 * np.sum(np.maximum(np.abs(x[3:]) - 1.2, 0) ** 2)
@@ -1273,11 +1282,19 @@ def _solve_thumb(hand: HandGeometry, closure: np.ndarray, fist: dict[str, list])
 
     best = None
     random = np.random.default_rng(0)
-    for start in [np.zeros(5)] + [random.normal(0, 0.5, 5) for _ in range(12)]:
-        result = minimize(cost, start, method="Powell", options={"maxiter": 4000, "xtol": 1e-3, "ftol": 1e-4})
-        if best is None or result.fun < best.fun:
+    for start in [np.zeros(5)] + [random.normal(0, 0.5, 5) for _ in range(2)]:
+        try:
+            result = minimize(cost, start, method="Powell", options={"maxiter": 100, "maxfev":max(1,max_evaluations-evaluations), "xtol": 1e-3, "ftol": 1e-4})
+        except ThumbBudgetExceeded:
+            break
+        if result.success and np.isfinite(result.x).all() and np.isfinite(result.fun) and (best is None or result.fun < best.fun):
             best = result
+    if best is None:
+        raise MotionInputError("THUMB_SOLVE_BUDGET_EXHAUSTED","no converged finite thumb pose within the evaluation/deadline budget")
     joints = _chain_joints(origin, bones, pose(best.x))
+    clearance=float(min(_point_segment(point,a,b) for point in (joints[2],joints[3]) for a,b in segments))
+    if clearance<1.3-1e-3:
+        raise MotionInputError("THUMB_COLLISION_RESIDUAL_UNSATISFIED","converged optimizer still violates the declared legacy clearance")
     return {
         "relaxed": relaxed,
         "fist": pose(best.x),
@@ -1361,50 +1378,37 @@ def pose_hand(hand: HandGeometry, params: HandPoseParams | None = None) -> dict[
 
 
 def hand_body_clearance(positions, triangles, dominant, joints, side) -> dict[str, np.ndarray]:
-    """Per frame: gap (cm) between a hand and the torso/hips/thighs, the surface normal there, and hand speed.
-
-    The gap is the distance from the closest hand vertex to its nearest body
-    vertex, negative when that vertex is behind the surface. Speed is the
-    hand's motion relative to the hips (cm/frame).
-    """
-    import scipy.sparse as sp
-    from scipy.spatial import cKDTree
-
-    names = np.array([str(item) for item in joints])[np.asarray(dominant)]
-    # Waist, hips and thighs only: a hand held up by the chest or face is a pose, not a hand at rest.
-    body = np.isin(names, ("Spine", "Spine1"))
-    for prefix in ("Hips", "LeftUpLeg", "RightUpLeg"):
-        body |= np.char.startswith(names, prefix)
-    faces = triangles[body[triangles].all(1)]
-    surface = np.where(body)[0]
-    hand = np.where(np.char.startswith(names, side + "Hand"))[0]
-    hips = np.char.startswith(names, "Hips")
-    first = positions[0].astype(float)
-    volume = np.einsum("ij,ij->i", first[triangles[:, 0]], np.cross(first[triangles[:, 1]], first[triangles[:, 2]]))
-    sign = 1.0 if volume.sum() > 0 else -1.0
-    gather = sp.csr_matrix(
-        (np.ones(3 * len(faces)), (faces.T.reshape(-1), np.tile(np.arange(len(faces)), 3))),
-        shape=(len(names), len(faces)),
-    )
-    frames = len(positions)
-    gap, speed, normal = np.zeros(frames), np.zeros(frames), np.zeros((frames, 3))
-    previous = None
-    for f in range(frames):
-        vertices = positions[f].astype(float)
-        face_normal = sign * np.cross(
-            vertices[faces[:, 1]] - vertices[faces[:, 0]], vertices[faces[:, 2]] - vertices[faces[:, 0]]
-        )
-        normals = _unit(gather @ face_normal)
-        distance, nearest = cKDTree(vertices[surface]).query(vertices[hand])
-        closest = int(np.argmin(distance))
-        at = surface[nearest[closest]]
-        side_of = np.sign((vertices[hand[closest]] - vertices[at]) @ normals[at]) or 1.0
-        gap[f] = distance[closest] * side_of
-        normal[f] = normals[at]
-        relative = vertices[hand].mean(0) - vertices[hips].mean(0)
-        speed[f] = 0.0 if previous is None else np.linalg.norm(relative - previous)
-        previous = relative
-    return {"gap": gap, "normal": normal, "speed": speed}
+    """Legacy-unit hand/torso predictor using actual triangles and validated ownership."""
+    from .motion_geometry import TriangleSurface
+    positions=np.asarray(positions,dtype=float);triangles=np.asarray(triangles);dominant=np.asarray(dominant)
+    if (positions.ndim!=3 or positions.shape[2]!=3 or not np.isfinite(positions).all()
+            or dominant.shape!=(positions.shape[1],) or dominant.dtype.kind not in 'iu'
+            or np.any(dominant<0) or np.any(dominant>=len(joints))):
+        raise MotionInputError('UNKNOWN_SKIN_OWNERSHIP','complete valid skin ownership required')
+    if triangles.ndim!=2 or triangles.shape[1]!=3 or triangles.dtype.kind not in 'iu' or np.any(triangles<0) or np.any(triangles>=positions.shape[1]):
+        raise MotionInputError('INVALID_MESH','invalid triangle topology')
+    names=np.asarray([str(item) for item in joints])[dominant]
+    body=np.isin(names,('Spine','Spine1'))
+    for prefix in ('Hips','LeftUpLeg','RightUpLeg'):
+        body|=np.char.startswith(names,prefix)
+    faces=triangles[body[triangles].all(axis=1)]
+    hand=np.where(np.char.startswith(names,side+'Hand'))[0]
+    hips=np.char.startswith(names,'Hips')
+    if not len(faces) or not len(hand) or not hips.any():
+        raise MotionInputError('COLLISION_GEOMETRY_UNAVAILABLE','missing hand/body/hips surface ownership')
+    gap,speed,normal=np.empty(len(positions)),np.empty(len(positions)),np.empty((len(positions),3))
+    previous=None
+    for f,vertices in enumerate(positions):
+        surface=TriangleSurface(vertices,faces,semantics='volume')
+        values=[surface.closest(point) for point in vertices[hand]]
+        if any(value.signed_distance_m is None for value in values):
+            raise MotionInputError('COLLISION_SIGN_UNVERIFIED','open body subset cannot certify contact side')
+        value=min(values,key=lambda value:value.signed_distance_m)
+        gap[f]=value.signed_distance_m;normal[f]=value.oriented_normal
+        relative=vertices[hand].mean(axis=0)-vertices[hips].mean(axis=0)
+        speed[f]=0 if previous is None else np.linalg.norm(relative-previous)
+        previous=relative
+    return {'gap':gap,'normal':normal,'speed':speed}
 
 
 def resting_spans(
@@ -1415,7 +1419,10 @@ def resting_spans(
     A span found that way is extended while the hand is still calm and within
     ``reach`` cm: captures drift a little further out before the hand leaves.
     """
-    calm = np.convolve(speed, np.ones(7) / 7, mode="same") < still
+    if not len(gap) or np.asarray(gap).shape!=np.asarray(speed).shape or not np.isfinite(gap).all() or not np.isfinite(speed).all():
+        raise MotionInputError("INVALID_POLICY","finite matching nonempty hand gap/speed tracks required")
+    width=min(7,len(speed))
+    calm = np.convolve(speed, np.ones(width) / width, mode="same") < still
     loose = (gap < reach) & calm
     spans = []
     for first, last in _runs((gap < near) & calm, min_frames, gap=3):
@@ -1431,16 +1438,12 @@ def resting_spans(
 
 
 def two_bone_elbow(shoulder, elbow, wrist, upper_length, fore_length):
-    """Elbow position for a moved wrist that keeps both bone lengths and stays closest to the old elbow."""
-    reach = wrist - shoulder
-    distance = np.linalg.norm(reach)
-    distance = float(np.clip(distance, abs(upper_length - fore_length) + 1e-6, upper_length + fore_length - 1e-6))
-    axis = reach / max(np.linalg.norm(reach), 1e-9)
-    along = (upper_length**2 - fore_length**2 + distance**2) / (2 * distance)
-    height = np.sqrt(max(upper_length**2 - along**2, 0.0))
-    centre = shoulder + axis * along
-    out = (elbow - centre) - ((elbow - centre) @ axis) * axis
-    return centre + _unit(out) * height
+    """Legacy elbow-only API; unreachable wrists are rejected instead of silently clamped."""
+    solved = solve_two_bone(shoulder, elbow, wrist, upper_length, fore_length,
+                            pole_axis=np.array([0.0, 0.0, 1.0]))
+    if solved.status == "failed":
+        raise MotionInputError(solved.reason, "requested wrist cannot preserve both bone lengths")
+    return solved.elbow_m
 
 
 def settle_resting_hand(
@@ -1501,6 +1504,20 @@ def pulse_envelope(frames: int, pulses, attack: float = 2.0, release: float = 3.
     frames later, holds, and returns over ``release`` frames ending two frames
     after ``last``: a quick knock and a slightly softer recovery.
     """
+    if isinstance(frames, bool) or not isinstance(frames, int) or frames <= 0:
+        raise MotionInputError("INVALID_POLICY", "positive frame count required")
+    if not np.isfinite([attack, release]).all() or min(attack, release) <= 0:
+        raise MotionInputError("INVALID_POLICY", "attack/release must be finite and positive")
+    pulses = list(pulses)
+    if not pulses:
+        raise MotionInputError("INVALID_POLICY", "at least one pulse is required")
+    previous = -1
+    for first, last in pulses:
+        if (isinstance(first, bool) or isinstance(last, bool) or not isinstance(first, (int, np.integer))
+                or not isinstance(last, (int, np.integer)) or first < 0 or first > last or last >= frames
+                or first <= previous):
+            raise MotionInputError("INVALID_POLICY", "pulse intervals must be ordered, disjoint and within clip")
+        previous = last
     position = np.arange(frames, dtype=float)
     envelope = np.zeros(frames)
 

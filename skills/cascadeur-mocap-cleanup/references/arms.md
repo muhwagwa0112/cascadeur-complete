@@ -42,5 +42,5 @@ A hand that rested on the hip ends up just off the surface: the solve translates
 ## Seeing the result
 
 - `viewport_capture` (`render.viewport_capture`, protected) renders the viewport to a PNG even when Cascadeur is minimised; a window screenshot is black then.
-- Point the camera with `camera_view` (position/target; protected) at the chest from the side of the arm, and set the frame with `timeline_set_frame` first.
+- Point the camera with `viewport_camera_prepare(action="camera_view", position, target)` + `change_commit` at the chest from the side of the arm, and set the frame with `timeline_set_frame_prepare` + `change_commit` first.
 - Each protected call leaves a working tab; close them (`close_working_tabs`) every few renders — a dozen tabs pushed Cascadeur to 7 GB.

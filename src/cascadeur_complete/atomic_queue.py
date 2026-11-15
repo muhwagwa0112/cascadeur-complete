@@ -15,21 +15,25 @@ from .queue_auth import QueueAuthenticationError, load_or_create_secret, session
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-        json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
-        stream.flush()
-        os.fsync(stream.fileno())
-    # Windows refuses to replace a file another process holds open without
-    # delete sharing (e.g. a concurrent reader). Such opens are brief; retry.
-    for attempt in range(50):
-        try:
-            os.replace(temporary, path)
-            return
-        except PermissionError:
-            if attempt == 49:
-                raise
-            time.sleep(0.05)
+    # Unique per write: job threads and the main thread may write the same file.
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Windows refuses to replace a file another process holds open without
+        # delete sharing (e.g. a concurrent reader or writer). Such opens are brief; retry.
+        for attempt in range(50):
+            try:
+                os.replace(temporary, path)
+                return
+            except PermissionError:
+                if attempt == 49:
+                    raise
+                time.sleep(0.05)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -47,14 +51,19 @@ class AtomicQueue:
         self._secret = load_or_create_secret(paths.bridge_key)
         self.session_id = session_id(self._secret)
         self._outstanding: dict[str, str] = {}
+        from .request_ledger import RequestLedger
+        self.ledger = RequestLedger(paths.state, self._secret)
 
     def submit(self, request: BridgeRequest) -> Path:
+        if self.ledger.read_request(request.request_id) is not None:
+            raise QueueAuthenticationError("Request already submitted; observe its original receipt")
         request.session_id = self.session_id
         request.nonce = secrets.token_urlsafe(24)
         request.mac = ""
         request.mac = sign_payload(request.model_dump(mode="json"), self._secret)
         self._outstanding[request.request_id] = request.nonce
         target = self.paths.requests / f"{request.created_at:.6f}-{request.request_id}.json"
+        self.ledger.create(request.model_dump(mode="json"))
         atomic_write_json(target, request.model_dump(mode="json"))
         return target
 
@@ -69,7 +78,8 @@ class AtomicQueue:
             return None
         payload = read_json(path)
         verify_payload(payload, self._secret)
-        expected_nonce = self._outstanding.get(request_id)
+        original = self.ledger.read_request(request_id)
+        expected_nonce = self._outstanding.get(request_id) or (original or {}).get("nonce")
         if payload.get("request_id") != request_id:
             raise QueueAuthenticationError("Response request id does not match")
         if payload.get("session_id") != self.session_id:
@@ -81,6 +91,20 @@ class AtomicQueue:
             path.unlink(missing_ok=True)
             self._outstanding.pop(request_id, None)
         return result
+
+    def recover_stale_claims(self, older_than: float = 300.0) -> list[str]:
+        """Discover unresolved claims; age never authorizes requeue or execution."""
+        unresolved = []
+        cutoff = time.time() - older_than
+        for path in self.paths.requests.glob("*.processing"):
+            if path.stat().st_mtime >= cutoff:
+                continue
+            payload = read_json(path)
+            verify_payload(payload, self._secret)
+            receipt = self.ledger.read_receipt(payload["request_id"])
+            if receipt is None or receipt.phase != "terminal":
+                unresolved.append(payload["request_id"])
+        return unresolved
 
     def authenticate_response(self, request: BridgeRequest, result: ResultEnvelope) -> ResultEnvelope:
         """Test/embedded bridge helper; the Cascadeur runtime signs independently."""
@@ -102,17 +126,3 @@ class AtomicQueue:
 
     def pending_count(self) -> int:
         return sum(1 for path in self.paths.requests.glob("*.json") if path.is_file())
-
-    def recover_stale_claims(self, stale_after: float = 60.0) -> int:
-        recovered = 0
-        now = time.time()
-        for path in self.paths.requests.glob("*.processing"):
-            try:
-                if now - path.stat().st_mtime < stale_after:
-                    continue
-                target = path.with_suffix(".json")
-                os.replace(path, target)
-                recovered += 1
-            except FileNotFoundError:
-                continue
-        return recovered

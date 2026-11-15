@@ -45,36 +45,55 @@ truth; neither tool count nor discovered Python symbols imply support.
 
 ## Mocap cleanup
 
-`motion_cleanup_analyze` samples every frame of the active character and reports
-foot skating (cm/frame), slides, drags and finger spread/spikes.
-`motion_cleanup_prepare` turns one whole-clip solve into a single protected key
-write (commit it with `change_commit`):
+Production preparation requires an explicit stable-ID rig profile, rational FPS,
+length scale, coordinate basis, original motion intent, and a complete source
+binding issued by the loaded bridge. Finger repair uses quaternion rotations;
+contact repair measures the declared support motion and preserves its contact
+schedule. Styling requires explicit styling intent. Missing rotation, geometry,
+controller, key interpolation, or authored dependency access blocks the affected
+pass instead of selecting a guessed rig or reporting predicted quality as actual.
 
-- `foot_contacts`: one quadratic program over all frames finds a whole-body offset
-  and per-foot offsets that stop planted feet sliding while keeping each leg within
-  its original reach; leftover one-foot drags become short steps.
-- `fingers`: soft-limits knuckle spread/twist and removes spikes while keeping curl.
-- `finger_fan`: rotates each index knuckle about the palm normal so a claw-like
-  index–middle splay settles near a natural gap (3° by default).
+The bridge protocol is `3.0`. Scene revision checks, single-use change tokens,
+durable request receipts, and a verified native guard apply to protected changes,
+including evaluation refresh. Install matching host and bridge bytes and restart
+Cascadeur after changing bridge code; an old process cannot certify new code.
 
-- `arm_clearance`: measures on the skinned mesh where each arm is inside the rest of
-  the body (every frame) and solves elbow and wrist offsets that lift it out while
-  keeping bone lengths; `mesh_sample` exposes the skinned mesh to the host.
+## Finite recipes
 
-- `wrist_soften`, `hand_pose`, `hand_rest`: styling passes for clips where the capture
-  misread the hands (gloves, mittens, props) — soft wrist limits, coordinated finger
-  poses between a relaxed hand and a loose fist (or one fixed shape), and hands that
-  hover near the hips brought into contact; `wrist_accent` authors beat-timed wrist
-  flicks (a "knock") that the capture could not see.
+| Tool | Behavior |
+|---|---|
+| `recipe_plan(spec)` | Read-only preflight and immutable plan with exact scope, budgets, native blockers, and host/loaded-bridge fingerprints. |
+| `recipe_authorize(plan_id, plan_digest, scope_digest, expires_at)` | Issue an expiring grant for that displayed plan. Blocked plans cannot receive a grant. |
+| `recipe_start(plan_id, authorization_id, idempotency_key)` | Allocate one persisted run per grant. Repeating the same key returns the original run. |
+| `recipe_status(run_id, after_seq)` | Read persisted state without advancing native work. |
+| `recipe_cancel(run_id)` | Persist cancellation; an already dispatched native request still needs its terminal receipt. |
+| `recipe_resume(run_id, authorization_id)` | Reconcile the original request and checkpoint. It never replays an unknown or completed mutation. |
+| `recipe_artifacts(run_id)` | List content-hashed captures, receipts, quality, and checkpoint artifacts. |
 
-On a 986-frame clip this took mean foot skating from 0.98 to 0.34 cm/frame with no
-remaining slides or drags. The [`cascadeur-mocap-cleanup`](skills/cascadeur-mocap-cleanup/SKILL.md)
-skill documents the full pipeline (key reduction, splines, AutoPhysics, fingers,
-feet, arms, styling against a reference video) and the pitfalls behind it; its
-`scripts/mesh_preview.py` renders contact sheets from a `mesh_sample` file.
+Recipes accept a strict declarative schema, not arbitrary operations or Python.
+Required acceptance metrics come from the rig, original intent, contacts and
+declared geometry as well as the caller's policy; a policy that omits a mandatory
+metric is blocked. Missing observations cannot become a pass through a narrower
+metric list.
+Native execution outcome, measured quality, checkpoint state, and publication are
+separate. `ok=true` requires a completed run with passing actual quality and, when
+requested, a validated and published export. An unknown outcome remains blocked;
+cancellation preserves both the intent and any already observed native result.
 
-The stage order, acceptance gates and report template are standardised in
-[docs/MOCAP_CLEANUP_WORKFLOW.md](docs/MOCAP_CLEANUP_WORKFLOW.md).
+**Current runtime limit:** this checkout does not install a verified no-yield
+native guard, authored dependency/identity reader, checkpoint adapter, or native
+export settings/completion adapter for the pinned Cascadeur SDK. Preflight reports
+these missing capabilities and blocks live recipes. Host math and durable
+orchestration do not establish live Cascadeur or FBX delivery support. Export
+utilities independently stage, seal, inspect, import-validate, and publish bytes;
+native export remains gated until the matching adapters are verified.
+
+See [the r3 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
+the limits of checks performed, and the next implementation steps.
+
+See [the cleanup workflow](docs/MOCAP_CLEANUP_WORKFLOW.md) for intent and evidence
+requirements. Its earlier production example is historical context, not evidence
+that this guarded runtime supports every listed stage.
 
 ## Install an official release
 

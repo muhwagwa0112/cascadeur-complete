@@ -17,13 +17,15 @@ from pathlib import Path
 import csc
 
 from . import handlers as _handlers  # noqa: F401
+from . import guarded_runtime as guards
 from .handler_registry import declared_postconditions, transact
 from .handler_registry import dispatch as dispatch_registered
 
-PROTOCOL_VERSION = "2.0"
+PROTOCOL_VERSION = "3.0"
 READ_ONLY_OPERATIONS = {
     "system.status",
     "system.logs",
+    "system.view_mode_get",
     "system.tools",
     "system.introspect",
     "scene.summary",
@@ -101,9 +103,15 @@ class BridgeAuthenticationError(PermissionError):
 
 
 def runtime_root():
+    """The host's RuntimePaths rule: CASCADEUR_MCP_ROOT, else the real user Local AppData."""
+    configured = os.environ.get("CASCADEUR_MCP_ROOT")
+    if configured:
+        return Path(configured).resolve()
     profile = os.environ.get("USERPROFILE")
-    local = Path(profile) / "AppData" / "Local" if profile else Path(os.environ["LOCALAPPDATA"])
-    return local / "CascadeurMCP" / "cascadeur-complete"
+    local = Path(profile) / "AppData" / "Local" if profile else None
+    if local is None or not local.is_dir():
+        local = Path(os.environ["LOCALAPPDATA"])
+    return (local / "CascadeurMCP" / "cascadeur-complete").resolve()
 
 
 def ensure_dirs():
@@ -182,11 +190,16 @@ def _claim_request_nonce(root, request):
 def _operation_is_mutating(operation):
     name = str(operation.get("name", ""))
     args = operation.get("arguments") or {}
+    if name == "animation.transform_get" and args.get("refresh", False):
+        return True
+    if name in ("system.view_mode", "system.view_mode_get"):
+        # The shared view-mode handler applies any supplied mode, whatever the action says.
+        if args.get("mode") is not None:
+            return True
+        return name == "system.view_mode" and str(args.get("action", "get")) not in {"get", "list"}
     if name in READ_ONLY_OPERATIONS:
         return False
-    if name == "system.view_mode":
-        return str(args.get("action", "get")) not in {"get", "list"}
-    return name not in {"safety.snapshot", "safety.rollback_internal"}
+    return name not in {"system.capture_source", "system.validate_source"}
 
 
 def _confirmation_signature(nonce, record, secret):
@@ -208,7 +221,12 @@ def _confirmation_signature(nonce, record, secret):
         separators=(",", ":"),
         allow_nan=False,
     )
-    message = ("cascadeur-complete-change-v2:" + nonce + ":").encode() + canonical.encode("utf-8")
+    if record.get("schema_version") == 3:
+        for name in ("mutation_request_id", "source_binding", "scene_binding", "execution_context",
+                     "snapshot_manifest_id", "adapter_fingerprint"):
+            approval[name] = record.get(name)
+        canonical = json.dumps(approval, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    message = ("cascadeur-complete-change-v" + str(record.get("schema_version")) + ":" + nonce + ":").encode() + canonical.encode("utf-8")
     return hmac.new(secret, message, hashlib.sha256).hexdigest()
 
 
@@ -237,16 +255,24 @@ def _verify_confirmation(root, request, before):
         raise BridgeAuthenticationError("Confirmation token authentication failed")
     if float(record.get("expires_at", 0)) < time.time():
         raise BridgeAuthenticationError("Confirmation token expired")
+    if record.get("schema_version") != 3:
+        raise BridgeAuthenticationError("PROTOCOL_MISMATCH: legacy token requires reprepare")
+    if record.get("mutation_request_id") != request.get("request_id"):
+        raise BridgeAuthenticationError("Confirmation token request binding differs")
+    if record.get("source_binding") != request.get("source_binding"):
+        raise BridgeAuthenticationError("Confirmation token source binding differs")
+    if record.get("adapter_fingerprint") != guards.LOADED_FINGERPRINT:
+        raise BridgeAuthenticationError("Confirmation token loaded adapter differs")
+    if record.get("execution_context") != request.get("execution_context"):
+        raise BridgeAuthenticationError("Confirmation token execution context differs")
     if record.get("feature_id") != request.get("feature_id"):
         raise BridgeAuthenticationError("Confirmation token feature binding differs")
     approved_name = str((record.get("operation") or {}).get("name", ""))
     # Playback only moves the playhead (part of the revision): identity binding only.
     playhead_only = record.get("scene_revision") is None and approved_name == "timeline.playback"
-    if record.get("scene_id") != before.get("scene_id") or (
-        not playhead_only and record.get("scene_revision") != before.get("revision")
-    ):
+    if record.get("scene_id") != before.get("scene_id") or record.get("scene_binding") != (request.get("source_binding") or {}).get("binding"):
         raise BridgeAuthenticationError("Confirmation token scene binding differs")
-    if record.get("selection_fingerprint") != before.get("selection_fingerprint"):
+    if record.get("selection_fingerprint") is not None and record.get("selection_fingerprint") != before.get("selection_fingerprint"):
         raise BridgeAuthenticationError("Confirmation token selection binding differs")
     approved = record.get("operation") or {}
     requested = operations[0] if len(operations) == 1 else None
@@ -284,9 +310,9 @@ def _finite(value):
 
 def atomic_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name("." + path.name + ".tmp")
+    temporary = path.with_name("." + path.name + "." + uuid.uuid4().hex + ".tmp")
     with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-        json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
+        json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
@@ -780,7 +806,7 @@ def scene_state(scene):
         sort_keys=True,
         separators=(",", ":"),
     )
-    scene_id = hashlib.sha256((path or name or "untitled").encode("utf-8")).hexdigest()[:24]
+    scene_id = guards.scene_instance(view_scene)["scene_instance_id"]
     revision = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     return {
         "scene_id": scene_id,
@@ -962,6 +988,10 @@ def _file_loader(tool_name, scene, method, path):
 def _run_operation(scene, operation, request):
     name = operation.get("name")
     args = operation.get("arguments") or {}
+    if name == "system.capture_source":
+        return guards.capture_source(scene, args["scope"], args["inputs_digest"], args.get("sample_digest")), []
+    if name == "system.validate_source":
+        return guards.assert_source(scene, args["source_binding"], operation_name=args.get("operation_name"), arguments=args.get("operation_arguments")), []
     handled, registered_result = dispatch_registered(
         name,
         scene,
@@ -979,6 +1009,9 @@ def _run_operation(scene, operation, request):
             "object_id": _object_id,
             "save_current_scene": _save_current_scene,
             "casc_tool_state": _casc_tool_state,
+            # The name this handler was dispatched for; a batch may mix operations.
+            "operation_name": name,
+            "assert_source_binding": lambda: guards.assert_source(_scene_view() or scene, request.get("source_binding"), operation_name=name),
         },
     )
     if handled:
@@ -988,6 +1021,9 @@ def _run_operation(scene, operation, request):
         if name == "system.status":
             state["tools"] = tools_catalog()
             state["protocol_version"] = PROTOCOL_VERSION
+            state["runtime_epoch"] = guards.RUNTIME_EPOCH
+            state["adapter_fingerprint"] = guards.LOADED_FINGERPRINT
+            state["guarded_capabilities"] = guards.capabilities()
             state["bridge_python"] = tuple(__import__("sys").version_info[:3])
         return state, []
     if name == "scene.objects":
@@ -1357,7 +1393,156 @@ def _run_operation(scene, operation, request):
     raise KeyError("Unknown operation: " + str(name))
 
 
+def _request_effect(request):
+    effects = []
+    operations = request.get("operations", [])
+    if not isinstance(operations, list) or not operations:
+        return "mixed"
+    for op in operations:
+        if not isinstance(op, dict) or not isinstance(op.get("name"), str) or not isinstance(op.get("arguments") or {}, dict):
+            return "mixed"
+        name, args = op["name"], op.get("arguments") or {}
+        if name.startswith("io.export_") or name in ("scene.save", "safety.checkpoint"):
+            effects.append("file")
+        elif name.startswith("io.import_") or name.startswith("safety."):
+            effects.append("mixed")
+        elif name == "animation.interpolation_refresh" or (name == "animation.transform_get" and args.get("refresh", False)):
+            effects.append("evaluation")
+        elif _operation_is_mutating(op):
+            effects.append("scene")
+    return "mixed" if len(set(effects)) > 1 else (effects[0] if effects else "none")
+
+
+def _verified_rollback_adapter():
+    """Only code-owned installed-build evidence can enable the rollback route."""
+    adapter = guards._ADAPTERS.get("safety.rollback")
+    if adapter is None:
+        return None
+    proof = adapter.verification
+    completion = proof.get("rollback_completion_observed")
+    observed_build = getattr(adapter, "observed_build", None)
+    if not isinstance(completion, dict) or not callable(observed_build):
+        return None
+    build = observed_build()
+    if (not isinstance(build, str) or not build
+            or proof.get("installed_build") != build
+            or proof.get("runtime_fingerprint") != guards.LOADED_FINGERPRINT
+            or proof.get("dispatch_semantics") != "synchronous_no_yield"
+            or completion.get("installed_build") != build
+            or completion.get("runtime_fingerprint") != guards.LOADED_FINGERPRINT
+            or completion.get("dispatch_semantics") != "synchronous_no_yield"
+            or not isinstance(completion.get("evidence_sha256"), str)
+            or not re.fullmatch(r"[a-f0-9]{64}", completion["evidence_sha256"])):
+        return None
+    return adapter
+
+
 def execute_request(scene, request):
+    """Guard the original request and durably record its observed outcome."""
+    scene = _scene_view() or scene
+    started = time.monotonic()
+    guards.begin_request(request)
+    effect = _request_effect(request)
+    source = request.get("source_binding")
+    state = scene_state(scene)
+    dispatched = False
+    try:
+        if request.get("protocol_version") not in (PROTOCOL_VERSION, "2.0") or (request.get("protocol_version") == "2.0" and effect != "none"):
+            raise ValueError("PROTOCOL_MISMATCH")
+        if request.get("runtime_epoch") and request.get("runtime_epoch") != guards.RUNTIME_EPOCH:
+            raise ValueError("PROTOCOL_MISMATCH: runtime restarted")
+        if source is not None and effect == "none":
+            guards.assert_source(scene, source)
+        if effect != "none":
+            if request.get("runtime_epoch") != guards.RUNTIME_EPOCH or request.get("adapter_fingerprint") != guards.LOADED_FINGERPRINT:
+                raise ValueError("PROTOCOL_MISMATCH: runtime epoch or loaded adapter differs")
+            for op in request["operations"]:
+                guards.assert_source(scene, source, operation_name=op["name"], arguments=op.get("arguments") or {})
+                if (op["name"] in YIELDING_OPERATIONS
+                        and not (op["name"] == "safety.rollback" and _verified_rollback_adapter() is not None)):
+                    raise ValueError("RIG_ADAPTER_UNVERIFIED: native completion yields")
+            guards.set_write_guard(lambda: guards.assert_source(_scene_view() or scene, source))
+        _verify_confirmation(runtime_root(), request, state)
+        if (request.get("safety_context") or {}).get("snapshot_required"):
+            raise ValueError("Unbound in-request snapshot is forbidden")
+        guards.receipt_event(runtime_root(), request, "dispatch_started", effect_class=effect, dispatched=True)
+        dispatched = True
+        result = _execute_request_impl(scene, request)
+    except Exception as exc:
+        code = "UNSUPPORTED_VERSION" if "PROTOCOL_MISMATCH" in str(exc) else "INVALID_REQUEST"
+        result = _error(request.get("feature_id", "request"), code, str(exc), started, state)
+        result["result"] = {"error_details": {"code": str(exc).split(":", 1)[0]}}
+    post_source = None
+    if dispatched and effect != "none" and source is not None:
+        try:
+            post_source = guards.capture_source(_scene_view() or scene, source["scope"], source["inputs_digest"])
+            if isinstance(result.get("result"), dict):
+                result["result"]["post_source_binding"] = post_source
+        except Exception as exc:
+            result["ok"] = False
+            result["error_code"] = "POSTCONDITION_FAILED"
+            result["error_message"] = "Applied state could not be captured: " + str(exc)
+    phase, failure = guards.write_observation()
+    outcome = ("succeeded" if result["ok"] else "failed_after_dispatch") if dispatched else "rejected_pre_dispatch"
+    result.update({"receipt_id": request["request_id"], "phase": "terminal", "outcome": outcome,
+                   "dispatched": dispatched, "execution": outcome, "write_phase": phase,
+                   "failure_kind": failure, "recovery_eligible": False,
+                   "quality": "unverified", "export": "not_requested",
+                   "scene_before": source.get("binding") if source else None,
+                   "scene_after": post_source["binding"] if post_source else None})
+    # Eligibility is code-owned and source-bound. A failure flag or snapshot on
+    # the wire cannot create an adapter, an attestation or a recovery source.
+    if (outcome == "failed_after_dispatch" and dispatched and effect in ("scene", "mixed")
+            and phase in ("started", "completed") and failure != "guard_rejected_before_first_write"
+            and post_source is not None and len(request.get("operations", ())) == 1
+            and request["operations"][0]["name"] not in {"safety.rollback", "safety.rollback_internal"}):
+        try:
+            rollback_adapter = _verified_rollback_adapter()
+            original_adapter = guards._ADAPTERS.get(request["operations"][0]["name"])
+            proof = original_adapter.verification if original_adapter is not None else {}
+            attestation = proof.get("recovery_after_partial_write_observed") or {}
+            prepare_recovery = getattr(original_adapter, "prepare_recovery_binding", None)
+            build = rollback_adapter.observed_build() if rollback_adapter is not None else None
+            if (rollback_adapter is not None and callable(prepare_recovery)
+                    and proof.get("runtime_fingerprint") == guards.LOADED_FINGERPRINT
+                    and proof.get("installed_build") == build
+                    and attestation.get("runtime_fingerprint") == guards.LOADED_FINGERPRINT
+                    and attestation.get("installed_build") == build
+                    and effect in attestation.get("known_effect_classes", ())
+                    and isinstance(attestation.get("evidence_sha256"), str)
+                    and re.fullmatch(r"[a-f0-9]{64}", attestation["evidence_sha256"])):
+                current_scene = _scene_view() or scene
+                recovery = prepare_recovery(current_scene, request, result)
+                scope = recovery["scope"]
+                args = scope["operation_arguments"]
+                manifest = source["scope"]["snapshot_manifest"]
+                if (scope.get("operation_name") != "safety.rollback"
+                        or scope.get("snapshot_manifest") != manifest
+                        or scope.get("recovery") != {"failed_request_id": request["request_id"],
+                            "post_source_digest": guards.digest(post_source),
+                            "snapshot_manifest_digest": guards.digest(manifest)}
+                        or args.get("failed_request_id") != request["request_id"]
+                        or args.get("post_source_digest") != guards.digest(post_source)
+                        or args.get("snapshot_manifest_digest") != guards.digest(manifest)
+                        or args.get("path") != manifest["path"]
+                        or args.get("snapshot_id") != manifest["snapshot_id"]
+                        or recovery["binding"]["document_lineage_id"] != post_source["binding"]["document_lineage_id"]):
+                    raise ValueError("RECOVERY_BINDING_UNAVAILABLE")
+                guards.assert_source(current_scene, post_source)
+                guards.assert_source(current_scene, recovery, operation_name="safety.rollback", arguments=args)
+                result["result"]["recovery_source_binding"] = recovery
+                result["recovery_eligible"] = True
+        except Exception as exc:
+            result.setdefault("warnings", []).append("Recovery is unavailable: " + str(exc)[:500])
+    result["scene_revision_before"] = state.get("revision")
+    # Terminal durability precedes response publication. Failure propagates and
+    # leaves the claim unresolved; a later host must never redispatch it.
+    guards.receipt_event(runtime_root(), request, "terminal", outcome=outcome, result=result,
+                         effect_class=effect, dispatched=dispatched)
+    return result
+
+
+def _execute_request_impl(scene, request):
     started = time.monotonic()
     feature_id = request.get("feature_id") or (request.get("operations") or [{}])[0].get("name", "batch")
     # Cascadeur may retain a Python command object created for a scene tab that
@@ -1379,11 +1564,11 @@ def execute_request(scene, request):
     safety = request.get("safety_context") or {}
     snapshot_id = None
     if safety.get("snapshot_required"):
-        snapshot_id = request["request_id"]
-        try:
-            _save_snapshot(scene, snapshot_id)
-        except Exception as exc:
-            return _error(feature_id, "POSTCONDITION_FAILED", str(exc), started, before)
+        # An in-request snapshot would switch the active document to a working copy
+        # the host never learns about. The host takes snapshots with safety.snapshot.
+        return _error(
+            feature_id, "INVALID_REQUEST", "snapshot_required is not supported; use safety.snapshot", started, before
+        )
     results = []
     warnings = []
     proven = []
@@ -1576,6 +1761,24 @@ def _mark_draining(until):
         atomic_json(runtime_root() / "state" / "drain_active.json", {"until": float(until), "pid": os.getpid()})
 
 
+def _request_shape_error(request):
+    """Reject a signed request whose fields the drain would otherwise trip over."""
+    expires_at = request.get("expires_at", 0)
+    if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+        return "Request expires_at must be a number"
+    if not isinstance(request.get("safety_context") or {}, dict):
+        return "Request safety_context must be an object"
+    operations = request.get("operations") or []
+    if not isinstance(operations, list):
+        return "Request operations must be a list"
+    for item in operations:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            return "Each request operation must be an object with a name"
+        if not isinstance(item.get("arguments") or {}, dict):
+            return "Request operation arguments must be an object"
+    return None
+
+
 def _drain_once(scene, *, matching_scene_only=False):
     # Event and command callbacks can carry a stale per-tab scene argument.
     # Queue routing must follow the document that is actually active now.
@@ -1611,31 +1814,47 @@ def _drain_once(scene, *, matching_scene_only=False):
         except OSError:
             continue
         try:
-            request = json.loads(claimed.read_text(encoding="utf-8"))
+            try:
+                request = json.loads(claimed.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                request = None
+            if not isinstance(request, dict):
+                # Unreadable or not a request object: there is no request id or
+                # nonce to answer, so drop the claim and keep draining.
+                continue
             request_id = str(request.get("request_id", ""))
             authenticated = True
+            terminal = None
             try:
                 _verify_message(request, bridge_secret)
-                _claim_request_nonce(root, request)
-            except BridgeAuthenticationError as exc:
+                terminal = guards.previous_terminal(root, request)
+                if terminal is None:
+                    _claim_request_nonce(root, request)
+                    guards.begin_request(request)
+                    guards.receipt_event(root, request, "claimed", effect_class=_request_effect(request), dispatched=False)
+            except (BridgeAuthenticationError, ValueError) as exc:
                 authenticated = False
-                result = _error(
-                    "authentication",
-                    "INVALID_REQUEST",
-                    str(exc),
-                    time.monotonic(),
-                    scene_state(scene),
-                )
-            if authenticated and request.get("protocol_version") != PROTOCOL_VERSION:
-                result = _error(
-                    "protocol", "UNSUPPORTED_VERSION", "Bridge protocol mismatch", time.monotonic(), scene_state(scene)
-                )
-            elif authenticated and float(request.get("expires_at", 0)) < time.time():
-                result = _error(
-                    "timeout", "TIMEOUT", "Request TTL expired before execution", time.monotonic(), scene_state(scene)
-                )
+                result = _error("authentication", "INVALID_REQUEST", str(exc), time.monotonic(), scene_state(scene))
+            shape_error = _request_shape_error(request) if authenticated else None
+            if terminal is not None:
+                result = terminal
+            elif authenticated and (request.get("protocol_version") not in (PROTOCOL_VERSION, "2.0") or (request.get("protocol_version") == "2.0" and _request_effect(request) != "none")):
+                result = _error("protocol", "UNSUPPORTED_VERSION", "Bridge protocol mismatch", time.monotonic(), scene_state(scene))
+                result["result"] = {"error_details": {"code": "PROTOCOL_MISMATCH"}}
+            elif shape_error:
+                result = _error("request", "INVALID_REQUEST", shape_error, time.monotonic(), scene_state(scene))
+            elif authenticated and (float(request.get("expires_at", 0)) < time.time() or guards.canceled(root, request)):
+                result = _error("timeout", "TIMEOUT", "Expired or canceled before dispatch", time.monotonic(), scene_state(scene))
+                result.update({"outcome": "canceled_pre_dispatch", "execution": "canceled_pre_dispatch"})
             elif authenticated:
                 result = execute_request(_scene_view() or scene, request)
+            if authenticated and terminal is None and result.get("phase") != "terminal":
+                outcome = result.get("outcome", "rejected_pre_dispatch")
+                result.update({"receipt_id": request_id, "phase": "terminal", "outcome": outcome,
+                               "dispatched": False, "execution": outcome, "write_phase": "not_started",
+                               "recovery_eligible": False})
+                guards.receipt_event(root, request, "terminal", outcome=outcome, result=result,
+                                     effect_class=_request_effect(request), dispatched=False)
             try:
                 valid_request_id = str(uuid.UUID(request_id)) == request_id.casefold()
             except ValueError:
@@ -1656,8 +1875,10 @@ def _drain_once(scene, *, matching_scene_only=False):
                 result["mac"] = _sign_message(result, bridge_secret)
                 atomic_json(responses / (request_id + ".json"), result)
             processed += 1
-            if authenticated and any(
-                str(item.get("name")) in YIELDING_OPERATIONS for item in request.get("operations") or []
+            if (
+                authenticated
+                and not shape_error
+                and any(str(item.get("name")) in YIELDING_OPERATIONS for item in request.get("operations") or [])
             ):
                 must_yield = True
             # A request may change the active scene (open/new/rollback), so the

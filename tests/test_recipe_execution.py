@@ -1,0 +1,232 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+
+import pytest
+from pydantic import ValidationError
+
+from cascadeur_complete.paths import RuntimePaths
+from cascadeur_complete.recipe_models import RecipeSpec, digest
+from cascadeur_complete.recipe_planning import build_plan
+from cascadeur_complete.recipe_runner import RecipeRunner
+from cascadeur_complete.recipe_store import RecipeConflict, RecipeRunStore
+
+
+def spec_dict():
+    profile = {"profile_id": "test", "character_id": "hero", "role_ids": {"root": "root"},
+               "writable_ids": ["root"]}
+    return {"input": {"kind": "active_scene", "binding": {
+        "runtime_epoch": "epoch", "scene_instance_id": "scene", "document_lineage_id": "lineage",
+        "scope_digest": "scope", "content_revision": "revision"}},
+        "character": {"character_id": "hero", "root_id": "root", "object_ids": ["root"],
+                      "role_ids": {"root": "root"}, "rig_profile_digest": digest(profile), "rig_profile": profile},
+        "clip": {"first_frame": 5, "last_frame": 7, "fps_num": 24, "fps_den": 1,
+                 "metres_per_scene_unit": .01, "scene_to_solver_basis": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+        "rig": {"controller_adapter_id": "explicit-test-profile"},
+        "intent": {"editable_frames": [5, 7]},
+        "quality": {"profile_id": "test", "profile_revision": "1", "required_metrics": ["duration_error_s"],
+                    "limits_si": {"duration_error_s": 0}}}
+
+
+def allocated(tmp_path):
+    paths = RuntimePaths.discover(tmp_path)
+    paths.ensure()
+    store = RecipeRunStore(paths)
+    plan = store.save_plan(build_plan(RecipeSpec.model_validate(spec_dict()), []))
+    grant = store.authorize(plan, time.time() + 300)
+    run = store.create(plan, grant, "same-start")
+    return paths, store, plan, grant, run
+
+
+def test_strict_recipe_rejects_unknown_boolean_frames_and_nonfinite():
+    for update in ({"arbitrary_operation": "scene.delete"},):
+        with pytest.raises(ValidationError):
+            RecipeSpec.model_validate({**spec_dict(), **update})
+    value = spec_dict()
+    value["clip"]["first_frame"] = True
+    with pytest.raises(ValidationError):
+        RecipeSpec.model_validate(value)
+    value = spec_dict()
+    value["intent"]["correction_envelope"] = {"position_m": float("nan")}
+    with pytest.raises(ValidationError):
+        RecipeSpec.model_validate(value)
+
+
+def test_start_allocation_is_single_use_and_idempotent_across_stores(tmp_path):
+    paths, store, plan, grant, run = allocated(tmp_path)
+    other = RecipeRunStore(paths)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda item: item.create(plan, grant, "same-start").run_id, [store, other]))
+    assert results == [run.run_id, run.run_id]
+    with pytest.raises(RecipeConflict, match="already assigned"):
+        other.create(plan, grant, "different-start")
+
+
+def test_cas_retains_cancel_and_never_accepts_stale_writer(tmp_path):
+    _, store, _, _, run = allocated(tmp_path)
+    canceled = store.record_cancel_intent(run.run_id)
+    with pytest.raises(RecipeConflict, match="conflict"):
+        store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+                                 transition={"state": "running"})
+    updated = store.compare_and_update(run.run_id, expected_seq=canceled.seq, lease_epoch=canceled.lease_epoch,
+                                      transition={"cancel_requested": False})
+    assert updated.cancel_requested
+
+
+def test_signed_plan_and_artifact_tampering_is_rejected(tmp_path):
+    _, store, plan, _, run = allocated(tmp_path)
+    artifact = store.artifact(run.run_id, "quality", {"metric": 1})
+    from pathlib import Path
+    Path(artifact.path).write_text('{"metric":0}', encoding="utf-8")
+    with pytest.raises(RecipeConflict, match="integrity"):
+        store.read_artifact(run.run_id, artifact)
+    path = store.root / "plans" / f"{plan.plan_id}.json"
+    path.write_text(path.read_text().replace('"fps_num":24', '"fps_num":48'), encoding="utf-8")
+    with pytest.raises(RecipeConflict, match="authentication"):
+        store.read_plan(plan.plan_id)
+
+
+def test_fresh_grant_continues_same_run_without_extending_wall_budget(tmp_path):
+    _, store, plan, _, run = allocated(tmp_path)
+    fresh = store.authorize(plan, time.time() + 600)
+    renewed = store.renew_authorization(run.run_id, fresh)
+    assert renewed.run_id == run.run_id and renewed.deadline == run.deadline
+    assert renewed.authorization_id == fresh.authorization_id
+    assert store.create(plan, fresh, run.idempotency_key).run_id == run.run_id
+    with pytest.raises(RecipeConflict, match="already assigned"):
+        store.create(plan, fresh, "another-run")
+
+
+def test_effect_measurement_uses_explicit_quaternion_not_euler_guess(tmp_path):
+    import math
+    paths, store, plan, _, run = allocated(tmp_path)
+    binding = {"binding": plan.spec.input.binding.model_dump(mode="json"), "scope": {},
+               "sample_digest": "sample", "inputs_digest": "inputs", "adapter_fingerprint": "adapter", "complete": True}
+    batch = {"context": {"frames": [5, 6, 7], "time_s": [0, 1 / 24, 2 / 24], "time_source": "fps",
+                         "fps_num": 24, "fps_den": 1, "metres_per_scene_unit": .01,
+                         "scene_to_solver_basis": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "metadata_provenance": {"test": "explicit"}},
+             "object_ids": ["root"], "space": "local", "position_m": {"root": [[0, 0, 0]] * 3},
+             "rotation_wxyz": {"root": [[1, 0, 0, 0]] * 3}, "channel_valid": {"root": [[True, True]] * 3},
+             "source_binding": binding}
+    capture = {"local": batch, "global": {**batch, "space": "global"}}
+    ref = store.artifact(run.run_id, "baseline", capture)
+    record = next(item for item in run.steps if item.step_id.endswith("-baseline_capture"))
+    record = record.model_copy(update={"state": "succeeded", "result": capture, "artifact_refs": (ref,)})
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+                                   transition={"state": "running", "steps": [record.model_dump(mode="json") if item.step_id == record.step_id
+                                                         else item.model_dump(mode="json") for item in run.steps]})
+    runner = RecipeRunner(SimpleNamespace(paths=paths))
+    effect = runner._measured_effect(run, plan, {"space": "local", "writes": [{"id": "root", "frame": 6,
+        "rotation_euler_xyz_radians": [123, 456, 789],
+        "expected_quaternion_wxyz": [math.sqrt(.5), math.sqrt(.5), 0, 0]}]})
+    assert effect["rotation_rad"] == pytest.approx(math.pi / 2)
+
+
+def test_unknown_receipt_never_replays_or_reads_scene(tmp_path):
+    paths, store, plan, _, run = allocated(tmp_path)
+    record = run.steps[0].model_copy(update={"state": "dispatching", "request_id": "original",
+                                           "attempt_id": "attempt", "execution_outcome": "outcome_unknown"})
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+                                  transition={"state": "running", "steps": [record.model_dump(mode="json"),
+                                               *[item.model_dump(mode="json") for item in run.steps[1:]]]})
+    calls = []
+    service = SimpleNamespace(paths=paths, client=SimpleNamespace(request_status=lambda request_id: (
+        calls.append(request_id) or {"phase": "dispatch_started", "outcome": "outcome_unknown"})))
+    runner = RecipeRunner(service)
+    first = runner.reconcile(run.run_id)
+    second = runner.reconcile(run.run_id)
+    assert first.state == second.state == "blocked"
+    assert first.blocked_reason == second.blocked_reason == "outcome_unknown"
+    assert calls == ["original", "original"]
+    assert runner.status(run.run_id)["workflow"] == "outcome_unknown"
+    assert runner.status(run.run_id)["ok"] is False
+
+
+@pytest.mark.parametrize("host_result, reason", [({"ok": False, "status": "failed"}, "HOST_POSTCONDITION_FAILED"),
+                                                (None, "HOST_POSTCONDITION_RESULT_MISSING")])
+def test_native_success_preserves_host_failure_or_missing_result(tmp_path, host_result, reason):
+    paths, store, _, _, run = allocated(tmp_path)
+    record = run.steps[0].model_copy(update={"state": "dispatching", "request_id": "original",
+                                            "attempt_id": "attempt", "execution_outcome": "outcome_unknown",
+                                            "result": None if host_result is None else {"host_commit_result": host_result}})
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+                                   transition={"state": "running", "steps": [record.model_dump(mode="json"),
+                                                *[item.model_dump(mode="json") for item in run.steps[1:]]]})
+    receipt = {"phase": "terminal", "outcome": "succeeded", "request_id": "original", "run_id": run.run_id,
+               "step_id": record.step_id, "attempt_id": "attempt", "lease_epoch": run.lease_epoch}
+    runner = RecipeRunner(SimpleNamespace(paths=paths, client=SimpleNamespace(request_status=lambda _: receipt)))
+    updated = runner.reconcile(run.run_id)
+    assert updated.state == "blocked" and updated.blocked_reason == reason
+    assert updated.steps[0].execution_outcome == "succeeded"
+    assert runner.status(run.run_id)["ok"] is False
+
+
+def test_interrupted_checkpoint_is_not_dispatched_again(tmp_path):
+    paths, store, _, _, run = allocated(tmp_path)
+    steps = [item.model_copy(update={"state": "checkpointing" if item.step_id.endswith("-checkpoint") else "skipped"})
+             for item in run.steps]
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+                                   transition={"state": "running", "steps": [item.model_dump(mode="json") for item in steps]})
+    calls = []
+    runner = RecipeRunner(SimpleNamespace(paths=paths, recipe_checkpoint=lambda *args: calls.append(args)))
+    result = runner.advance_once(run.run_id)
+    assert result.state == "blocked" and result.blocked_reason == "CHECKPOINT_MISSING"
+    assert calls == []
+
+
+def test_mandatory_quality_closure_blocks_duration_only_recipe(tmp_path):
+    spec = RecipeSpec.model_validate(spec_dict())
+    runner = RecipeRunner(SimpleNamespace(paths=RuntimePaths.discover(tmp_path),
+                                         recipe_preflight=lambda *args: [], recipe_checkpoint=lambda *args: None))
+    reasons = runner._preflight(spec, ())
+    policy_reason = next(item for item in reasons if item["code"] == "QUALITY_POLICY_INCOMPLETE")
+    assert {"root_preservation_m", "root_preservation_rad", "position_correction_m"} <= set(policy_reason["required_metrics"])
+    assert runner.plan(spec)["accepted"] is False
+
+
+def test_mandatory_quality_closure_requires_mesh_observations_and_rechecks_evaluation(tmp_path):
+    from cascadeur_complete.motion_quality import evaluate_metrics, measured_metric
+    value = spec_dict()
+    value["character"]["required_mesh_ids"] = ["body-mesh"]
+    spec = RecipeSpec.model_validate(value)
+    runner = RecipeRunner(SimpleNamespace(paths=RuntimePaths.discover(tmp_path),
+                                         recipe_preflight=lambda *args: [], recipe_checkpoint=lambda *args: None))
+    reasons = runner._preflight(spec, ())
+    policy_reason = next(item for item in reasons if item["code"] == "QUALITY_POLICY_INCOMPLETE")
+    assert {"mesh_penetration_m", "mesh_surface_intersection_count"} <= set(policy_reason["required_metrics"])
+    report = evaluate_metrics({"duration_error_s": measured_metric([0], units="s")}, spec.quality,
+                              rig=runner._profile(spec), intent=spec.intent, include_mesh=True,
+                              runtime_verified=True, capture_digest="a" * 64)
+    assert report.status == "unverified" and not report.passed
+
+
+def test_implementation_digest_tracks_real_bridge_copy_and_frozen_executable(tmp_path, monkeypatch):
+    import shutil
+    import sys
+    from pathlib import Path
+    from cascadeur_complete import package_fingerprint, recipe_planning
+
+    source_package = Path(recipe_planning.__file__).parent
+    source_bridge = source_package.parents[1] / "cascadeur_side" / "cascadeur_complete"
+    copied_package = tmp_path / "src" / "cascadeur_complete"
+    copied_bridge = tmp_path / "cascadeur_side" / "cascadeur_complete"
+    copied_package.mkdir(parents=True)
+    copied_bridge.mkdir(parents=True)
+    for name in ("recipe_planning.py", "package_fingerprint.py"):
+        shutil.copy2(source_package / name, copied_package / name)
+    for name in ("runtime.py", "guarded_runtime.py"):
+        shutil.copy2(source_bridge / name, copied_bridge / name)
+    monkeypatch.setattr(recipe_planning, "__file__", str(copied_package / "recipe_planning.py"))
+    monkeypatch.setattr(package_fingerprint, "__file__", str(copied_package / "package_fingerprint.py"))
+    before = recipe_planning.implementation_digest()
+    guard = copied_bridge / "guarded_runtime.py"
+    guard.write_bytes(guard.read_bytes() + b"\n# changed copied bridge bytes\n")
+    assert recipe_planning.implementation_digest() != before
+
+    executable_copy = tmp_path / "copied-host.exe"
+    shutil.copy2(sys.executable, executable_copy)
+    monkeypatch.setattr(recipe_planning, "sys", SimpleNamespace(frozen=True, executable=str(executable_copy)))
+    monkeypatch.setattr(recipe_planning, "__file__", str(tmp_path / "no-source" / "recipe_planning.py"))
+    frozen_before = recipe_planning.implementation_digest()
+    executable_copy.write_bytes(executable_copy.read_bytes() + b"\0")
+    assert recipe_planning.implementation_digest() != frozen_before

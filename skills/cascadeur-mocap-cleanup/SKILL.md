@@ -25,7 +25,7 @@ The stage order, gates and report shape are standardised in the repository's [`d
 
 ## Operating rules
 
-1. **Protect the user's files.** Never overwrite the source or an earlier result. Save each accepted stage with `scene_file` save_as under a new name (e.g. `clip_clean_physics.casc`, `clip_clean_final_v3.casc`).
+1. **Protect the user's files.** Never overwrite the source or an earlier result. Save each accepted stage with `scene_file_prepare(action="save_as")` under a new name (e.g. `clip_clean_physics.casc`, `clip_clean_final_v3.casc`).
 2. **Verify the active tab before every write and every save.** `scene_file(action="list")` → exactly one tab has `active: true`; it must be the scene you measured. The user switching tabs (Ctrl+Tab) mid-session is the most common cause of "the write didn't stick".
 3. **Measure first, then fix, then re-measure the live scene.** Use `motion_cleanup_analyze` for the baseline. A `motion_cleanup_prepare` result carries *predicted* numbers; after commit, run `feature_prepare("interpolation_refresh")` + commit and analyze again — only the re-read numbers count.
 4. **Fix classes, not spots.** When the user reports a frame range, treat it as a symptom: find the metric that catches it (skate per frame, survey, finger steps), confirm the metric flags it, then fix the whole clip with one solve.

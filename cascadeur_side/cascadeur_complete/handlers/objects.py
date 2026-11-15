@@ -175,7 +175,7 @@ def rename_object(scene, arguments, _request, context):
 def reparent_objects(scene, arguments, request, context):
     import common.hierarchy as hierarchy
 
-    operation = str((request.get("operations") or [{}])[0].get("name", ""))
+    operation = str(context.get("operation_name") or (request.get("operations") or [{}])[0].get("name", ""))
     if operation == "object.parent" and not arguments.get("parent_id"):
         raise ValueError("object.parent requires parent_id; use object.unparent to clear parents")
     if operation == "object.unparent" and arguments.get("parent_id"):

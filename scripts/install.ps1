@@ -50,6 +50,8 @@ Push-Location $StageRuntime
 try {
     & uv sync --frozen
     if ($LASTEXITCODE -ne 0) { throw 'Staged dependency installation failed' }
+    & uv run --frozen python -m cascadeur_complete.package_fingerprint --bridge-root $StageBridge --output (Join-Path $StageRuntime 'bridge-package.json')
+    if ($LASTEXITCODE -ne 0) { throw 'Bridge package fingerprint failed' }
 } finally {
     Pop-Location
 }

@@ -96,9 +96,9 @@ Use the exact sequence:
 
 1. `auto_physics_state` to inspect CoM, selection, animation length, and readiness.
 2. Fix missing rig/CoM/interval/constraint prerequisites.
-3. `auto_physics_enable(scene_id, expected_revision)` to select the main CoM and enable Physics Assistant.
+3. `auto_physics_enable_prepare()` + `change_commit` to select the main CoM and enable Physics Assistant.
 4. Refresh scene/revision and call `auto_physics_state` again.
-5. Protect `physics.auto_snap` through `change_prepare(feature_id="auto_physics", operation_name="physics.auto_snap", arguments={})`, then commit. If the dedicated environment allows `auto_physics_snap`, still require its protected contract.
+5. `auto_physics_snap_prepare()`, inspect the snapshot/impact, then commit.
 6. Compare the resulting keys, root/CoM trajectory, contacts, constraints, and final revision.
 
 Do not call snap repeatedly when readiness is false. A warning dialog or timeout is not success; inspect logs/status and determine whether the operation was claimed.

@@ -1,5 +1,47 @@
 # Proposed Standard Workflow: Mocap Cleanup and Styling
 
+## Guarded recipe contract
+
+The current implementation uses bridge protocol `3.0` and a strict `RecipeSpec`.
+Provide exact character object/layer IDs and rig-profile digest; explicit FPS,
+units and basis; original repair or styling intent; immutable support/geometry
+artifacts; a quality policy; and finite resource limits. `recipe_plan` is read-only
+and displays the exact permit sequence and blockers. Authorize its plan and scope
+digests before `recipe_start`; a grant allocates one run, with idempotent retries of
+the same start key. Status and artifacts are persisted under `state/runs`.
+
+Each native mutation uses `prepare_change` and a single-use `commit_change` token.
+The runtime receipt records native outcome; host postconditions and actual motion
+quality remain separate. A native success cannot override a failed host check.
+Unknown requests are reconciled by their original request ID, with no speculative
+transform reads, automatic replay, or implicit rollback. Applied changes require
+a verified successor checkpoint before proceeding. Cancellation persists across
+those states and preserves any already published result.
+
+Contact repair preserves the supplied contact schedule and support frame. Finger
+repair uses local quaternion motion. Sparse key fitting requires verified
+interpolation access. Required but unavailable quality observations remain
+`unverified`; sampled frame checks do not prove continuous collision freedom.
+The canonical checker derives mandatory metrics from the rig, original intent,
+contact schedule and declared geometry. The supplied quality policy must contain
+those metrics and their thresholds; requesting only an easier metric such as
+duration cannot bypass contact, lock, root or collision observations.
+An export must be sealed, structurally checked, imported and measured through the
+pinned target adapter, then published under its exact destination permission.
+
+The pinned native SDK has no installed verified guard, authored dependency and
+scene identity reader, checkpoint adapter, or native export settings/completion
+adapter in this checkout. These are explicit preflight blockers. The host tests
+and math do not establish a successful live scene mutation or export.
+
+## Historical workflow example
+
+The following example predates the guarded recipe contract. Its thresholds,
+reported clip results, styling routes, and repeated passes are contextual examples;
+they do not authorize automatic retries, step synthesis during repair, broader
+scene writes, or unsupported native adapters. Use the current plan's explicit
+budgets, original intent, and measured acceptance policy for execution.
+
 A repeatable path from a raw captured clip to a delivered FBX, built from one full production run (a 986-frame dance clip captured from a 32.9 s video). Every stage has the same shape: **measure → change through a protected commit → re-measure the live scene → save under a new name**. Stages 1–5 are cleanup (remove capture errors). Stage 6 is styling (make the motion match what the performer meant) and needs a reference.
 
 The agent-facing detail (exact arguments, pitfalls, formulas) lives in the [`cascadeur-mocap-cleanup`](../skills/cascadeur-mocap-cleanup/SKILL.md) skill. This document is the standard to follow and to review a run against.
