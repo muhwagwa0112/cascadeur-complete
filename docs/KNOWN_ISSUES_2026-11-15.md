@@ -7,7 +7,23 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 비대상 회전 보존과 baseline 품질 의무
+### 최신 추가: 실제 absent-frame 키 삽입 primitive
+
+원격 개선안과 구현 브랜치를 다시 fetch했다. r4는 `6a9338c`로 동일하며 전체 16개 목표는 진행 중이다. R4-09의 native 연결을 위해 `native_key_insertion.py`와 명시적 `Qualify key insertion adapter` 명령을 추가했다. 기존 전체 key-grid 재작성과 달리 `set_section`은 **현재 key와 section이 없는 내부 frame에만** 호출하고, 해당 새 key의 local position만 쓴다. 새 구간의 LINEAR/STEP 모드는 원래 나누는 구간과 같아야 한다. 기존 key/section 변경·삭제·retime이나 모드 변경 권한을 추가하지 않았다.
+
+private source는 exact scene/object/owning layer, 전체 projection, build/epoch/fingerprint, 현재 finite-model proof와 callback generation에 묶이고 한 번만 소비된다. callback 진입의 동기·동일 thread·단일 실행과 첫 setter 전 source guard를 확인한다. dispatch 뒤 불확실/불일치는 unknown으로 남기며 같은 source 또는 unresolved scene을 재삽입하지 않는다. 늦은 callback은 setter 전에 차단하고 자격을 폐기한다. 이 방어의 실패 경로를 실제 native partial failure로 관측했다는 주장은 하지 않는다.
+
+최종 실제 관측은 설치 `2026.2.3.0.16863`, PID `37920`, epoch `87d2ea78-eb1e-4d48-9f7f-581de36acddd`, bridge fingerprint `81bfb37530b613aea4303be795682731e1ea6d52fc4951a2308b92e339769537`에서 수행했다. 새 프로세스에서 finite-model 40개 사례를 먼저 확인한 뒤 LL/SS/LS/SL 네 구간 조합 각각에 대해 9 frames / 기존 keys `0,4,8`에 새 keys `2,6`을 추가했다. 새 key 값뿐 아니라 **unkeyed `1,3,5,7`의 실제 보간**, 기존 모든 key/section, 비대상 회전·스케일·빈 기본 Track과 전체 projection을 모델의 예측값과 비교했다. 별도 native interpolate 후에도 같은 projection 비교를 통과했다. 명령은 `observed/complete`로 반환했고 네 `.casc`는 13,998–14,043 bytes로 저장됐다. 다음 idle 조회에서도 각 evaluated projection digest가 유지됐고, 원 빈 탭 보존·활성 복귀·전체 5탭 inventory를 확인했다. 이 비교는 native 값의 동등성으로, JSON 표현의 bitwise 동일성이나 영구 key GUID 증거가 아니다.
+
+ignored 실제 근거: `artifacts/native-r4/key-insertion-repaired-actual-observation.json`, SHA-256 `5683c496e979abff95c78a3a96398d96bdc0660f1c9175d3b479da1761b16302`; `key-insertion-repaired-next-idle.json`; `isolated-runtime/snapshots/key-insertion-qualification-b83d194b-b7db-4bd6-b2cc-8a6553930b41/trial-{0,1,2,3}.casc`. 성공·실패 탭은 자동 제거하지 않으며 각 새 경로에 보존한다.
+
+진행 중 발견한 실제 결함 두 개도 수정했다. 첫 시도는 SDK가 빈 `Track0`와 owning Transform 트랙을 함께 생성해 총 트랙 하나 검사에서 **쓰기 전** 차단됐다. 이제 exact owning layer 하나를 선택하고 제한된 빈 다른 트랙만 허용하며 전체 projection으로 보존한다. 다음 시도는 native 네 사례를 마쳤지만 명령 래퍼의 잘못된 `scene.success` 호출로 반환이 실패했다. 해당 호출을 제거하고 위 최종 새 프로세스에서 명령까지 다시 확인했다. 이전 성공 관측·private proof를 새 fingerprint에서 재사용하지 않았다.
+
+**남은 연결:** 이 primitive는 production 등록을 하지 않았으며 실제 조회에서도 registered operation은 0개였다. 공개 prepare/commit, 승인된 intent/added-key budget, owned checkpoint, durable terminal/evaluation receipt, 원본 baseline quality, recipe sparse planner·continuation과의 통합은 남아 있다. 현재 host의 persistent-native-ID gate를 해제하거나 locator를 native GUID로 위장하지 않았다. 일반 character·rotation·coupled/shared owning layer·새 interpolation mode도 미자격이다. 전체 suite/build/CI는 실행하지 않았다.
+
+**종료 crash 유지:** 위 관측 전 재시작 과정에서 PID `31060`(05:45:25), `15664`, `27824`의 종료는 다시 `Qt6Core.dll` 6.5.3.0 / `0xc0000005` / offset `0xb4c7f`를 기록했다. report는 각각 `79f8d1ab-d8c8-461e-a0a0-2774284f3d4d`, `7aba5fee-25e8-4edb-9a37-cd5c2273e357`, `7e8034ce-2360-4eb0-9fca-ead3473e36a2`다. 첫 두 실행은 삽입을 실행하지 않았거나 쓰기 전에 차단됐으므로 이 이벤트를 새 insertion setter의 원인으로 단정하지 않는다. ignored `retained-restore-next-exit-crash.json`, `key-insertion-first-blocked-exit-events.json`, `key-insertion-wrapper-failed-exit-events.json`에 보존했다. 최종 PID는 응답하는 상태로 두었고 종료 안정성·장시간 안정성 해결을 주장하지 않는다.
+
+### 이전 추가: 비대상 회전 보존과 baseline 품질 의무
 
 R4-08의 원본 보존 경로에서 비대상 role/dependency의 위치만 비교하고 회전 변화는 누락하는 결함을 수정했다. 원본 capture에 회전 채널이 관측된 비대상 객체에는 `non_target_scope_rad`와 원래 승인된 임계값을 요구한다. 위치가 같다는 이유로 회전 보존을 pass로 만들지 않는다. 원본에 관측된 회전이 실제 capture에서 누락되면 `INCOMPLETE_CAPTURE`로 거절하며, 필수 role/dependency의 누락도 건너뛰지 않는다. 시간값이 같아도 frame ID가 다르면 원본 grid 불일치로 거절한다.
 

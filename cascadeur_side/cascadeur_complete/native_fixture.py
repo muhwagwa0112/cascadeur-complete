@@ -9,7 +9,7 @@ _OWNED = {}
 SUPPORTED_BUILD = "2026.2.3.0.16863"
 
 
-def create_disposable_scene():
+def create_disposable_scene(*, retain_on_failure=False):
     import csc
     from . import guarded_runtime as guards
     from .native_adapters import installed_build
@@ -19,13 +19,15 @@ def create_disposable_scene():
     manager = csc.app.get_application().get_scene_manager()
     previous = manager.current_scene()
     scene = manager.create_application_scene()
+    _OWNED[id(scene)] = {"scene": scene, "previous": previous, "objects": set()}
     try:
         manager.set_current_scene(scene)
-        _OWNED[id(scene)] = {"scene": scene, "previous": previous, "objects": set()}
         return scene
     except Exception:
         if previous is not None: manager.set_current_scene(previous)
-        manager.remove_application_scene(scene)
+        if not retain_on_failure:
+            manager.remove_application_scene(scene)
+            _OWNED.pop(id(scene), None)
         raise
 
 

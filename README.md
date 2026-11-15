@@ -106,6 +106,18 @@ The additional explicit setup commands are:
 - `Cascadeur Complete.Qualify independent motion adapter`: finite LINEAR/STEP
   perturbation and existing position-key writer probes on an owned independent
   Transform. It requires an empty current tab and never enables key insertion.
+- `Cascadeur Complete.Qualify key insertion adapter`: explicit absent-frame
+  position-key insertion observation on retained independent Transform tabs.
+  First run the finite-model qualification in the same process and select an
+  empty tab. On installed `2026.2.3.0.16863`, four LINEAR/STEP schedules inserted
+  frames 2 and 6 among original keys 0, 4 and 8, preserving old sections, empty
+  tracks and non-target data across full-projection readback and separate
+  interpolation, including unkeyed frames 1, 3, 5 and 7. Each small `.casc` and
+  tab remains available; failures are retained too. The private single-use
+  source binds the scene, full projection, build, epoch and loaded fingerprint;
+  unknown completion cannot be retried. This is a development primitive with
+  honest layer/frame locators, not a registered production operation, durable
+  evaluation/quality receipt or public MCP/recipe insertion route.
 - `Cascadeur Complete.Qualify complete scene adapter`: shipped-file full reader,
   bootstrap, evaluation and checkpoint in disposable tabs.
 - `Cascadeur Complete.Qualify independent scene adapter`: finite LINEAR/STEP
