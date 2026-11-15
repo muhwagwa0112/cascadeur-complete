@@ -1090,6 +1090,12 @@ class RecipeRunner:
         added = 0 if topology_delta is None else len(topology_delta.additions)
         usage["written_keys"] += len(arguments.get("writes", [])) + added
         usage["generated_keys"] += added + int((measured or {}).get("added_keys", 0))
+        if step.stage == "motion" and plan.spec.motion.mode == "native_unbaking":
+            # Reserve the approved maximum, not an unobserved action result.
+            # The same CAS seals request identity and spend before prepare;
+            # prepared/unknown/reconciled attempts never re-enter this path.
+            usage["written_keys"] += step.max_effect_from_baseline.maximum_written_keys
+            usage["generated_keys"] += step.max_effect_from_baseline.maximum_added_keys
         usage["correction_passes"] += int(step.stage in {"correction", "key_insert"})
         usage = BudgetUsage.model_validate(usage)
         validate_usage(plan, usage, run.deadline)

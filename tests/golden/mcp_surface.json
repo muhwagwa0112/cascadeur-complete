@@ -879,7 +879,7 @@
       }
     },
     "animation_unbaking_prepare": {
-      "description": "Snapshot and prepare one documented Animation Unbaking stage.",
+      "description": "Prepare an exact unbaking scope with explicit topology permissions and finite key limits.\n\n    Supply both permission flags and maximum added/removed/written keys. These\n    bounds do not qualify native action completion or enable its closed gate.\n    ",
       "input_schema": {
         "$defs": {
           "SceneBinding": {
@@ -984,9 +984,68 @@
             ],
             "title": "SourceBinding",
             "type": "object"
+          },
+          "UnbakingTopologyPolicy": {
+            "additionalProperties": false,
+            "properties": {
+              "allow_interpolation_change": {
+                "title": "Allow Interpolation Change",
+                "type": "boolean"
+              },
+              "allow_key_insertion": {
+                "title": "Allow Key Insertion",
+                "type": "boolean"
+              },
+              "maximum_added_keys": {
+                "minimum": 0,
+                "title": "Maximum Added Keys",
+                "type": "integer"
+              },
+              "maximum_removed_keys": {
+                "minimum": 0,
+                "title": "Maximum Removed Keys",
+                "type": "integer"
+              },
+              "maximum_written_keys": {
+                "minimum": 0,
+                "title": "Maximum Written Keys",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "maximum_added_keys",
+              "maximum_removed_keys",
+              "maximum_written_keys",
+              "allow_key_insertion",
+              "allow_interpolation_change"
+            ],
+            "title": "UnbakingTopologyPolicy",
+            "type": "object"
           }
         },
         "properties": {
+          "first_frame": {
+            "title": "First Frame",
+            "type": "integer"
+          },
+          "last_frame": {
+            "title": "Last Frame",
+            "type": "integer"
+          },
+          "layer_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Layer Ids",
+            "type": "array"
+          },
+          "object_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Object Ids",
+            "type": "array"
+          },
           "source_binding": {
             "anyOf": [
               {
@@ -1008,12 +1067,22 @@
             "title": "Step",
             "type": "string"
           },
+          "topology_policy": {
+            "$ref": "#/$defs/UnbakingTopologyPolicy"
+          },
           "ttl": {
             "default": 300,
             "title": "Ttl",
             "type": "number"
           }
         },
+        "required": [
+          "object_ids",
+          "layer_ids",
+          "first_frame",
+          "last_frame",
+          "topology_policy"
+        ],
         "title": "animation_unbaking_prepareArguments",
         "type": "object"
       },
@@ -6436,6 +6505,237 @@
         "type": "object"
       }
     },
+    "position_keys_insert_prepare": {
+      "description": "Prepare bounded absent local position keys in native scene units on an owned checkpoint.\n\n    Requires current-process native qualification. This standalone change does\n    not authorize recipe key insertion or replace its intent and quality gates.\n    ",
+      "input_schema": {
+        "$defs": {
+          "SceneBinding": {
+            "additionalProperties": false,
+            "properties": {
+              "content_revision": {
+                "title": "Content Revision",
+                "type": "string"
+              },
+              "document_lineage_id": {
+                "title": "Document Lineage Id",
+                "type": "string"
+              },
+              "revision_kind": {
+                "const": "scope_digest",
+                "default": "scope_digest",
+                "title": "Revision Kind",
+                "type": "string"
+              },
+              "runtime_epoch": {
+                "title": "Runtime Epoch",
+                "type": "string"
+              },
+              "scene_instance_id": {
+                "title": "Scene Instance Id",
+                "type": "string"
+              },
+              "schema_version": {
+                "const": 1,
+                "default": 1,
+                "title": "Schema Version",
+                "type": "integer"
+              },
+              "scope_digest": {
+                "title": "Scope Digest",
+                "type": "string"
+              },
+              "selection_digest": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Selection Digest"
+              }
+            },
+            "required": [
+              "runtime_epoch",
+              "scene_instance_id",
+              "document_lineage_id",
+              "scope_digest",
+              "content_revision"
+            ],
+            "title": "SceneBinding",
+            "type": "object"
+          },
+          "SourceBinding": {
+            "additionalProperties": false,
+            "properties": {
+              "adapter_fingerprint": {
+                "title": "Adapter Fingerprint",
+                "type": "string"
+              },
+              "binding": {
+                "$ref": "#/$defs/SceneBinding"
+              },
+              "complete": {
+                "default": false,
+                "title": "Complete",
+                "type": "boolean"
+              },
+              "inputs_digest": {
+                "title": "Inputs Digest",
+                "type": "string"
+              },
+              "sample_digest": {
+                "title": "Sample Digest",
+                "type": "string"
+              },
+              "schema_version": {
+                "const": 1,
+                "default": 1,
+                "title": "Schema Version",
+                "type": "integer"
+              },
+              "scope": {
+                "additionalProperties": true,
+                "title": "Scope",
+                "type": "object"
+              }
+            },
+            "required": [
+              "binding",
+              "scope",
+              "sample_digest",
+              "inputs_digest",
+              "adapter_fingerprint"
+            ],
+            "title": "SourceBinding",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "additions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Additions",
+            "type": "array"
+          },
+          "allow_key_insertion": {
+            "default": false,
+            "title": "Allow Key Insertion",
+            "type": "boolean"
+          },
+          "layer_id": {
+            "title": "Layer Id",
+            "type": "string"
+          },
+          "max_added_keys": {
+            "title": "Max Added Keys",
+            "type": "integer"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "source_binding": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SourceBinding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "object_id",
+          "layer_id",
+          "additions",
+          "max_added_keys"
+        ],
+        "title": "position_keys_insert_prepareArguments",
+        "type": "object"
+      },
+      "name": "position_keys_insert_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "position_keys_insert_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "position_keys_insertion_plan": {
+      "description": "Read a native prediction for absent local scene-unit position keys.\n\n    Requires a current runtime-issued key-layout digest. This observes exact\n    locator/section effects; it does not authorize intent, budgets or recipes.\n    Writing still requires a current source, position_keys_insert_prepare and\n    change_commit. Each addition supplies object_id, channel='position',\n    layer_id, frame, value, mode and the exact observed-model tangent metadata.\n    ",
+      "input_schema": {
+        "properties": {
+          "additions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Additions",
+            "type": "array"
+          },
+          "key_layout_digest": {
+            "title": "Key Layout Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_layout_digest",
+          "additions"
+        ],
+        "title": "position_keys_insertion_planArguments",
+        "type": "object"
+      },
+      "name": "position_keys_insertion_plan",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "position_keys_insertion_planDictOutput",
+        "type": "object"
+      }
+    },
+    "position_keys_topology_verify": {
+      "description": "Read private terminal-completion evidence for an actual key-layout observation.\n\n    The digest must match the complete typed observation. Evidence remains\n    observational: this grants no intent/budget authorization or recipe support.\n    An unknown or unverified native completion stays unverified.\n    ",
+      "input_schema": {
+        "properties": {
+          "adapter_evidence_ref": {
+            "title": "Adapter Evidence Ref",
+            "type": "string"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "observation": {
+            "additionalProperties": true,
+            "title": "Observation",
+            "type": "object"
+          }
+        },
+        "required": [
+          "observation",
+          "digest",
+          "adapter_evidence_ref"
+        ],
+        "title": "position_keys_topology_verifyArguments",
+        "type": "object"
+      },
+      "name": "position_keys_topology_verify",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "position_keys_topology_verifyDictOutput",
+        "type": "object"
+      }
+    },
     "prepare_blender_export_profile": {
       "description": "Pin an export profile to the installed Blender before recipe planning.\n\n    Supply explicit axes, units, take, destination and target object/bone maps.\n    A background consumer observes its version and importer bytes. This does\n    not export, import an artifact, authorize a recipe or certify roundtrip quality.\n    ",
       "input_schema": {
@@ -7698,6 +7998,17 @@
                 ],
                 "default": null
               },
+              "unbaking_limits": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/UnbakingKeyLimits"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
               "unbaking_step": {
                 "anyOf": [
                   {
@@ -8367,6 +8678,33 @@
               "bone_mapping"
             ],
             "title": "TargetImportSettings",
+            "type": "object"
+          },
+          "UnbakingKeyLimits": {
+            "additionalProperties": false,
+            "properties": {
+              "maximum_added_keys": {
+                "minimum": 0,
+                "title": "Maximum Added Keys",
+                "type": "integer"
+              },
+              "maximum_removed_keys": {
+                "minimum": 0,
+                "title": "Maximum Removed Keys",
+                "type": "integer"
+              },
+              "maximum_written_keys": {
+                "minimum": 0,
+                "title": "Maximum Written Keys",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "maximum_added_keys",
+              "maximum_removed_keys",
+              "maximum_written_keys"
+            ],
+            "title": "UnbakingKeyLimits",
             "type": "object"
           },
           "VariantEnvelope": {
@@ -9129,7 +9467,7 @@
       }
     },
     "resolve_motion_inputs": {
-      "description": "Resolve roles and missing explicit conversion_policy (FPS, scale, basis).\n\nNative observations stay unchanged; declarations do not certify physical\nmetadata or supply missing ownership, rest, root or joint evidence.",
+      "description": "Resolve roles and missing explicit conversion_policy (FPS, scale, basis).\n\n    Native observations stay unchanged; declarations do not certify physical\n    metadata or supply missing ownership, rest, root or joint evidence.\n    ",
       "input_schema": {
         "properties": {
           "draft_ref": {

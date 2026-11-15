@@ -7,7 +7,22 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 새 키와 기존 키의 공동 fitting 및 후속 보정 연결
+### 최신 추가: unbaking의 명시적 topology 권한과 예산 연결
+
+원격 개선안의 live SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하며, 전체 16개 목표를 유지한다. 설치 실행 파일의 ProductVersion/FileVersion은 `2026.2.3.0.16863`으로 다시 확인했다. 이번 `Win32_Process` 조회에는 Cascadeur 항목이 반환되지 않았다. 앞 절들의 PID `2328` 실행 관찰은 당시 기록이며, 이번에 앱 종료 원인·정상 종료·새 프로세스의 loaded bridge를 관찰한 것은 아니다. 전역 설치 교체나 실제 unbaking은 실행하지 않았다.
+
+- `MotionStageSpec`의 `native_unbaking`은 `unbaking_limits`의 `maximum_added_keys`, `maximum_removed_keys`, `maximum_written_keys`를 모두 명시해야 한다. bool/실수 count, 음수, 추가+삭제가 write 상한을 넘는 계약, 무시될 `settings`는 거절한다. 다른 mode의 unbaking 전용 제한도 거절한다. 추가 키는 원 intent의 opt-in·추가키 상한·run 예산에 묶인다.
+- 원 intent의 `allow_key_insertion`/`allow_interpolation_change`와 세 count만 native `topology_policy`로 내린다. 공개 MCP `animation_unbaking_prepare`도 같은 필수 계약을 요구한다. 승인 경계는 원 step·정확한 객체/레이어/단일 구간·원 선언/permit·source의 operation 인자와 digest를 비교한다. 인자와 digest를 함께 바꾸어도 권한을 넓힐 수 없다.
+- runner는 prepare 전에 원 request/attempt를 기록하는 동일 CAS에서 최대 added/written을 한 번 예약한다. cleanup 삽입 배정은 unbaking 예약을 뺀 원 생성키 상한을 공유한다. `outcome_unknown` 재조회는 원 request/token/소비 예산을 보존하며 환급·재dispatch하지 않는다.
+- native handler에 실제 전체 projection의 전후 비교를 연결했다. 승인 밖 layer/객체/구간·공유 reference·정적 값·원 라벨·허용하지 않은 interpolation/fixation 변경과 추가/삭제/write 초과를 거절한다. write 수는 추가/삭제/변경 section과 변경 sample을 제어하는 authored key의 고유 `(layer, frame)` 합집합이며 SDK setter 호출 횟수가 아니다. 전체 reader의 raw label ID 중 실제 `Key.no_label_id()`와 일치하는 값만 이 비교용 projection에서 `None`으로 정규화한다. 실제 라벨은 지우지 않는다.
+
+**완료 근거는 여전히 없다.** 설치된 `resources/scripts/stubs/csc/tools/__init__.pyi`의 `AnimationUnbakingTool`에는 interpolation difference getter만 있고, `AutoPosingTool`의 add/update와 `ActionManager.call_action -> None`은 세 step의 동기 완료 증거가 아니다. 설치 `resources/scripts/python/ml/editable_animation.py`의 `run(scene)`도 전역 application/current scene을 사용하며 hierarchy 대화상자·deferred callback·layer 범위 확장·내부 실패 처리가 있다. 이 모듈이 각 action ID의 정확한 binding이라는 근거도 확인하지 못했다. 임의 SDK symbol 탐색, global SDK 교체 또는 반환 `None`을 성공으로 처리하는 어댑터는 만들지 않았다.
+
+따라서 handler는 post-dispatch projection이 범위 안이어도 `native_completion: unverified`와 effect `unknown`을 유지한다. snapshot은 이후 비동기 효과를 닫는 증거가 아니다. production unbaking gate는 열지 않았고 native 완료/result/non-target의 실앱 검증은 미완료다. 기존 unknown 기록·인증키·receipt·전역 unresolved-effect barrier는 수정하거나 우회하지 않았다. bridge bytes가 변경되어 과거 loaded fingerprint의 자격을 재사용할 수 없다.
+
+이 권한·예산 경계에는 직접 실행 확인이 필요해 해당 사례만 실행했다. `tests/test_unbaking_bounds.py tests/test_recipe_execution.py -k unbaking -q`는 **`25 passed, 30 deselected in 3.23s`**였다. 이후 SDK no-label 정규화를 추가하고 그 새 사례만 실행하여 **`1 passed in 0.15s`**를 확인했다. 고유 사례 26개이며, 실제 host lowering/store/CAS·projection 비교와 MCP 입력/전달 확인이다. projection/SDK/source doubles를 사용했으므로 실제 Cascadeur action 완료 증거가 아니다. 공개 golden은 이번 unbaking/recipe 계약과 앞서 추가되어 누락됐던 position 준비 도구 세 개, 설명 공백 차이 한 개를 실제 MCP schema로 갱신했다. 갱신 자체를 독립 검증으로 세지 않는다. 전체 suite/build/CI, 실제 recipe·새 loaded 자격·설치 연속성은 실행하지 않았다.
+
+### 이전 추가: 새 키와 기존 키의 공동 fitting 및 후속 보정 연결
 
 원격 개선안 branch를 다시 조회했으며 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하다. 기존 16개 목표는 계속 진행 중이다. 실제 설치 파일의 ProductVersion/FileVersion은 `2026.2.3.0.16863`이며 이번 CIM 조회에도 PID `2328`이 실행 중이었다. 전역 설치 교체나 앱 종료·재시작, loaded qualification은 이번에 실행하지 않았다.
 

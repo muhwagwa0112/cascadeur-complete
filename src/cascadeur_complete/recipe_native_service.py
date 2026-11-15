@@ -510,6 +510,7 @@ class RecipeNativeServiceMixin:
         elif stage == "motion":
             motion = spec.motion
             if motion.mode == "native_unbaking":
+                from .unbaking_contract import unbaking_topology_policy
                 if len(step.frame_ranges) != 1:
                     raise RecipeConflict("UNBAKING_REQUIRES_ONE_EXACT_FRAME_RANGE")
                 first, last = step.frame_ranges[0]
@@ -520,7 +521,10 @@ class RecipeNativeServiceMixin:
                 if not target_ids or not target_layers or first >= last:
                     raise RecipeConflict("UNBAKING_REQUIRES_EXACT_OBJECTS_LAYERS_AND_INTERVAL")
                 args = {"step": motion.unbaking_step, "object_ids": list(target_ids),
-                        "layer_ids": list(target_layers), "first_frame": first, "last_frame": last}
+                        "layer_ids": list(target_layers), "first_frame": first, "last_frame": last,
+                        "topology_policy": unbaking_topology_policy(motion.unbaking_limits,
+                            allow_key_insertion=spec.intent.allow_key_insertion,
+                            allow_interpolation_change=spec.intent.allow_interpolation_change).model_dump(mode="json")}
             elif motion.mode in {"native_root_motion", "native_inbetweening"}:
                 if motion.settings:
                     raise RecipeConflict("NATIVE_GENERATION_SETTINGS_UNSUPPORTED")

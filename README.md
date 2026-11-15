@@ -158,6 +158,19 @@ The additional explicit setup commands are:
   spaces; missing channels are not filled in. General rigs, retarget
   refinement and unbaking completion remain outside its qualified scope. The
   new host integration has not been executed as a native recipe.
+  Native unbaking plans now require explicit `motion.unbaking_limits` for
+  maximum added, removed and written keys; insertion/interpolation flags come
+  only from the original intent. Unbaking reserves its maximum added/written
+  cost before prepare in the request-identity CAS and shares the original
+  generated-key allowance with cleanup. The public
+  `animation_unbaking_prepare` tool requires the same five-field
+  `topology_policy`. Native projection comparison rejects visible scope,
+  label, interpolation and key-budget violations, counting unique layer/frame
+  effects conservatively. A post-dispatch snapshot remains an unverified
+  completion observation; it never enables the three opaque action adapters.
+  Installed SDK stubs expose no typed synchronous executor for all three
+  steps. Native recipe execution and fresh loaded-byte qualification remain
+  unobserved for this change.
   Opt-in plans must explicitly budget the numerical fit-iteration ceiling
   across three axes, all bounded refinement attempts and at most one stabilizing
   refit per grid; the default run

@@ -109,12 +109,19 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
     add("motion", motion_feature, motion_operation, "scene_mutation", spec.motion.model_dump(mode="json"),
         channels, "existing_motion_preserved" if mode == "existing" else None,
         postconditions=("target_motion_readback", "non_target_unchanged"), lowering="motion-v1")
+    unbaking_added = 0
+    if mode == "native_unbaking":
+        limits = spec.motion.unbaking_limits
+        unbaking_added = limits.maximum_added_keys
+        steps[-1] = steps[-1].model_copy(update={"max_effect_from_baseline": bounds.model_copy(update={
+            "maximum_added_keys": limits.maximum_added_keys, "maximum_written_keys": limits.maximum_written_keys})})
     add("evaluation", "interpolation_refresh", "animation.interpolation_refresh", "evaluation", channels=("evaluation",),
         postconditions=("evaluation_settled",))
     add("source_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("baseline_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("analyze", "motion_analysis", "motion.analyze", "host_compute", postconditions=("required_metric_eligibility",))
-    insertion_budget = min(spec.budgets.generated_keys, int(envelope.get("added_keys", 0)), 8 * len(spec.cleanup))
+    insertion_budget = min(min(spec.budgets.generated_keys, int(envelope.get("added_keys", 0))) - unbaking_added,
+                           8 * len(spec.cleanup))
     for index, cleanup in enumerate(spec.cleanup):
         variants = cleanup.variants or (VariantEnvelope(variant_id="requested", parameters=cleanup.parameters),)
         add("solve", "motion_cleanup", "motion.solve", "host_compute", {"cleanup_index": index}, variants=variants,

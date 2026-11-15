@@ -108,11 +108,10 @@ def unbaking(scene, arguments, request, context):
     operation can be enabled for guarded production dispatch.
     """
     from .. import guarded_runtime as guards
+    from .. import native_unbaking
     from .timeline_edit import _interval, _layers, _select_interval, _select_objects
 
-    required = {"step", "object_ids", "layer_ids", "first_frame", "last_frame"}
-    if not isinstance(arguments, dict) or set(arguments) != required:
-        raise ValueError("INVALID_WRITE_SCOPE: unbaking requires exact objects, layers and frame interval")
+    native_unbaking.validate_arguments(arguments)
     step = arguments["step"]
     actions = {
         "prepare_keys_by_fulcrums": "View.AutoInterpolation_Keys",
@@ -157,6 +156,10 @@ def unbaking(scene, arguments, request, context):
     if layer_objects != set(object_ids):
         raise ValueError("INVALID_WRITE_SCOPE: unbaking objects must equal the selected layer closure")
 
+    # Retain the full actual source before selection or action dispatch. This
+    # is an observation, not caller-supplied topology or action qualification.
+    topology_before = native_unbaking.capture_before(scene, arguments)
+
     _select_objects(domain, object_ids, context)
     _select_interval(domain, layers, first, last)
     state = _generation_state(scene, context)
@@ -174,13 +177,14 @@ def unbaking(scene, arguments, request, context):
         guards.observe_effect("generation.unbaking", "unknown", scene_before=instance_before,
             scene_after=dict(guards.scene_instance(context["scene_view"]() or scene)),
             detail={"action_id": actions[step], "native_completion": "unverified"})
+    topology = native_unbaking.observe_after(context["scene_view"]() or scene, topology_before, arguments)
     after = context["scene_state"](context["scene_view"]() or scene)
     return {"step": step, "action_id": actions[step], "object_ids": object_ids, "layer_ids": layer_ids,
             "interval": [first, last], "return_value": context["json_safe"](result),
             "action_dispatch_returned": True, "native_completion": "unverified",
-            "before_revision": before["revision"], "after_revision": after["revision"],
+            "before_revision": before["revision"], "after_revision": after["revision"], "topology_observation": topology,
             "observed_postconditions": ["exact_unbaking_selection"]}, [
-                "Unbaking action completion and key/interpolation topology bounds remain unverified"]
+                "Unbaking action completion remains unverified; the returned snapshot cannot bound later effects"]
 
 
 @handler("generation.auto_posing", postconditions=("scene_revision_changed",))

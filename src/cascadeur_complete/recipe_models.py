@@ -18,6 +18,7 @@ from .models import SceneBinding, SourceBinding
 from .motion_context import IntentConstraints
 from .motion_quality import QualityPolicy
 from .stage_contracts import BootstrapGrant, CheckpointObservation, DerivedTargetMapping, DerivedTargetRef, StageEffect
+from .unbaking_contract import UnbakingKeyLimits
 
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Identifier = Annotated[str, Field(min_length=1, max_length=256, pattern=r"^[^\x00-\x1f*?]+$")]
@@ -171,6 +172,7 @@ class MotionStageSpec(RecipeModel):
     keyposes: tuple[PoseWrite, ...] = ()
     settings: dict[str, JsonValue] = Field(default_factory=dict)
     unbaking_step: Literal["prepare_keys_by_fulcrums", "adjust_keys_and_interpolation", "adjust_autoposing_lock_state"] | None = None
+    unbaking_limits: UnbakingKeyLimits | None = None
     host_channel: Literal["position", "rotation"] = "position"
     host_space: Literal["local", "global"] = "global"
 
@@ -188,6 +190,13 @@ class MotionStageSpec(RecipeModel):
             raise ValueError("native_unbaking requires one of the three registered steps")
         if self.mode != "native_unbaking" and self.unbaking_step is not None:
             raise ValueError("unbaking_step only applies to native_unbaking")
+        if self.mode == "native_unbaking":
+            if self.unbaking_limits is None:
+                raise ValueError("native_unbaking requires explicit unbaking_limits")
+            if self.settings:
+                raise ValueError("native_unbaking settings are unsupported")
+        elif self.unbaking_limits is not None:
+            raise ValueError("unbaking_limits only applies to native_unbaking")
         return self
 
 
@@ -266,6 +275,14 @@ class RecipeSpec(RecipeModel):
         scope = set(self.character.object_ids) if self.character.derived_target is None else set(self.character.derived_target.role_paths)
         if tuple(self.intent.editable_frames) != (self.clip.first_frame, self.clip.last_frame):
             raise ValueError("Clip and editable intent range must match")
+        if self.motion.mode == "native_unbaking":
+            limits = self.motion.unbaking_limits
+            added_cap = min(self.intent.correction_envelope.get("added_keys", 0), self.budgets.generated_keys)
+            if (limits.maximum_added_keys > added_cap
+                    or (not self.intent.allow_key_insertion and limits.maximum_added_keys != 0)):
+                raise ValueError("Unbaking key additions exceed the original insertion intent or generated-key budget")
+            if limits.maximum_written_keys > self.budgets.written_keys:
+                raise ValueError("Unbaking writes exceed the written-key budget")
         for cleanup in self.cleanup:
             if not set(cleanup.object_ids) <= scope:
                 raise ValueError("Cleanup pass escapes the target character scope")

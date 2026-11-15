@@ -56,6 +56,155 @@ def allocated(tmp_path):
     return paths, store, plan, grant, run
 
 
+def unbaking_spec_dict():
+    value = spec_dict()
+    value["character"]["layer_ids"] = ["root-layer"]
+    value["intent"].update(allow_key_insertion=True, allow_interpolation_change=False,
+                           correction_envelope={"added_keys": 5, "position_m": .03})
+    value["budgets"] = {"generated_keys": 7, "written_keys": 20}
+    value["motion"] = {"mode": "native_unbaking", "unbaking_step": "prepare_keys_by_fulcrums",
+        "unbaking_limits": {"maximum_added_keys": 2, "maximum_removed_keys": 1, "maximum_written_keys": 6}}
+    return value
+
+
+def allocated_unbaking_boundary(tmp_path):
+    """Host lowering/persistence doubles, never native unbaking completion proof."""
+    from cascadeur_complete.models import SourceBinding
+    from cascadeur_complete.recipe_native_service import RecipeNativeServiceMixin
+    paths = RuntimePaths.discover(tmp_path)
+    paths.ensure()
+    store = RecipeRunStore(paths)
+    plan = store.save_plan(build_plan(RecipeSpec.model_validate(unbaking_spec_dict()), []))
+    grant = store.authorize(plan, time.time() + 300)
+    run = store.create(plan, grant, "unbaking-host-boundary")
+    source = SourceBinding(binding=plan.spec.input.binding, scope={}, sample_digest="host-fixture",
+        inputs_digest="host-fixture", adapter_fingerprint="host-fixture", complete=True)
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+        transition={"state": "running", "current_binding": source.model_dump(mode="json")})
+    service = SimpleNamespace(paths=paths, _bound_arguments=lambda feature, args: dict(args))
+    def rebind(binding, operation, arguments, **context):
+        return binding.model_copy(update={"scope": {"operation_name": operation,
+            "operation_arguments": arguments, "operation_arguments_digest": digest(arguments)}})
+    service.recipe_rebind_source = rebind
+    service.recipe_resolve_stage_effect = lambda *args: RecipeNativeServiceMixin.recipe_resolve_stage_effect(service, *args)
+    runner = RecipeRunner(service)
+    step = next(item for item in plan.steps if item.stage == "motion")
+    record = next(item for item in run.steps if item.step_id == step.step_id)
+    return runner, store, plan, grant, run, step, record
+
+
+def test_unbaking_limits_are_explicit_strict_and_bound_to_original_permissions():
+    from cascadeur_complete.unbaking_contract import UnbakingTopologyPolicy
+    value = unbaking_spec_dict()
+    RecipeSpec.model_validate(value)
+    invalid = []
+    missing = unbaking_spec_dict()
+    del missing["motion"]["unbaking_limits"]
+    invalid.append(missing)
+    for field, bad in (("maximum_added_keys", True), ("maximum_removed_keys", -1),
+                       ("maximum_written_keys", 2.0), ("maximum_added_keys", 6),
+                       ("maximum_written_keys", 21), ("maximum_written_keys", 2)):
+        bad_value = unbaking_spec_dict()
+        bad_value["motion"]["unbaking_limits"][field] = bad
+        invalid.append(bad_value)
+    forbidden = unbaking_spec_dict()
+    forbidden["intent"]["allow_key_insertion"] = False
+    invalid.append(forbidden)
+    settings = unbaking_spec_dict()
+    settings["motion"]["settings"] = {"maximum_added_keys": 0}
+    invalid.append(settings)
+    other_mode = unbaking_spec_dict()
+    other_mode["motion"].update(mode="existing", unbaking_step=None)
+    invalid.append(other_mode)
+    for candidate in invalid:
+        with pytest.raises(ValidationError):
+            RecipeSpec.model_validate(candidate)
+    with pytest.raises(ValidationError):
+        UnbakingTopologyPolicy.model_validate({**value["motion"]["unbaking_limits"],
+            "allow_key_insertion": 1, "allow_interpolation_change": False})
+    with pytest.raises(ValidationError):
+        UnbakingTopologyPolicy.model_validate({**value["motion"]["unbaking_limits"],
+            "allow_key_insertion": False, "allow_interpolation_change": False})
+
+
+def test_unbaking_and_cleanup_share_the_original_generated_key_bound():
+    value = unbaking_spec_dict()
+    value["cleanup"] = [{"kind": "foot_contacts", "object_ids": ["root"]} for _ in range(3)]
+    plan = build_plan(RecipeSpec.model_validate(value), [])
+    motion = next(item for item in plan.steps if item.stage == "motion")
+    insertions = [item for item in plan.steps if item.stage == "key_insert"]
+    assert motion.max_effect_from_baseline.maximum_added_keys == 2
+    assert motion.max_effect_from_baseline.maximum_written_keys == 6
+    assert [item.max_effect_from_baseline.maximum_added_keys for item in insertions] == [1, 1, 1]
+    assert motion.max_effect_from_baseline.maximum_added_keys + sum(
+        item.max_effect_from_baseline.maximum_added_keys for item in insertions) == 5
+
+
+@pytest.mark.parametrize("change", ["additions", "interpolation", "layers", "range"])
+def test_unbaking_authorization_rejects_policy_or_scope_beyond_the_exact_declaration(tmp_path, change):
+    """Host contract comparison; synthetic sources are not runtime authority."""
+    from cascadeur_complete.recipe_authorization import validate_step_authorization
+    from cascadeur_complete.stage_contracts import StageEffect
+    runner, _, plan, grant, run, step, _ = allocated_unbaking_boundary(tmp_path)
+    effect = runner.service.recipe_resolve_stage_effect(plan, run, step, {})
+    assert effect.arguments["topology_policy"] == {**plan.spec.motion.unbaking_limits.model_dump(mode="json"),
+        "allow_key_insertion": True, "allow_interpolation_change": False}
+    validate_step_authorization(runner.store, grant, plan, run, step, source=effect.source_binding,
+                                arguments=effect.arguments, stage_effect=effect)
+    value = effect.model_dump(mode="json")
+    args = value["arguments"]
+    if change == "additions":
+        args["topology_policy"]["maximum_added_keys"] = 3
+    elif change == "interpolation":
+        args["topology_policy"]["allow_interpolation_change"] = True
+    elif change == "layers":
+        args["layer_ids"] = ["another-layer"]
+        value["target_layer_ids"] = ["another-layer"]
+    else:
+        args["first_frame"] = 6
+    # Keep the wire self-consistent, so rejection must compare it with the
+    # original declaration rather than merely notice stale digest fields.
+    value["arguments_digest"] = digest(args)
+    value["operation_digest"] = digest([{"name": step.operation_name, "arguments": args}])
+    value["source_binding"]["scope"] = {"operation_name": step.operation_name,
+        "operation_arguments": args, "operation_arguments_digest": digest(args)}
+    changed = StageEffect.model_validate(value)
+    with pytest.raises(RecipeConflict, match="UNBAKING_AUTHORIZATION_MISMATCH"):
+        validate_step_authorization(runner.store, grant, plan, run, step, source=changed.source_binding,
+                                    arguments=changed.arguments, stage_effect=changed)
+
+
+def test_unbaking_reserves_maximum_keys_before_prepare_and_never_refunds_unknown(tmp_path):
+    """Real host CAS and repeated ledger queries, not native action/failure evidence."""
+    runner, store, plan, _, run, step, record = allocated_unbaking_boundary(tmp_path)
+    prepared, queried = [], []
+    def prepare(feature, operation, args, ttl, **kwargs):
+        current = store.read(run.run_id)
+        sealed = next(item for item in current.steps if item.step_id == step.step_id)
+        assert sealed.state == "preparing" and sealed.request_id == kwargs["execution_context"]["request_id"]
+        assert current.budgets_used.generated_keys == 2 and current.budgets_used.written_keys == 6
+        prepared.append((feature, operation, args, kwargs))
+        return {"confirmation_token": "original-host-token"}
+    runner.service.prepare_change = prepare
+    ready = runner._prepare(run, record, step, plan)
+    sealed = next(item for item in ready.steps if item.step_id == step.step_id)
+    assert sealed.state == "prepared" and sealed.calls_used == 1 and len(prepared) == 1
+    interrupted = sealed.model_copy(update={"state": "dispatching", "execution_outcome": "outcome_unknown"})
+    store.compare_and_update(ready.run_id, expected_seq=ready.seq, lease_epoch=ready.lease_epoch,
+        transition={"steps": [interrupted.model_dump(mode="json") if item.step_id == step.step_id
+                              else item.model_dump(mode="json") for item in ready.steps]})
+    runner.service.client = SimpleNamespace(request_status=lambda request_id: queried.append(request_id) or {
+        "phase": "dispatch_started", "outcome": "outcome_unknown"})
+    runner.reconcile(run.run_id)
+    observed = runner.reconcile(run.run_id)
+    remaining = next(item for item in observed.steps if item.step_id == step.step_id)
+    assert observed.state == "blocked" and observed.blocked_reason == "outcome_unknown"
+    assert observed.budgets_used == ready.budgets_used
+    assert remaining.request_id == sealed.request_id and remaining.token_ref == sealed.token_ref
+    assert remaining.calls_used == sealed.calls_used and len(prepared) == 1
+    assert queried == [sealed.request_id, sealed.request_id]
+
+
 def allocated_refinement_boundary(tmp_path, *, fault=None):
     """Persist host continuity doubles, never native topology/completion proof."""
     from cascadeur_complete.motion_key_layout import KeyLayoutObservation

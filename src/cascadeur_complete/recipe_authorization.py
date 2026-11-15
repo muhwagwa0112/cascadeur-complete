@@ -107,6 +107,42 @@ def validate_step_authorization(
         expected_lineage = step.target.lineage_id
         if expected_lineage is not None and source.binding.document_lineage_id != expected_lineage:
             raise RecipeConflict("Target document lineage differs from the authorized plan")
+    if step.stage == "motion" and plan.spec.motion.mode == "native_unbaking":
+        from .unbaking_contract import UnbakingTopologyPolicy, unbaking_topology_policy
+        motion = plan.spec.motion
+        limits = motion.unbaking_limits
+        policy = unbaking_topology_policy(limits, allow_key_insertion=plan.spec.intent.allow_key_insertion,
+            allow_interpolation_change=plan.spec.intent.allow_interpolation_change)
+        try:
+            wire_policy = UnbakingTopologyPolicy.model_validate(arguments.get("topology_policy"))
+        except ValueError as exc:
+            raise RecipeConflict("UNBAKING_TOPOLOGY_POLICY_MISMATCH") from exc
+        ids, layers = step.target.object_ids, step.target.layer_ids
+        if step.target.derived_ref is not None:
+            mapping = next((item for item in run.derived_targets
+                if item.reference_digest == digest(step.target.derived_ref)), None)
+            if mapping is None:
+                raise RecipeConflict("DERIVED_TARGET_UNRESOLVED")
+            ids = tuple(mapping.role_ids[key] for key in ids) if ids else mapping.object_ids
+            layers = mapping.layer_ids
+        if len(step.frame_ranges) != 1:
+            raise RecipeConflict("UNBAKING_REQUIRES_ONE_EXACT_FRAME_RANGE")
+        first, last = step.frame_ranges[0]
+        expected = {"step": motion.unbaking_step, "object_ids": list(ids), "layer_ids": list(layers),
+            "first_frame": first, "last_frame": last, "topology_policy": policy.model_dump(mode="json")}
+        if (stage_effect is None or source is None or not ids or not layers or first >= last
+                or step.feature_id != "unbaking" or step.operation_name != "generation.unbaking"
+                or step.fixed_parameters != motion.model_dump(mode="json")
+                or step.max_effect_from_baseline.maximum_added_keys != limits.maximum_added_keys
+                or step.max_effect_from_baseline.maximum_written_keys != limits.maximum_written_keys
+                or wire_policy != policy or arguments != expected
+                or type(arguments.get("first_frame")) is not int or type(arguments.get("last_frame")) is not int
+                or stage_effect.target_object_ids != tuple(ids) or stage_effect.target_layer_ids != tuple(layers)
+                or source.scope.get("operation_name") != step.operation_name
+                or source.scope.get("operation_arguments_digest") != digest(arguments)
+                or source.scope.get("operation_arguments") != arguments):
+            raise RecipeConflict("UNBAKING_AUTHORIZATION_MISMATCH")
+        return
     if step.stage == "key_insert":
         from .motion_key_layout import KeyTopologyDelta
         delta = KeyTopologyDelta.model_validate(topology_delta)
@@ -116,7 +152,8 @@ def validate_step_authorization(
         expected = {"object_id": additions[0].object_id, "layer_id": additions[0].layer_id,
             "additions": [{"frame": row.frame, "position": list(row.value), "mode": row.mode} for row in additions],
             "space": "local", "allow_key_insertion": True, "max_added_keys": cap} if additions else None
-        approved_total = sum(item.max_effect_from_baseline.maximum_added_keys for item in plan.steps if item.stage == "key_insert")
+        approved_total = sum(item.max_effect_from_baseline.maximum_added_keys for item in plan.steps
+            if item.stage == "key_insert" or (item.stage == "motion" and item.operation_name == "generation.unbaking"))
         original_cap = min(plan.spec.budgets.generated_keys, int(plan.spec.intent.correction_envelope.get("added_keys", 0)))
         if (not plan.spec.intent.allow_key_insertion or approved_total > original_cap
                 or stage_effect is None or source is None or proof is None or not 1 <= len(additions) <= cap <= 8

@@ -11,6 +11,7 @@ from .models import ErrorCode, ExecutionMode, ResultEnvelope, SourceBinding
 from .product_catalog import PRODUCT_CATALOG, SUPPORTED_BUILD
 from .service import CascadeurService
 from .ui_file_flow import dialog_flow_arguments, ui_file_flow_arguments
+from .unbaking_contract import UnbakingTopologyPolicy
 
 mcp = MCPServer(
     "cascadeur-complete",
@@ -743,13 +744,18 @@ def inbetweening_prepare(ttl: float=300, source_binding: SourceBinding | None=No
 
 
 @mcp.tool()
-def animation_unbaking_prepare(object_ids: list[str], layer_ids: list[str], first_frame: int, last_frame: int, step: Literal['prepare_keys_by_fulcrums', 'adjust_keys_and_interpolation', 'adjust_autoposing_lock_state']='adjust_keys_and_interpolation', ttl: float=300, source_binding: SourceBinding | None=None) -> dict[str, Any]:
-    """Prepare one exact unbaking target; native completion qualification remains required."""
+def animation_unbaking_prepare(object_ids: list[str], layer_ids: list[str], first_frame: int, last_frame: int, topology_policy: UnbakingTopologyPolicy, step: Literal['prepare_keys_by_fulcrums', 'adjust_keys_and_interpolation', 'adjust_autoposing_lock_state']='adjust_keys_and_interpolation', ttl: float=300, source_binding: SourceBinding | None=None) -> dict[str, Any]:
+    """Prepare an exact unbaking scope with explicit topology permissions and finite key limits.
+
+    Supply both permission flags and maximum added/removed/written keys. These
+    bounds do not qualify native action completion or enable its closed gate.
+    """
     if (not object_ids or not layer_ids or len(set(object_ids)) != len(object_ids)
-            or len(set(layer_ids)) != len(layer_ids) or first_frame >= last_frame):
+            or len(set(layer_ids)) != len(layer_ids) or not 0 <= first_frame < last_frame):
         return _invalid('Unique explicit objects/layers and an increasing frame interval are required')
     return _prepare('unbaking', 'generation.unbaking', {'step': step, 'object_ids': object_ids,
-        'layer_ids': layer_ids, 'first_frame': first_frame, 'last_frame': last_frame}, ttl, source_binding)
+        'layer_ids': layer_ids, 'first_frame': first_frame, 'last_frame': last_frame,
+        'topology_policy': topology_policy.model_dump(mode='json')}, ttl, source_binding)
 
 
 @mcp.tool()
