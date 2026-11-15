@@ -7,7 +7,32 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 설치 상태 이관과 보관 자료 삭제 범위
+### 최신 추가: 설치 maintenance lease와 실제 앱 재시작
+
+원격을 다시 fetch했으며 r4 개선안 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`다. 기존 16개 목표를 유지한다. 이번 변경은 R4-16의 설치·재실행 경합을 줄이며 전체 목표나 실제 installer 교체 완료를 뜻하지 않는다.
+
+- host와 embedded bridge에 같은 dependency-free gate 모듈을 추가했다. runtime root의 **부모 폴더**에 `.<runtime-name>.maintenance.lock`을 두고 Windows `GENERIC_READ/FILE_SHARE_READ` handle을 프로세스 수명 동안 유지한다. host main과 state 생성, native pump 첫 heartbeat보다 앞서 획득하며 설치 중이면 `INSTALLATION_BUSY`로 중단한다. 파일 존재·PID·TTL로 잠금 소유권을 추정하지 않고 OS가 종료 시 해제한다.
+- source installer는 최종 idle 확인 전에 같은 gate를 `ReadWrite/FileShare.None`으로 열고 old runtime 이동·상태 이관·activation·hooks·rollback·정리까지 유지한다. frozen installer는 부모 Setup 프로세스가 backup 전 `CreateFileW` 독점 handle을 획득하고 `DeinitializeSetup`에서 닫는다. 자식 hooks에 우회 권한이나 인증키 재생성 경로를 추가하지 않았다.
+- 기존 `verify-install.ps1`은 source console entry에도 `--smoke`를 넘겼으나 source entry는 이를 처리하지 않고 서버를 실행했다. smoke client를 `src/cascadeur_complete/mcp_smoke.py`의 공통 구현으로 옮기고 source에도 dispatch를 연결했다. verification은 고유한 disposable state에서 MCP initialize/list/status를 호출하므로 설치 중 실제 state를 열지 않는다. 자식 종료를 기다린 뒤 소유한 임시 root와 gate만 정리하며 기존 환경변수를 복원한다.
+
+실제 Windows 다중 프로세스 확인은 ignored `artifacts/native-r4/maintenance-lease-9a577ad0-7a1e-49f4-84bc-d16f1bcddc32/observation.json`에 있다. source checkout의 실제 console entry와 PowerShell 5.1의 제품 gate 함수를 사용했다.
+
+| 직접 확인 | 결과와 범위 |
+|---|---|
+| runtime reader 두 개 | host/native guard reader가 공존하며 installer를 차단. 한 reader가 종료돼도 남은 reader가 차단 |
+| installer 독점 유지 | 두 번째 installer와 새 host entry/native guard가 거부됨. runtime 폴더를 이동한 뒤에도 거부하며 거부된 host가 새 state를 만들지 않음 |
+| 비정상 종료·stale 파일 | 해당 재현용 child를 종료하면 OS가 handle을 해제. 남은 gate 파일을 삭제하지 않고 reader와 installer가 다시 획득. 기존 sentinel bytes 보존 |
+| source smoke | 실제 root 독점 lease 중 별도 state의 `--smoke --server`에서 initialize/list/status 성공, 도구 108개. 실제 설치·Codex 등록·버전 검사 전체를 통과한 증거는 아님 |
+
+native bytes 변경 때문에 이전 Cascadeur를 hot reload하지 않았다. 기존 탭은 빈 탭 또는 소유한 단일 객체 복제본인지 SDK로 확인하고, 복제본 두 개를 `restart-preservation-d69c58b3-4a66-4288-a20b-f6c37bb6a672/owned-tab-1.casc`, `owned-tab-2.casc`에 각각 13,989 bytes로 저장했다(각 SHA-256 `19dd95910c03b671d006268fb2fea54f45983b00766c9aed565826e14791951f`). 앱 정상 종료 후 설치된 **Cascadeur `2026.2.3.0.16863`, PID `12340`, embedded Python `3.11.0`**을 새로 실행했다.
+
+새 프로세스는 checkout의 `cascadeur_side/cascadeur_complete/installation_guard.py`를 로드했으며 isolated runtime을 사용한다. epoch `9d124044-b683-4d39-b56d-936e1af2cf10`, loaded bridge fingerprint `dfbd3b9afbd68e7d80606d5a57b9d88505d8fbc4e38de80ebb32c1e15d862e99`를 현재 disk bytes와 대조했다. pump `last_error=null`, 실제 native reader가 같은 root의 installer 독점 open을 차단했다. 관측은 `artifacts/native-r4/maintenance-actual-process-observation.json`이다. 전역 MCP 설치를 교체하거나 재등록한 결과는 아니다.
+
+같은 새 epoch에서 독립 scene bootstrap/evaluation/checkpoint와 position model·기존 key writer를 재자격 확인했다. 새 disposable fixture의 실제 animated FBX export 두 번도 성공해 `io.export_fbx`를 등록했다. export 근거는 `export-qualification-d9ab8e74-3038-4b4b-a29f-d2fb3cf09862/qualification.json`, SHA-256 `f616135d1ec85e4eca06d798f08df929f934a6d7eedde16e73c3420324ca4e2f`다. 이 qualification의 quality는 `not_evaluated`, consumer roundtrip은 `unverified`이며 이전 epoch의 실제 Blender 왕복·게시 성공과 구분한다. 이전 run/승인/receipt를 새 구현으로 재서명하거나 native effect를 replay하지 않았다.
+
+**남은 문제:** source/frozen installer 전체 교체와 Inno compile/release build는 실행하지 않았다. gate 미지원 구버전의 검사 뒤 재실행은 새 gate가 강제 차단하지 못하므로 기존 idle scan도 유지한다. lease는 같은 runtime state root 사이의 보호이며 별도 root로 실행한 외부 client까지 전체 설치 교체로 검증한 것은 아니다. `verify-install.ps1`의 고정 버전 검사는 여전히 `2026.1.3.0.15619`를 요구한다. 실제 `2026.2`의 제한된 operation 관측을 전체 제품 지원으로 승격하지 않는다. 일반 rig/물리 메타데이터, 실제 부분 실패 뒤 인증된 conditional recovery, 기존 unknown의 authoritative reconciliation은 계속 미완료다. 전체 suite/CI도 실행하지 않았다.
+
+### 이전 추가: 설치 상태 이관과 보관 자료 삭제 범위
 
 이전 turn은 실제 export 왕복·게시 성공과 commit `ff1f2b8` 푸시로 진행됐다. 기존 16개 r4 목표를 유지하며 R4-16의 source/frozen 상태 연속성 경로를 이어 확인했다. 이번 변경은 native bridge bytes를 바꾸지 않으며 전역 설치·인증키·기존 unknown을 교체하지 않았다.
 

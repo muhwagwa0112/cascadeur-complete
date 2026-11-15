@@ -312,8 +312,15 @@ authentication keys, request/receipt/unknown history, consumed recovery claims,
 recipe records, snapshots, logs and user policy. Frozen upgrades retain that
 state in place; post-install hooks never merge a stale backup into it. Temporary
 Windows roots confirmed authenticated history and one-attempt consumption after
-copying. Full installer replacement/restart has not been observed; process idle
-scans do not provide an exclusive maintenance lease.
+copying. A stable sibling `.cascadeur-complete.maintenance.lock` now coordinates
+clients using the same runtime root: host/bridge processes retain shared Windows
+handles, while source installation and the parent frozen installer hold an
+exclusive handle through activation, hooks and rollback. The gate remains valid
+when the runtime directory moves; its existence alone never blocks startup.
+Verification uses disposable state and the shared source/frozen stdio smoke client.
+Windows subprocess checks and a clean restart of the installed Cascadeur build
+confirmed handle exclusion; full source/frozen installer replacement has not been
+observed. Older clients without the gate still require the process idle scan.
 
 ## Build an unsigned local package
 

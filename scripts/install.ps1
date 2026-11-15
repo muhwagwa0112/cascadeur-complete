@@ -60,11 +60,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Staged MCP smoke failed' }
 # recreate the environment after the runtime directory reaches its final path.
 Remove-Item -LiteralPath (Join-Path $StageRuntime '.venv') -Recurse -Force
 
-Assert-CascadeurUpgradeIdle $RuntimeRoot
 $movedOld = [System.Collections.Generic.List[object]]::new()
 $activatedTargets = [System.Collections.Generic.List[string]]::new()
 $targetState = [ordered]@{}
+$maintenanceLease = $null
 try {
+    # Staging above uses a disposable root. From this final idle check through
+    # activation, hooks and rollback, block new installed runtime readers and
+    # competing installers at the stable sibling gate, not the moved runtime.
+    $maintenanceLease = Enter-CascadeurMaintenanceLease $RuntimeRoot
+    Assert-CascadeurUpgradeIdle $RuntimeRoot
     foreach ($pair in @(
         [pscustomobject]@{ Target = $RuntimeRoot; Stage = $StageRuntime; BackupName = 'runtime' },
         [pscustomobject]@{ Target = $BridgeRoot; Stage = $StageBridge; BackupName = 'bridge' },
@@ -123,7 +128,11 @@ try {
     }
     throw
 } finally {
-    if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
+    try {
+        if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
+    } finally {
+        if ($null -ne $maintenanceLease) { $maintenanceLease.Dispose() }
+    }
 }
 
 [pscustomobject]@{

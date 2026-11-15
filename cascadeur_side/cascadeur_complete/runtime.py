@@ -119,6 +119,8 @@ def runtime_root():
 
 def ensure_dirs():
     root = runtime_root()
+    from .installation_guard import hold_runtime_lease
+    hold_runtime_lease(root)
     for relative in (
         "state/requests",
         "state/responses",

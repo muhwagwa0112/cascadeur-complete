@@ -307,6 +307,10 @@ def ensure_installed():
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     if not _inside_cascadeur(kernel32):
         return False
+    # Acquire before the pump's first heartbeat or request/key access. A new
+    # process launched during installation cannot recreate the replaced state.
+    from .runtime import ensure_dirs
+    ensure_dirs()
     thread_id = kernel32.GetCurrentThreadId()
     if _state["hwnd"] and (
         _state["thread_id"] == thread_id or time.time() - _state["last_heartbeat"] < 5 * HEARTBEAT_SECONDS

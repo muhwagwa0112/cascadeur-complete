@@ -71,9 +71,33 @@ if ($RequireSignature) {
 
 if (-not ($required | Where-Object { -not $checks[$_] })) {
     $SmokeExecutable = if ($checks.CodexAvailable) { $checks.CodexRegisteredPath } else { $Executable }
-    $smokeOutput = & $Executable --smoke --server $SmokeExecutable --timeout 30 2>&1
-    $checks.McpSmoke = $LASTEXITCODE -eq 0
-    $checks.McpSmokeResult = ($smokeOutput -join "`n")
+    # Verify stdio using disposable state, including while Setup owns the real
+    # runtime maintenance gate. No auth/state-root bypass enters the server.
+    $previousSmokeRoot = $env:CASCADEUR_MCP_ROOT
+    $smokeParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    $smokeName = 'cascadeur-mcp-verify-' + [guid]::NewGuid().ToString('N')
+    $smokeRoot = [IO.Path]::GetFullPath((Join-Path $smokeParent $smokeName))
+    try {
+        $env:CASCADEUR_MCP_ROOT = $smokeRoot
+        $smokeOutput = & $Executable --smoke --server $SmokeExecutable --timeout 30 2>&1
+        $checks.McpSmoke = $LASTEXITCODE -eq 0
+        $checks.McpSmokeResult = ($smokeOutput -join "`n")
+    } finally {
+        if ($null -eq $previousSmokeRoot) { Remove-Item Env:CASCADEUR_MCP_ROOT -ErrorAction SilentlyContinue }
+        else { $env:CASCADEUR_MCP_ROOT = $previousSmokeRoot }
+        # This exact GUID child is owned by this invocation, never RuntimeRoot.
+        if ((Split-Path -Parent $smokeRoot) -ine $smokeParent -or (Split-Path -Leaf $smokeRoot) -cne $smokeName) {
+            throw 'Disposable verification state escaped its temporary parent.'
+        }
+        if (Test-Path -LiteralPath $smokeRoot) {
+            if ((Get-Item -LiteralPath $smokeRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Disposable verification state is a reparse point.'
+            }
+            Remove-Item -LiteralPath $smokeRoot -Recurse -Force
+        }
+        $smokeGate = Join-Path (Split-Path -Parent $smokeRoot) ('.' + (Split-Path -Leaf $smokeRoot) + '.maintenance.lock')
+        if (Test-Path -LiteralPath $smokeGate) { Remove-Item -LiteralPath $smokeGate -Force }
+    }
 }
 $required += 'McpSmoke'
 

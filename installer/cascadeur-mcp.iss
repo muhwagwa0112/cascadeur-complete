@@ -60,9 +60,70 @@ Name: "{group}\Uninstall Cascadeur MCP"; Filename: "{uninstallexe}"
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\uninstall-hooks.ps1"" -RuntimeRoot ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "CascadeurMCPUnregister"
 
 [Code]
+function OpenMaintenanceFile(FileName: String; DesiredAccess, ShareMode: Cardinal;
+  SecurityAttributes: THandle; CreationDisposition, FlagsAndAttributes: Cardinal;
+  TemplateFile: THandle): THandle;
+  external 'CreateFileW@kernel32.dll stdcall setuponly';
+
+function CloseMaintenanceFile(FileHandle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall setuponly';
+
+function MaintenanceLastError: Cardinal;
+  external 'GetLastError@kernel32.dll stdcall setuponly';
+
 var
   PostUninstallScript: String;
   PostUninstallOwnership: String;
+  MaintenanceHandle: THandle;
+  MaintenanceHeld: Boolean;
+
+function AcquireMaintenanceLease: String;
+var
+  RuntimePath: String;
+  ParentPath: String;
+  GatePath: String;
+  Opened: THandle;
+  ErrorCode: Cardinal;
+begin
+  Result := '';
+  if MaintenanceHeld then
+    Exit;
+  RuntimePath := RemoveBackslash(ExpandFileName(ExpandConstant('{app}')));
+  ParentPath := ExtractFileDir(RuntimePath);
+  if (ParentPath = '') or (ExtractFileName(RuntimePath) = '') then
+  begin
+    Result := 'Unable to determine the stable maintenance gate directory.';
+    Exit;
+  end;
+  GatePath := AddBackslash(ParentPath) + '.' + ExtractFileName(RuntimePath) + '.maintenance.lock';
+  if not ForceDirectories(ParentPath) then
+  begin
+    Result := 'Unable to create the maintenance gate directory.';
+    Exit;
+  end;
+  { Parent setup process owns this non-inheritable handle across backup,
+    InstallDelete, child hooks, verification and rollback. File existence is
+    harmless; only incompatible live sharing handles deny this open. }
+  Opened := OpenMaintenanceFile(GatePath, $C0000000, 0, 0, 4, $80, 0);
+  if Opened = THandle(-1) then
+  begin
+    ErrorCode := MaintenanceLastError;
+    Result := 'Unable to acquire the maintenance lease. Close the installed runtime and any other installer. Windows error ' + IntToStr(ErrorCode) + '.';
+    Exit;
+  end;
+  MaintenanceHandle := Opened;
+  MaintenanceHeld := True;
+end;
+
+procedure DeinitializeSetup;
+begin
+  if MaintenanceHeld then
+  begin
+    if not CloseMaintenanceFile(MaintenanceHandle) then
+      Log('Unable to close the maintenance lease; Windows will release it when Setup exits.');
+    MaintenanceHeld := False;
+  end;
+end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
@@ -70,7 +131,9 @@ var
   BackupScript: String;
   Parameters: String;
 begin
-  Result := '';
+  Result := AcquireMaintenanceLease;
+  if Result <> '' then
+    Exit;
   ExtractTemporaryFile('upgrade-state.ps1');
   ExtractTemporaryFile('backup-existing.ps1');
   ExtractTemporaryFile('restore-existing.ps1');

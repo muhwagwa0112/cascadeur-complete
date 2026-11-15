@@ -1283,6 +1283,21 @@ def redo(expected_revision: str, scene_id: str | None=None, expect_change: bool=
     return _confirmation_required("redo_prepare")
 
 def main() -> None:
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--smoke":
+        del sys.argv[1]
+        from .mcp_smoke import main as smoke_main
+
+        smoke_main()
+        return
+
+    # Hold the installation even while the stdio server is idle and has not
+    # constructed its lazy service yet. Maintenance must precede state creation.
+    from .installation_guard import hold_runtime_lease
+    from .paths import RuntimePaths
+
+    hold_runtime_lease(RuntimePaths.discover().root)
     mcp.run(transport="stdio")
 
 

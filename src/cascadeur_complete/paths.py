@@ -62,6 +62,9 @@ class RuntimePaths:
         )
 
     def ensure(self) -> None:
+        from .installation_guard import hold_runtime_lease
+
+        hold_runtime_lease(self.root)
         for path in (
             self.root,
             self.state,
