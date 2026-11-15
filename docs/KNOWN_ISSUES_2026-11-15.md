@@ -7,7 +7,30 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 실제 absent-frame 키 삽입 primitive
+### 최신 추가: 소유 checkpoint의 키 삽입 연결과 실제 unknown 경계
+
+원격 개선안을 다시 fetch했으며 r4 최신은 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하다. 전체 16개 목표는 계속 진행 중이다. 아래에는 이번 구현과 실제 관측을 구분했다. 이전 절의 "production 미등록"은 당시 관측이며 현재의 명시적 제한 route 등록과 구분한다.
+
+- `native_key_insertion_adapter.py`를 추가하고 실제 현재-process 자격 확인이 끝난 명령에서만 `motion.key_topology_insert`를 등록한다. 공개 `position_keys_insert_prepare` → 기존 `change_commit` 경로를 연결했다. explicit object/layer, local **native scene units** 값, 삽입 opt-in, 1–8개 예산, 현재 epoch/scene/lineage의 native-owned working checkpoint와 변경되지 않은 backup bytes를 요구한다. 기존 원본·전체 native projection·single-use source 검사를 유지한다. 성공 projection만 별도 successor capture 대상으로 인정하며 같은 삽입을 재실행하지 않는다. 등록 여부를 capability로 표시하되 실제 공개 execution 성공으로 표시하지 않는다.
+- host의 locator 계약을 native ID 계약과 분리했다. `layer_frame_locator`를 영구 key GUID로 바꾸지 않으며 source/capture/context/scene/epoch와 전체 예상 driver를 묶은 native-private prediction을 요구한다. 기존 key/section/value/tangent/metadata와 boundary 보존, 정확한 새 row, 실제 terminal receipt에 묶인 readback을 확인한다. **native prediction/completion 발급·인증 연결은 아직 없으므로 recipe topology gate는 그대로 닫힌다.** standalone 등록은 recipe `key_topology_write` 권한을 주지 않는다.
+- unbaking lowering과 공개 prepare는 승인된 object/layer 및 단일 frame interval을 실행 인자에 고정한다. handler는 source closure·전체 선택 layer의 object closure·실제 selection을 대조한다. `call_action(str) -> None`을 완료로 세지 않으며 static `scene_revision_changed` 성공 선언을 제거했다. action dispatch 뒤 effect는 `unknown`이다. 전용 완료/topology/생성 key 예산 adapter는 여전히 미자격이며 실제 unbaking을 실행하거나 capability를 열지 않았다.
+- independent-scene qualifier는 성공·실패 모두 새 탭/파일을 보존하고 retained ID/path/ownership을 반환한다. 원 탭의 활성 상태·projection·inventory를 확인한 뒤만 등록한다. 자동 `remove_application_scene`/fixture release를 제거했다. 실패 시 retention 조회도 실패하면 원 예외를 보존한다. 명령 래퍼의 잘못된 `scene.success`도 제거했다. 이 변경은 native crash 원인 해결이나 탭 종료 안정성 보장이 아니다.
+
+**실제 공개 요청 실패:** PID `27416`, epoch `beb0c783-2287-44f2-bee9-dbfc6cd9ec39`에서 source capture와 prepare를 거쳐 request `fcf3352a-483c-4f9c-bc18-8b61a58822eb`를 commit했다. 기존 keys `0,2,4,6,8`에 frame `1`을 추가하자 callback/setter는 반환했지만 SDK가 기존 section `0`과 새 section `1`의 LINEAR를 STEP으로 바꿨다. 전체 projection 대조가 이를 잡아 **`outcome_unknown` / `POSTCONDITION_FAILED` / `NATIVE_COMPLETION_UNKNOWN`**으로 남겼다. 실제 terminal receipt 재조회도 같은 unknown이며 source 재사용·재dispatch·복구 성공 승격을 하지 않았다. 원 빈 탭 projection은 보존했고 실패 후 소유 작업은 별도 `unknown-after-insertion.casc`로 남겼다. SHA-256 `2de6cda5c8e4dab134dc77126ded7d6f1383bc9b97a1b94db87db978ffd08bca`다. 원 immutable request/terminal receipt는 그대로 유지한다.
+
+이 관측에 따라 native preflight와 host locator 계약 모두 **삽입 후 모든 인접 key 간격 최소 2 frames**로 자격 범위를 제한했다. 1-frame interval을 새로 만드는 요청은 첫 setter 전에 `KEY_INSERTION_SPACING_UNQUALIFIED`로 거절한다. 기존 key 모드를 SDK가 바꾼 결과를 허용하도록 예상값을 약화하지 않았다.
+
+**최종 새 프로세스의 한정 관측:** 실제 설치 `C:\Program Files\Cascadeur\cascadeur.exe`, build `2026.2.3.0.16863`, PID `2328`(06:14:42 KST 시작), epoch `aea96fff-c90c-4d8c-bba3-4ad5724e77a4`, loaded fingerprint `458d8d570dfe07b7924c2dac91e82d066380ae5bd6f7240407254101a3ddd2f9`에서 수행했다. 과거 private proof를 재사용하지 않고 finite-model 40개와 LL/SS/LS/SL 네 삽입·별도 보간을 다시 확인했다. 실제 `Qualify key insertion adapter` 래퍼가 `observed/complete`와 guarded route 등록을 반환했다. 이어 실제 independent-scene qualification은 세 새 탭을 유지하고 원 활성 탭/projection/inventory를 보존했다. 별도 SDK event에서 새 `0,4,8` fixture를 생성·저장하고 새 owned working/checkpoint로 bootstrap했다. 이는 setup용 직접 native bootstrap이며 host token commit 성공 근거가 아니다. frame `1`의 readonly preflight는 위 spacing 오류로 거절했고 전체 working projection이 그대로였다. 당시 원 빈 탭을 포함한 10개 탭을 보존했다.
+
+그러나 frame `2`를 대상으로 한 **새 host source capture는 dispatch 전에** `An earlier effect has no authoritative completion`으로 차단됐다. 원 `fcf3352a-…` unknown 때문에 bridge가 상태/로그 외 새 요청을 막는 기존 정책이다. runtime root 변경, ledger/receipt 삭제, ID 재사용 또는 직접 SDK 삽입으로 우회하지 않았다. 따라서 새 2-frame route의 공개 commit·successor source·별도 evaluation receipt 성공은 **미확인**이다. 마지막 UI 조회에서는 소유 `working.casc`와 fixture 객체가 표시됐고 프로세스는 존재했지만, 같은 종료 전 점검에서 `Responding=False`도 관측했다. 이를 현재 안정 실행 또는 장시간 정상 상태로 표현하지 않는다. 탭을 추가로 닫거나 사용자 autosave를 열지 않았다.
+
+ignored 실제 근거: `artifacts/native-r4/guarded-key-insertion-adjacent-unknown.json` SHA-256 `b6d95b7fa1c05aba4ba2025c2697c11bc47aee90a29d59e7b9ef4a50a0c36d82`; `guarded-key-insertion-unknown-inspection.json`; `guarded-key-insertion-unknown-retained.json`. 최종 새 epoch의 `key-insertion-spaced-prerequisites.json` SHA-256 `4351cdb4ad29a5b795a73325ec42844dece93a5d3f841b98dc4671223fd057e2`; `key-insertion-spaced-scene-qualification.json` SHA-256 `e55ba3e3a94d597d38ad89fd8a29dc3cbc2b44fcceebdd5d5377a8e9251ef376`; `key-insertion-adapter-setup.json` SHA-256 `94375ca96cc379fb1e790b527a721d7cc856e2bc859ea0c184986b48174089e5`. 원 request/receipt는 `isolated-runtime/state/request_records/fcf3352a-483c-4f9c-bc18-8b61a58822eb/` 아래 있다. auth/state와 실제 작업 파일은 Git에 넣지 않는다.
+
+**추가 crash 관측:** 종료 중 PID `37920`(06:04:52 KST)와 `27416`(06:10:28)은 `Qt6Core.dll` 6.5.3.0 / `0xc0000005` / offset `0xb4c7f`를 기록했다. report는 각각 `4fa23f71-f4d5-4446-9777-da977e3c8052`, `27da418d-06d0-4fb8-bf44-6b6b49f37f4d`다. PID `33988`은 06:12:54 KST, offset `0xae815`, report `ab2ffd23-7854-4546-b19f-cbebfd044048`로 종료했다. 마지막 경우 qualification 후 다음 fixture의 evaluate/read 단계에서 crash가 났으며 HTTP는 idle 대기 timeout을 반환했다. 당시 qualifier의 자동 탭 제거가 있었다는 시간상 관측만 있고 원인 확정은 아니다. 최종 retained-tabs 구현과 별도 SDK event는 해당 단계를 통과했지만 종료/soak를 검증하지 않았다. 근거는 ignored `key-insertion-adapter-restart-exit.json`, `key-insertion-spacing-restart-exit.json`, `key-insertion-spacing-qualification-crash.json`이다.
+
+남은 작업은 native locator prediction/completion 인증, 실제 공개 terminal/successor/evaluation 연결, 승인 intent와 sparse/continuation 및 원본 baseline 품질, bounded unbaking 완료/예산 검증, 실제 실패 복구와 lifecycle/installer 연속성이다. 일반 character·rotation·coupled/shared layer 삽입은 미자격이다. 새 domain 계약 사례는 기존 테스트 파일에 추가했지만 이번에 실행하지 않았다. 전체 suite/build/CI도 실행하지 않았다. 전체 목표를 완료 처리하지 않는다.
+
+### 이전 추가: 실제 absent-frame 키 삽입 primitive
 
 원격 개선안과 구현 브랜치를 다시 fetch했다. r4는 `6a9338c`로 동일하며 전체 16개 목표는 진행 중이다. R4-09의 native 연결을 위해 `native_key_insertion.py`와 명시적 `Qualify key insertion adapter` 명령을 추가했다. 기존 전체 key-grid 재작성과 달리 `set_section`은 **현재 key와 section이 없는 내부 frame에만** 호출하고, 해당 새 key의 local position만 쓴다. 새 구간의 LINEAR/STEP 모드는 원래 나누는 구간과 같아야 한다. 기존 key/section 변경·삭제·retime이나 모드 변경 권한을 추가하지 않았다.
 

@@ -14,5 +14,4 @@ def run(scene):
     from .native_independent_scene import qualify_independent_scene_adapter
     models = ensure_independent_models()
     adapter = qualify_independent_scene_adapter()
-    scene.success("Qualified independent complete-scene bootstrap, evaluation and checkpoint")
     return {"models": models, "scene_adapter": adapter}

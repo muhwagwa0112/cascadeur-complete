@@ -379,3 +379,115 @@ def test_key_insertion_requires_authority_for_its_new_outgoing_mode_only():
 def test_key_insertion_still_rejects_endpoints_existing_keys_and_duplicates(frames):
     with pytest.raises(MotionInputError,match="KEY_LAYOUT_INSUFFICIENT"):
         _plan_domain_key_insertions([_domain_key_addition(frame,"LINEAR") for frame in frames])
+
+
+def _locator_insertion_domain_case():
+    """Synthetic wire-contract data only; no native qualification is implied."""
+    from copy import deepcopy
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from cascadeur_complete.capture import canonical_digest
+    from cascadeur_complete.motion_key_layout import KeyLayoutObservation
+    digest=canonical_digest({"domain_only":True})
+    source={"schema_version":1,"binding":{"schema_version":1,"runtime_epoch":"domain-epoch",
+        "scene_instance_id":"domain-scene","document_lineage_id":"domain-document",
+        "revision_kind":"scope_digest","scope_digest":digest,"content_revision":digest,
+        "selection_digest":None},"scope":{"object_ids":["a"]},"sample_digest":digest,
+        "inputs_digest":digest,"adapter_fingerprint":digest,"complete":False}
+    capture=replace(batch({"a":np.zeros((9,3))},9),space="local",source_binding=source)
+    rig=RigProfile("p","c",{"a":"a"},frozenset(("a",)))
+    intent=IntentConstraints(editable_frames=(0,8),allow_key_insertion=True,correction_envelope={"added_keys":2})
+    common={"ik_fk":"FK","fixation":"Free"}
+    def section(frame,mode):
+        return {"frame":frame,"is_key":True,"interval_mode":mode,"interval_common":dict(common),
+            "tangent":{"mode":"Continuous","left_weight_velocity":1.,"right_weight_velocity":1.},
+            "key_common":dict(common),"label":None}
+    def boundary(frame):
+        return {"frame":frame,"key_id":"layer:"+str(frame),"key_id_kind":"layer_frame_locator",
+                "locked":False,"event":False,"label":None}
+    def tangent(row):
+        return {**row["tangent"],"key_common":row["key_common"],"label":row["label"]}
+    sections=[section(0,"LINEAR"),section(4,"STEP"),section(8,"STEP")]
+    driver={"object_id":"a","channel":"position","space":"local","layer_id":"layer",
+        "key_id_kind":"layer_frame_locator","key_ids":["layer:0","layer:4","layer:8"],
+        "frames":[0,4,8],"values":[[0.,0.,0.],[4.,0.,0.],[8.,0.,0.]],
+        "segment_modes":["LINEAR","STEP"],"tangents":[tangent(row) for row in sections],
+        "boundary_keys":[boundary(frame) for frame in (0,4,8)],"sections":sections,
+        "influences":{"controllers":[],"blend":[],"cycle":[]},"data_id":"data",
+        "data_mode":"Animation","layer_objects":["a"],"native_model":"domain-piecewise"}
+    observed=KeyLayoutObservation(build_fingerprint=digest,evaluator_fingerprint=digest,
+        source_fingerprint=digest,capture_digest=canonical_digest(capture.as_dict()),
+        evidence_ref="domain-key-layout",support_status="supported",drivers=[driver]).model_dump(mode="json")
+    new_section=section(2,"LINEAR")
+    addition={"object_id":"a","channel":"position","layer_id":"layer","frame":2,
+              "value":[2.,0.,0.],"mode":"LINEAR","tangent":tangent(new_section)}
+    expected=deepcopy(observed["drivers"][0])
+    expected.update(frames=[0,2,4,8],key_ids=["layer:0","layer:2","layer:4","layer:8"],
+        values=[[0.,0.,0.],[2.,0.,0.],[4.,0.,0.],[8.,0.,0.]],
+        segment_modes=["LINEAR","LINEAR","STEP"],sections=[sections[0],new_section,*sections[1:]],
+        tangents=[tangent(row) for row in [sections[0],new_section,*sections[1:]]],
+        boundary_keys=[boundary(frame) for frame in (0,2,4,8)])
+    request={"key_layout_digest":canonical_digest(observed),"additions":[addition]}
+    proof={"contract":"independent_absent_layer_frame_position_v1","key_id_kind":"layer_frame_locator",
+        "value_space":"native_scene_units","request_digest":canonical_digest(request),
+        "key_layout_digest":canonical_digest(observed),"original_topology_digest":canonical_digest(observed["drivers"]),
+        "capture_digest":canonical_digest(capture.as_dict()),"context_digest":canonical_digest(capture.context.as_dict()),
+        "source_binding_digest":canonical_digest(source),"runtime_epoch":"domain-epoch",
+        "runtime_fingerprint":digest,"scene_instance_id":"domain-scene","document_lineage_id":"domain-document",
+        "before_projection_digest":digest,"model_qualification_digest":digest,
+        "insertion_qualification_digest":digest,"expected_driver":expected}
+    insertion_result={"request_digest":canonical_digest(request),"shared_layer_effects_observed":True,
+        "adapter_evidence_ref":"domain-insertion","locator_insertion":proof}
+    verifier=lambda _,key:SimpleNamespace(ok=True,result={"key_layout_digest":key})
+    insertion_verifier=lambda *_:SimpleNamespace(ok=True,result=insertion_result)
+    return capture,rig,intent,observed,addition,proof,insertion_result,verifier,insertion_verifier
+
+
+def test_locator_insertion_requires_exact_private_prediction_and_completed_readback():
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from cascadeur_complete.capture import canonical_digest
+    from cascadeur_complete.motion_key_layout import plan_key_insertion,validate_key_topology_readback
+    capture,rig,intent,observed,addition,proof,_,verifier,insertion_verifier=_locator_insertion_domain_case()
+    delta=plan_key_insertion(observed,capture,rig,intent,[addition],verifier=verifier,
+        insertion_verifier=insertion_verifier,generated_keys_budget=2)
+    assert delta.locator_insertion.value_space=="native_scene_units"
+    after=deepcopy(observed)
+    after["drivers"]=[deepcopy(proof["expected_driver"])]
+    completion={key:proof[key] for key in ("contract","request_digest","source_binding_digest",
+        "runtime_epoch","runtime_fingerprint","scene_instance_id","document_lineage_id","before_projection_digest")}
+    completion.update(key_layout_digest=canonical_digest(after),adapter_evidence_ref="domain-insertion",
+        after_projection_digest=canonical_digest({"domain_after":True}),
+        completion_receipt_digest=canonical_digest({"domain_completion":True}))
+    result={"key_layout_digest":canonical_digest(after),"completion_receipt_digest":completion["completion_receipt_digest"],
+            "locator_insertion_completion":completion}
+    readback=lambda *_:SimpleNamespace(ok=True,result=result)
+    assert validate_key_topology_readback(delta,after,verifier=readback)["added_keys"]==1
+    # A valid post observation digest does not authorize a different original source.
+    completion["scene_instance_id"]="another-scene"
+    with pytest.raises(MotionInputError,match="KEY_TOPOLOGY_READBACK_UNVERIFIED"):
+        validate_key_topology_readback(delta,after,verifier=readback)
+    completion["scene_instance_id"]=proof["scene_instance_id"]
+    after["drivers"][0]["sections"][0]["interval_mode"]="STEP"
+    result["key_layout_digest"]=completion["key_layout_digest"]=canonical_digest(after)
+    with pytest.raises(MotionInputError,match="KEY_TOPOLOGY_MISMATCH"):
+        validate_key_topology_readback(delta,after,verifier=readback)
+
+
+@pytest.mark.parametrize("change",["missing_proof","source","old_section","new_event","persistent_id"])
+def test_locator_insertion_rejects_unbound_or_rewritten_predictions(change):
+    from cascadeur_complete.motion_key_layout import plan_key_insertion
+    capture,rig,intent,observed,addition,proof,result,verifier,insertion_verifier=_locator_insertion_domain_case()
+    if change=="missing_proof":
+        result.pop("locator_insertion")
+    elif change=="source":
+        proof["document_lineage_id"]="another-document"
+    elif change=="old_section":
+        proof["expected_driver"]["sections"][0]["interval_mode"]="STEP"
+    elif change=="new_event":
+        proof["expected_driver"]["boundary_keys"][1]["event"]=True
+    else:
+        proof["expected_driver"]["key_ids"][1]="invented-guid"
+    with pytest.raises(MotionInputError,match="KEY_(INSERTION_ADAPTER_UNVERIFIED|TOPOLOGY_MISMATCH)"):
+        plan_key_insertion(observed,capture,rig,intent,[addition],verifier=verifier,
+            insertion_verifier=insertion_verifier,generated_keys_budget=2)

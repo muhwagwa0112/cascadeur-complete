@@ -69,13 +69,15 @@ def qualify_independent_scene_adapter():
     """Explicit owned fixture/save/load/evaluation/checkpoint observation.
 
     Requires a prior actual finite-model qualification in the same process.
-    This helper is not a wire operation and never runs on import.
+    This helper is not a wire operation and never runs on import. All created
+    tabs and files are retained on success or failure; the original tab is
+    restored as active without destroying qualification scenes.
     """
     import csc
     from . import runtime as rt
     from .native_adapters import _locked_input, _save_observed, installed_build
     from .native_export import _QualificationProgress
-    from .native_fixture import create_disposable_scene, create_independent_transform, release_disposable_scene
+    from .native_fixture import create_disposable_scene, create_independent_transform
     from .native_interpolation_qualification import qualification, evaluate_independent_transform
 
     guards.assert_loaded_package()
@@ -97,10 +99,10 @@ def qualify_independent_scene_adapter():
         "runtime_epoch": guards.RUNTIME_EPOCH, "runtime_fingerprint": guards.LOADED_FINGERPRINT,
         "build": installed_build(), "operations": []}
     adapter = NativeIndependentSceneAdapter(json.dumps(proof).encode())
-    succeeded = False
+    qualification_error, retention = None, None
     try:
         progress.mark("fixture")
-        fixture_scene = create_disposable_scene()
+        fixture_scene = create_disposable_scene(retain_on_failure=True)
         fixture = create_independent_transform(fixture_scene, "MCPIndependentSceneQualification",
             [(0, [0., 0., 0.]), (2, [2., 1., 0.]), (4, [0., 2., 1.])], ["LINEAR", "STEP"])
         evaluate_independent_transform(fixture_scene, fixture)
@@ -156,29 +158,55 @@ def qualify_independent_scene_adapter():
             "loaded_projection_digest": guards.digest(loaded), "evaluated_projection_digest": guards.digest(evaluated),
             "bootstrap": bootstrap, "evaluation": evaluation, "checkpoint": checkpoint})
         progress.mark("checkpoint", "complete")
-        succeeded = True
     except Exception as error:
+        qualification_error = error
         progress.mark("qualification", "failed", detail=str(error)[:1000])
         raise
     finally:
         try:
-            manager.set_current_scene(previous)
-            # A failed load may own an unknown tab. Preserve it and its files;
-            # remove only positively identified successful qualification tabs.
-            if succeeded and child is not None:
-                manager.remove_application_scene(child)
-            if source_scene is not None:
-                manager.remove_application_scene(source_scene)
-            if fixture_scene is not None:
-                release_disposable_scene(fixture_scene)
-            manager.set_current_scene(previous)
-            if any(not any(tab is item for item in manager.scenes()) for tab in original_tabs):
+            # Establish live identity before touching any retained wrapper.
+            # A failed native load may have created an unidentified extra tab;
+            # preserve that tab too, without claiming its ownership or success.
+            live = list(manager.scenes())
+            if any(not any(tab is item for item in live) for tab in original_tabs):
                 raise ValueError("NATIVE_COMPLETION_UNKNOWN: original scene inventory changed")
+            manager.set_current_scene(previous)
+            live = list(manager.scenes())
+            if (manager.current_scene() is not previous
+                    or any(not any(tab is item for item in live) for tab in original_tabs)
+                    or read_scene(previous) != original):
+                raise ValueError("NATIVE_COMPLETION_UNKNOWN: original scene inventory changed")
+            identified = [("fixture", fixture_scene), ("bootstrap_source", source_scene), ("working", child)]
+            if qualification_error is None and any(
+                    tab is None or not any(tab is item for item in live) for _, tab in identified):
+                raise ValueError("NATIVE_COMPLETION_UNKNOWN: retained qualification scene disappeared")
+            retained = []
+            for tab in live:
+                if any(tab is item for item in original_tabs):
+                    continue
+                role = next((role for role, item in identified if tab is item), None)
+                retained.append({"role": role or "unidentified_new_tab",
+                    "ownership": "identified_qualification_tab" if role else "unverified",
+                    **dict(guards.scene_instance(tab)), "path": str(tab.get_path_name())})
+            retention = {"retention_policy": "retain_qualification_tabs_and_files",
+                "retained_tabs": retained, "retained_directory": str(folder),
+                "original_active_scene_instance_id": guards.scene_instance(previous)["scene_instance_id"],
+                "original_inventory_preserved": True}
+            progress.mark("retention", "observed", retention_policy=retention["retention_policy"],
+                          retained_tab_count=len(retained), original_inventory_preserved=True)
+            if qualification_error is not None:
+                qualification_error.retention = retention
+                qualification_error.add_note(json.dumps(retention, sort_keys=True, allow_nan=False))
+        except Exception as retention_error:
+            if qualification_error is None:
+                raise
+            qualification_error.add_note("Retention observation failed: " + str(retention_error)[:1000])
         finally:
             vars(guards._LOCAL).clear()
             vars(guards._LOCAL).update(local_before)
-    # Cleanup is part of the observation. Do not publish authority before the
-    # original tab and inventory have actually been restored.
+    # Registration requires original activation/projection and inventory
+    # preservation. Tab destruction is deliberately not a qualification effect.
+    proof.update(retention)
     path = folder / "qualification.json"
     with path.open("xb") as stream:
         stream.write(json.dumps(proof, sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
@@ -187,4 +215,5 @@ def qualify_independent_scene_adapter():
         guards.register_adapter(operation, qualified)
     progress.mark("qualification", "observed")
     return {"adapter_id": _PROFILE, "evidence_path": str(path),
-        "evidence_sha256": qualified.verification["evidence_sha256"], "operations": list(_OPERATIONS)}
+        "evidence_sha256": qualified.verification["evidence_sha256"], "operations": list(_OPERATIONS),
+        **retention}

@@ -99,17 +99,88 @@ def root_motion(scene, _arguments, _request, context):
     )
 
 
-@handler("generation.unbaking", postconditions=("scene_revision_changed",))
-def unbaking(scene, arguments, _request, context):
-    step = str(arguments.get("step", "adjust_keys_and_interpolation"))
+@handler("generation.unbaking")
+def unbaking(scene, arguments, request, context):
+    """Dispatch only the exact authenticated target, without claiming completion.
+
+    ActionManager returns no completion receipt. A qualified native adapter must
+    still observe completion and bounded key/interpolation changes before this
+    operation can be enabled for guarded production dispatch.
+    """
+    from .. import guarded_runtime as guards
+    from .timeline_edit import _interval, _layers, _select_interval, _select_objects
+
+    required = {"step", "object_ids", "layer_ids", "first_frame", "last_frame"}
+    if not isinstance(arguments, dict) or set(arguments) != required:
+        raise ValueError("INVALID_WRITE_SCOPE: unbaking requires exact objects, layers and frame interval")
+    step = arguments["step"]
     actions = {
         "prepare_keys_by_fulcrums": "View.AutoInterpolation_Keys",
         "adjust_keys_and_interpolation": "View.Animation unbaking",
         "adjust_autoposing_lock_state": "AutoPosingTool.AutoUnlock",
     }
-    if step not in actions:
-        raise ValueError("Unknown unbaking step: " + step)
-    return _call_generation_action(scene, context, actions[step], "ready_for_unbaking", "Animation Unbaking")
+    if not isinstance(step, str) or step not in actions:
+        raise ValueError("Unknown unbaking step: " + str(step))
+    for field in ("object_ids", "layer_ids"):
+        values = arguments[field]
+        if (not isinstance(values, list) or not values
+                or any(not isinstance(item, str) or not item for item in values)
+                or len(set(values)) != len(values)):
+            raise ValueError("INVALID_WRITE_SCOPE: nonempty unique explicit " + field + " required")
+    if (type(arguments["first_frame"]) is not int or type(arguments["last_frame"]) is not int
+            or arguments["first_frame"] >= arguments["last_frame"]):
+        raise ValueError("INVALID_WRITE_SCOPE: unbaking requires an increasing integer interval")
+
+    source = request.get("source_binding")
+    guards.assert_source(scene, source, operation_name="generation.unbaking", arguments=arguments)
+    scope = source["scope"]
+    object_ids, layer_ids = arguments["object_ids"], arguments["layer_ids"]
+    first, last = arguments["first_frame"], arguments["last_frame"]
+    scoped_frames = scope.get("frames")
+    if (not set(object_ids) <= set(scope.get("object_ids", ()))
+            or not set(layer_ids) <= set(scope.get("layer_ids", ()))
+            or not isinstance(scoped_frames, (list, tuple)) or len(scoped_frames) != 2
+            or any(type(frame) is not int for frame in scoped_frames)
+            or not scoped_frames[0] <= first < last <= scoped_frames[1]):
+        raise ValueError("INVALID_WRITE_SCOPE: unbaking target is outside authenticated source closure")
+
+    domain = context["domain_scene"](scene)
+    existing = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
+    if not set(object_ids) <= existing:
+        raise ValueError("INVALID_WRITE_SCOPE: unknown unbaking target objects")
+    layers = _layers(domain, layer_ids, context)
+    _interval(domain, arguments)
+    # The action consumes whole selected layers. Do not let a caller authorize
+    # one controller while silently affecting other objects in that layer.
+    layer_objects = {context["id_string"](item)
+                     for layer in layers for item in domain.layers_viewer().layer(layer).obj_ids}
+    if layer_objects != set(object_ids):
+        raise ValueError("INVALID_WRITE_SCOPE: unbaking objects must equal the selected layer closure")
+
+    _select_objects(domain, object_ids, context)
+    _select_interval(domain, layers, first, last)
+    state = _generation_state(scene, context)
+    selected_objects = {context["id_string"](item) for item in domain.selector().selected().ids}
+    if (selected_objects != set(object_ids) or set(state["selected_layer_ids"]) != set(layer_ids)
+            or state["interval"] != {"valid": True, "first": first, "last": last}
+            or not state["ready_for_unbaking"]):
+        raise ValueError("INVALID_WRITE_SCOPE: native unbaking selection differs from exact target")
+    before = context["scene_state"](context["scene_view"]() or scene)
+    instance_before = dict(guards.scene_instance(scene))
+    guards.before_write()
+    try:
+        result = context["csc"].app.get_application().get_action_manager().call_action(actions[step])
+    finally:
+        guards.observe_effect("generation.unbaking", "unknown", scene_before=instance_before,
+            scene_after=dict(guards.scene_instance(context["scene_view"]() or scene)),
+            detail={"action_id": actions[step], "native_completion": "unverified"})
+    after = context["scene_state"](context["scene_view"]() or scene)
+    return {"step": step, "action_id": actions[step], "object_ids": object_ids, "layer_ids": layer_ids,
+            "interval": [first, last], "return_value": context["json_safe"](result),
+            "action_dispatch_returned": True, "native_completion": "unverified",
+            "before_revision": before["revision"], "after_revision": after["revision"],
+            "observed_postconditions": ["exact_unbaking_selection"]}, [
+                "Unbaking action completion and key/interpolation topology bounds remain unverified"]
 
 
 @handler("generation.auto_posing", postconditions=("scene_revision_changed",))

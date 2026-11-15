@@ -242,6 +242,23 @@ class CascadeurService(RecipeNativeServiceMixin, ChangeFlowMixin, UiFileFlowMixi
             contract_status="bound", truth_layer="discovered",
         ))
 
+        insertion_ready = connected and "motion.key_topology_insert" in operations
+        self._features.append(FeatureRecord(
+            id="key_insert", family="animation", name="Bounded absent position keys",
+            description="Insert explicit local scene-unit position keys on an owned working checkpoint",
+            execution_mode=ExecutionMode.NATIVE if insertion_ready else ExecutionMode.GATED,
+            state=CapabilityState.AVAILABLE if insertion_ready else CapabilityState.UNHEALTHY,
+            route="motion.key_topology_insert", operation_id="motion.key_topology_insert", test_id="",
+            adapter_id="native-independent-absent-position-keys-v1" if insertion_ready else None,
+            source="Cascadeur bridge runtime qualification", requires_scene=True,
+            destructive=True, mutation=True, implemented=True, runtime_available=insertion_ready,
+            execution_observed=False, verification=VerificationState.IMPLEMENTED,
+            evidence_kind="handler", preconditions=["Current private insertion qualification",
+                "Complete source binding", "Owned working checkpoint", "Explicit insertion opt-in and budget"],
+            postconditions=["Exact full native projection", "Successor source binding"],
+            contract_status="bound", truth_layer="discovered",
+        ))
+
     def _observed_runtime_context(self) -> dict:
         live = getattr(self.client, "runtime_status", {})
         return {"runtime_available": getattr(self, "_runtime_connected", False),

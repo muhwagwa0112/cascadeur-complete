@@ -110,6 +110,9 @@ def _inspect(scene, object_id, layer_id, additions):
         _position(row["position"])
         seen.add(row["frame"])
         values.append(copy.deepcopy(row))
+    combined = sorted(driver["frames"] + list(seen))
+    if any(right - left < 2 for left, right in zip(combined, combined[1:])):
+        raise ValueError("KEY_INSERTION_SPACING_UNQUALIFIED: preserve at least two frames between adjacent keys; SDK rewrites adjacent-frame section modes")
     return before, driver, sorted(values, key=lambda row: row["frame"])
 
 
@@ -380,7 +383,8 @@ def qualify_key_insertion():
             "key_id_kind": "layer_frame_locator", "domain": {"objects": 1, "owning_layers": 1,
                 "maximum_preserved_empty_layers": 7, "empty_layer_contract": "entire_projection_unchanged", "parent": None,
                 "space": "local", "channel": "position", "models": ["LINEAR", "STEP"],
-                "new_key_modes": "same_as_original_segment", "qualification_frames": list(range(9)),
+                "new_key_modes": "same_as_original_segment", "minimum_adjacent_key_frame_distance": 2,
+                "qualification_frames": list(range(9)),
                 "original_keys": [0, 4, 8], "inserted_keys": [2, 6], "unkeyed_samples": [1, 3, 5, 7]},
             "run_id": run_id, "trials": copy.deepcopy(run["trials"])}
         _QUALIFICATION_BYTES = _freeze(proof)

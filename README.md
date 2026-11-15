@@ -115,9 +115,22 @@ The additional explicit setup commands are:
   interpolation, including unkeyed frames 1, 3, 5 and 7. Each small `.casc` and
   tab remains available; failures are retained too. The private single-use
   source binds the scene, full projection, build, epoch and loaded fingerprint;
-  unknown completion cannot be retried. This is a development primitive with
-  honest layer/frame locators, not a registered production operation, durable
-  evaluation/quality receipt or public MCP/recipe insertion route.
+  unknown completion cannot be retried. Successful explicit qualification now
+  registers `motion.key_topology_insert` for `position_keys_insert_prepare`
+  followed by `change_commit`. Capture its exact operation source first; supply
+  object/layer IDs, `additions=[{frame,position,mode}]`, explicit
+  `allow_key_insertion=true` and `max_added_keys` (1–8). Positions are **local
+  native scene units**. The route requires a native-owned working checkpoint
+  with unchanged backup bytes. Every adjacent key in the resulting grid must
+  remain at least two frames apart: the installed SDK rewrote section modes
+  when a one-frame interval was introduced. Full native projection equality,
+  one-use authorization and successor capture remain mandatory; explicit
+  interpolation is a separate operation. Honest layer/frame locators do not
+  become persistent native key GUIDs. Recipe topology authorization, private
+  planner/completion attestations and baseline quality remain gated.
+  The actual one-frame commit remains `outcome_unknown`; the existing global
+  unresolved-effect barrier blocks further host source capture. Public success,
+  successor and evaluation receipts for the two-frame route are not yet observed.
 - `Cascadeur Complete.Qualify complete scene adapter`: shipped-file full reader,
   bootstrap, evaluation and checkpoint in disposable tabs.
 - `Cascadeur Complete.Qualify independent scene adapter`: finite LINEAR/STEP
@@ -126,6 +139,9 @@ The additional explicit setup commands are:
   metadata, at most 33 frames and no assets, controllers, cycles or additive
   layers. This separate profile preserves exact save equality; it does not
   qualify the character route when Cascy's first save changes data channels.
+  Qualification tabs/files remain open on success and failure, with retained
+  IDs and paths returned; the original active tab and inventory are preserved.
+  Native tab lifecycle crashes remain unresolved.
 - `Cascadeur Complete.Qualify checkpoint restore adapter`: exact new-tab restore
   of the active owned checkpoint. It returns a pending qualification ID and
   retains the restored tab; a later source-idle callback verifies both scenes

@@ -447,7 +447,17 @@ class RecipeNativeServiceMixin:
         elif stage == "motion":
             motion = spec.motion
             if motion.mode == "native_unbaking":
-                args = {"step": motion.unbaking_step}
+                if len(step.frame_ranges) != 1:
+                    raise RecipeConflict("UNBAKING_REQUIRES_ONE_EXACT_FRAME_RANGE")
+                first, last = step.frame_ranges[0]
+                target_ids = step.target.object_ids if mapping is None else tuple(
+                    mapping.role_ids[key] for key in step.target.object_ids
+                ) if step.target.object_ids else mapping.object_ids
+                target_layers = step.target.layer_ids if mapping is None else mapping.layer_ids
+                if not target_ids or not target_layers or first >= last:
+                    raise RecipeConflict("UNBAKING_REQUIRES_EXACT_OBJECTS_LAYERS_AND_INTERVAL")
+                args = {"step": motion.unbaking_step, "object_ids": list(target_ids),
+                        "layer_ids": list(target_layers), "first_frame": first, "last_frame": last}
             elif motion.mode in {"native_root_motion", "native_inbetweening"}:
                 if motion.settings:
                     raise RecipeConflict("NATIVE_GENERATION_SETTINGS_UNSUPPORTED")

@@ -6,7 +6,7 @@ def command_name():
 
 
 def command_description():
-    return "Observe bounded new position keys in retained disposable scenes; requires explicit current-process finite-model qualification and an empty tab"
+    return "Observe bounded new position keys and register the owned-checkpoint guarded route; requires current-process finite-model qualification and an empty tab"
 
 
 def run(scene):
@@ -15,4 +15,8 @@ def run(scene):
     result = qualify_key_insertion()
     if result.get("status") != "observed" or result.get("phase") != "complete":
         raise RuntimeError("KEY_INSERTION_QUALIFICATION_INCOMPLETE")
+    from .native_key_insertion_adapter import register_key_insertion_adapter
+    result["guarded_registration"] = register_key_insertion_adapter()
+    result["production_registered"] = True
+    result["recipe_topology_write"] = False
     return result

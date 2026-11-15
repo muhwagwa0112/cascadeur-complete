@@ -743,9 +743,31 @@ def inbetweening_prepare(ttl: float=300, source_binding: SourceBinding | None=No
 
 
 @mcp.tool()
-def animation_unbaking_prepare(step: Literal['prepare_keys_by_fulcrums', 'adjust_keys_and_interpolation', 'adjust_autoposing_lock_state']='adjust_keys_and_interpolation', ttl: float=300, source_binding: SourceBinding | None=None) -> dict[str, Any]:
-    """Snapshot and prepare one documented Animation Unbaking stage."""
-    return service().prepare_change('unbaking', 'generation.unbaking', {'step': step}, ttl, source_binding=source_binding)
+def animation_unbaking_prepare(object_ids: list[str], layer_ids: list[str], first_frame: int, last_frame: int, step: Literal['prepare_keys_by_fulcrums', 'adjust_keys_and_interpolation', 'adjust_autoposing_lock_state']='adjust_keys_and_interpolation', ttl: float=300, source_binding: SourceBinding | None=None) -> dict[str, Any]:
+    """Prepare one exact unbaking target; native completion qualification remains required."""
+    if (not object_ids or not layer_ids or len(set(object_ids)) != len(object_ids)
+            or len(set(layer_ids)) != len(layer_ids) or first_frame >= last_frame):
+        return _invalid('Unique explicit objects/layers and an increasing frame interval are required')
+    return _prepare('unbaking', 'generation.unbaking', {'step': step, 'object_ids': object_ids,
+        'layer_ids': layer_ids, 'first_frame': first_frame, 'last_frame': last_frame}, ttl, source_binding)
+
+
+@mcp.tool()
+def position_keys_insert_prepare(object_id: str, layer_id: str, additions: list[dict[str, Any]],
+                                 max_added_keys: int, allow_key_insertion: bool=False,
+                                 ttl: float=300, source_binding: SourceBinding | None=None) -> dict[str, Any]:
+    """Prepare bounded absent local position keys in native scene units on an owned checkpoint.
+
+    Requires current-process native qualification. This standalone change does
+    not authorize recipe key insertion or replace its intent and quality gates.
+    """
+    if (allow_key_insertion is not True or type(max_added_keys) is not int
+            or not 1 <= max_added_keys <= 8 or not 1 <= len(additions) <= max_added_keys
+            or not object_id or not layer_id):
+        return _invalid('Explicit insertion opt-in, target and one-to-eight key budget required')
+    return _prepare('key_insert', 'motion.key_topology_insert', {'object_id': object_id,
+        'layer_id': layer_id, 'additions': additions, 'space': 'local',
+        'allow_key_insertion': allow_key_insertion, 'max_added_keys': max_added_keys}, ttl, source_binding)
 
 
 @mcp.tool()
