@@ -168,9 +168,16 @@ class RecipeRunner:
 
     def _runtime_fingerprints(self):
         status = getattr(getattr(self.service, "client", None), "runtime_status", {}) or {}
+        capabilities = _json(status.get("guarded_capabilities"))
+        if isinstance(capabilities, dict) and isinstance(capabilities.get("retarget_inputs"), dict):
+            # Current target state changes after bootstrap and authorized writes.
+            # Its private source/controller observations are verified separately;
+            # retain every qualification and unknown field in runtime identity.
+            capabilities["retarget_inputs"] = {key: value for key, value in capabilities["retarget_inputs"].items()
+                if key not in {"native_projection_digest", "object_ids", "target_scope"}}
         return _json({"runtime_epoch": status.get("runtime_epoch"),
                       "loaded_adapter_fingerprint": status.get("adapter_fingerprint"),
-                      "guarded_capabilities": status.get("guarded_capabilities"),
+                      "guarded_capabilities": capabilities,
                       "installation_version": getattr(self.service, "_version_name", None)})
 
     def start(self, plan_id, authorization_id, idempotency_key):

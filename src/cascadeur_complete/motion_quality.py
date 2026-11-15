@@ -58,7 +58,7 @@ def required_motion_metrics(rig,intent,include_mesh=False,*,capture=None):
     required={"duration_error_s","position_correction_m","correction_envelope_violation_count"}
     if intent.root_policy=="preserve":
         required.update(("root_preservation_m","root_preservation_rad"))
-    if rig.parent_ids or rig.bone_lengths_m:
+    if any(parent is not None for parent in rig.parent_ids.values()) or rig.bone_lengths_m:
         required.add("bone_length_error_m")
     if rig.dependency_ids or rig.derived_ids or set(rig.role_ids.values())-rig.writable_ids:
         required.add("non_target_scope_m")

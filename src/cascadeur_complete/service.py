@@ -138,6 +138,21 @@ class CascadeurService(RecipeNativeServiceMixin, ChangeFlowMixin, UiFileFlowMixi
     def resolve_motion_inputs(self, draft_ref, overrides, intent_policy):
         return self._motion_inputs().resolve_motion_inputs(draft_ref, overrides, intent_policy)
 
+    def prepare_blender_export_profile(self, profile, timeout_seconds=60):
+        """Observe the installed consumer and pin an explicit export declaration.
+
+        This prepares profile bytes before planning/authorization; it neither
+        exports nor imports an artifact or grants publication permission.
+        """
+        import math
+        from .external import bind_blender_target_profile
+        from .recipe_models import digest
+        if (isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float))
+                or not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 60):
+            raise ValueError("INVALID_POLICY: consumer observation timeout must be within 60 seconds")
+        prepared = bind_blender_target_profile(profile, timeout=timeout_seconds)
+        return {"profile": prepared.model_dump(mode="json"), "profile_digest": digest(prepared)}
+
     def _checked_status(self, status: ResultEnvelope) -> ResultEnvelope:
         """A successful status must carry the scene state dict that tokens are bound to."""
         if status.ok and not isinstance(status.result, dict):

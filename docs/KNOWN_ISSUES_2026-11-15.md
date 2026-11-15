@@ -7,7 +7,34 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 키포즈 작성과 독립 객체 model-pose rest
+### 최신 추가: 입력 자동 구성, 실제 host retarget와 소비자 프로필 준비
+
+원격 개선안 SHA `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`가 현재도 최신임을 확인했다. 기존 16개 r4 목표를 유지하며 R4-02 입력 수집, R4-10 host controller와 R4-13 소비자 준비를 이어 연결했다. 전체 목표는 아직 진행 중이다.
+
+- `native_independent_inputs.py`는 현재 private model 자격이 있는 부모 없는 단일 Transform의 ownership/root, 실제 model-pose rest, 회전 채널과 기존 위치 writer의 읽기 전용 closure 검사를 연결한다. 공개 inspect/resolve가 raw rig JSON 없이 프로필을 구성한다. 이 객체는 joint가 아니므로 axes/limits를 만들지 않는다. 일반 캐릭터의 필수 관절 metadata는 그대로 요구한다. `{root: None}` 계층만으로 측정 불가능한 bone-length 지표를 요구하던 조건도 실제 edge/선언된 길이 기준으로 수정했다.
+- `independent-parentless-position-v1`은 exact source/profile/context/원본 artifact/명시 mapping·scale·anchor·intent를 묶어 실제 native rest와 direct controller를 관측·재인증한다. host retarget 수학 → 실제 기존 key model fitting → prepare/commit → exact float32 readback 경로를 사용한다. 지원 범위는 root 하나의 global position, 기존 LINEAR/STEP 키이며 rotation/coupled/IK/키 삽입으로 확대하지 않는다.
+- 실제 첫 run `a914e65e-e3d2-472a-ba5f-013e6cced279`는 쓰기 성공 뒤 평가 준비에서 `IMPLEMENTATION_CHANGED`로 중단됐다. 읽기 전용 진단에서 변경된 runtime 필드는 `retarget_inputs.native_projection_digest` 하나였다. 구현 identity 비교에서 장면별 `native_projection_digest/object_ids/target_scope`만 분리했다. model/writer 자격, epoch/fingerprint, 미지 capability 필드와 실제 source/controller 재검증은 유지한다. 기존 run·성공 receipt·미전송 prepared 평가를 보존했고 성공한 쓰기를 replay하지 않았다. 수정 후 별도 새 복제본/새 승인 run으로 확인했다.
+- 새 MCP `prepare_blender_export_profile`은 고정 background Blender adapter로 실제 설치 버전·실행 파일·FBX importer bytes를 읽어 누락된 pin과 settings digest를 채운다. 명시된 map/axes/units/options는 보존하고 기존 pin 충돌은 `TARGET_INSTALLATION_PIN_CONFLICT`로 거부한다. artifact import나 recipe 승인·품질·게시 작업은 수행하지 않는다.
+- export 후 continuation이 native scope의 ExportProfile을 RigProfile로 오인하던 경로를 수정했다. 검증된 `native-selected-export-v1`의 exact export operation/profile/arguments digest, 객체·selection·layer·range·raw staging 경로를 확인한 뒤 기존 private recipe target 관측으로 실제 rig/rest/ownership을 다시 인증한다. 일반 profile 검사나 target 검증을 건너뛰지 않는다. 이 후속 수정의 실제 export 종단 실행은 아직 관찰하지 않았다.
+
+아래 실앱 관측은 새 PID 37508, Cascadeur `2026.2.3.0.16863`, bridge fingerprint `eb7fa16eb51c2ab926824f3c4ba14cdbaa20d5fff8815349b42c1bcc2349133a`, epoch `b095e01e-7c5d-4666-8452-8a14e64ecd76`에서 수행했다. native hot reload는 하지 않았다.
+
+| 실제 확인 | 결과와 범위 |
+|---|---|
+| fresh 자격 | 실제 model 40 trials 후 같은 private proof 재사용, writer 16 trials. model digest `9a57a501d63eee68df9f23c7b08c220af7a1ce68d228c0459f5a38d0564006b1`, writer digest `8ec012e016d597c1ed5b9746961c99514504e796b1663fafe66966185b1805be` |
+| 자동 입력 | `independent-input-observation-2cfad58c-24c5-4f69-b6b5-88dad10d71ec/{draft,resolved}.json`. 실제 root/rest/회전/writable을 관측하고 명시 conversion policy로 resolve 성공. FPS 30/1, 0.01m/unit, identity basis는 native 물리 metadata 관측이 아니다 |
+| 실제 host retarget recipe | run `8fd739e0-158c-45a1-915d-e129e4c55fe6`, `succeeded`. 보존된 실제 source capture와 native model rest에서 canonical source artifact를 만들고 다른 target root에 scale 0.5, anchor `[0,0,0]`을 명시. 자동 관측 target 프로필을 사용. 쓰기 요청 `6bc65f2f-5bfe-4811-b952-3b77e89797dc`, 실제 기존 key 2=`[1,0.5,-0.125]`, 4=`[0,1,0.375]` scene units, key 0은 변경 없음 |
+| 평가·품질·저장 | 평가 `9e5997ff-2298-4d9b-aca0-40911d257537`, checkpoint `ddf15ddd-42dc-4374-b75e-aa1311f923ec`, native/host 확인 성공. 0..4 actual capture의 네 필수 지표가 measured pass. quality artifact SHA-256 `cd3d8bbbb4f63947b512199e29f61523e3ed08d249c3b17b813f1ddac9894091` |
+| 소비자 공개 도구 | 실제 MCP 호출 성공. 설치 Blender `[4,5,8]`, executable SHA-256 `2157db89aa366f94a6c216078d1457ac0bd141532990c23e4e11ac7019418ed9`, importer fingerprint `8c345bc570f2870a7b1de8e7a6398acec4ff4c8f848f55a650858d8a9417816e`. prepared profile digest `12aa241bf85cc8f3b69376037866f7eb938fa8b484b449683284dd47e9914394` |
+| 원본·기록 | 새 qualification input SHA-256 `a9e3bfc498bd075b8c4d14bbedfb2b4b56d50611c91c626c005f2317cc437da6` 유지. 모든 산출물은 ignored local runtime에 보관. 기존 unknown·인증키·receipt를 보존 |
+
+이 retarget는 명시적으로 작성한 mapped trajectory다. source/baseline 품질 캡처는 retarget 쓰기 **이후**이며 네 지표의 0 오차는 입력 animation 보존이나 source-to-target mapping 오차 0의 증거가 아니다. fitting residual은 host prediction이며 actual motion quality와 구분한다. humanoid cleanup, 연속 시간 충돌, 실제 FBX consumer 왕복·게시 성공을 주장하지 않는다. export는 `not_requested`. 전체 suite/build/CI는 실행하지 않았다. 새 공개 도구의 golden surface는 실제 MCP schema에 맞춰 추가했다.
+
+일반 리그 입력은 여전히 구체적인 SDK 제한이 있다. 공식 typed `AngleConstraints`는 parent/child rigid-body와 3성분 min/max 및 rotation offset을 노출한다. 공식 builder는 parent rigid 회전의 inverse와 child 회전을 곱해 offset을 만든다. 그러나 각도 단위·Euler 순서·0 제한의 자유/고정 의미·joint-rest frame 및 flexion/splay/twist 축 대응은 확인되지 않았다. host의 radian hinge/rotvec 계약에 이 원시 벡터를 직접 대입하지 않았다. final-root의 fresh readonly graph, 실제 실패 후 conditional recovery, 원본 intent/rest와 결합한 consumer 왕복·게시 및 설치 상태 실기 검증도 남는다.
+
+consumer rest의 남은 문제도 분리한다. 보존된 이전 Blender 관측의 독립 객체 rest는 X축 90도 회전, native model pose는 identity였다. importer의 root frame left conversion과 canonical basis conjugation은 서로 다르며, conjugation만으로 이 차이를 없앨 수 없다. native rest를 FBX rest로 대체하거나 허용 오차를 완화하지 않는다. 설치 importer의 실제 root frame 변환을 분리해 처리하고 같은 native rest와 재대조하는 후속 연결이 필요하다.
+
+### 이전 추가: 키포즈 작성과 독립 객체 model-pose rest
 
 원격 개선안 branch의 최신 SHA `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`를 다시 확인했다. 기존 r4 목표를 유지하며, 이번에는 실제 키포즈 쓰기와 target rest 관측을 연결했다. 전체 r4 목표는 진행 중이다.
 

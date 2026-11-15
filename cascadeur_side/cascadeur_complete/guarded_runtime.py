@@ -73,7 +73,7 @@ def register_adapter(operation_name, adapter):
     _ADAPTERS[operation_name] = adapter
 
 
-def capabilities():
+def capabilities(scene=None):
     result = {"guarded_mutation": bool(_ADAPTERS), "source_binding": bool(_ADAPTERS),
             "identity_verified": bool(_ADAPTERS), "dispatch_semantics": "unverified" if not _ADAPTERS else "synchronous_no_yield",
             "operations": sorted(_ADAPTERS), "protocols": ["3.0"], "legacy_read_protocols": ["2.0"]}
@@ -81,6 +81,11 @@ def capabilities():
     extra = getattr(bootstrap, "qualified_capabilities", {})
     if "file_bootstrap" in extra:
         result["file_bootstrap"] = extra["file_bootstrap"]
+    if scene is not None:
+        from .native_retarget_inputs import qualified_capability
+        retarget = qualified_capability(scene)
+        if retarget is not None:
+            result["retarget_inputs"] = retarget
     return result
 
 

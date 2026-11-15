@@ -30,6 +30,26 @@ def _canonical(value):
                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
 
+def _installed_bytes():
+    import bpy
+    import importlib
+    files = {name: _digest_file(importlib.import_module(name).__file__) for name in (
+        'io_scene_fbx', 'io_scene_fbx.import_fbx', 'io_scene_fbx.parse_fbx', 'io_scene_fbx.fbx_utils')}
+    return {'blender_version': list(bpy.app.version[:3]),
+            'blender_executable_sha256': _digest_file(bpy.app.binary_path),
+            'importer_fingerprint': _canonical(files), 'importer_files': files,
+            'adapter_fingerprint': _digest_file(__file__)}
+
+
+def describe_installation(manifest):
+    """Observe the actual consumer bytes; never import an artifact or issue quality."""
+    if (set(manifest) != {'mode', 'nonce', 'report_path'} or manifest['mode'] != 'installation'
+            or not isinstance(manifest['nonce'], str) or len(manifest['nonce']) != 48):
+        raise ValueError('TARGET_INSTALLATION_REQUEST_INVALID')
+    return {'schema_version': 1, 'kind': 'installed_consumer', 'nonce': manifest['nonce'],
+            **_installed_bytes()}
+
+
 def _action_binding(obj, version):
     animation = obj.animation_data
     action = animation.action if animation else None
@@ -154,7 +174,6 @@ def _artifact_object_rest(manifest, scene):
 
 def run(manifest):
     import bpy
-    import importlib
     from mathutils import Matrix
 
     profile, expected = manifest["profile"], manifest["expected"]
@@ -169,13 +188,10 @@ def run(manifest):
         raise ValueError("ARTIFACT_CHANGED")
     if _digest_file(__file__) != profile["target_adapter_fingerprint"]:
         raise ValueError("TARGET_ADAPTER_MISMATCH")
-    importer_files = {}
-    for name in ("io_scene_fbx", "io_scene_fbx.import_fbx", "io_scene_fbx.parse_fbx", "io_scene_fbx.fbx_utils"):
-        module = importlib.import_module(name)
-        importer_files[name] = _digest_file(module.__file__)
-    if _canonical(importer_files) != settings.get("importer_fingerprint"):
+    installed = _installed_bytes()
+    if installed['importer_fingerprint'] != settings.get("importer_fingerprint"):
         raise ValueError("TARGET_IMPORTER_FINGERPRINT_MISMATCH")
-    if _digest_file(bpy.app.binary_path) != settings.get("blender_executable_sha256"):
+    if installed['blender_executable_sha256'] != settings.get("blender_executable_sha256"):
         raise ValueError("TARGET_EXECUTABLE_FINGERPRINT_MISMATCH")
     paths = {entry["node_path"] for entry in profile["skeleton_map"]}
     if paths != set(settings["bone_mapping"]) or paths != set(expected["position_m"]):
@@ -350,9 +366,15 @@ if __name__ == "__main__":
     if manifest_path.stat().st_size > 128 * 1024**2:
         raise ValueError("TARGET_MANIFEST_BUDGET_EXCEEDED")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    result = run(manifest)
+    installation = manifest.get('mode') == 'installation'
+    if installation:
+        output = Path(manifest['report_path'])
+        if (not output.is_absolute() or output.parent != manifest_path.parent or output.exists()
+                or output.is_symlink()):
+            raise ValueError('TARGET_INSTALLATION_OUTPUT_INVALID')
+    result = describe_installation(manifest) if installation else run(manifest)
     encoded = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
-    if len(encoded) > manifest["profile"]["target_import_settings"]["max_report_bytes"]:
+    if len(encoded) > (32768 if installation else manifest["profile"]["target_import_settings"]["max_report_bytes"]):
         raise ValueError("TARGET_REPORT_BUDGET_EXCEEDED")
     with Path(manifest["report_path"]).open("xb") as stream:
         stream.write(encoded)

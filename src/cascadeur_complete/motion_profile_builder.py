@@ -228,7 +228,16 @@ class MotionInputResolver:
         if rotation_id not in roles.values():
             roles["root_orientation"]=rotation_id
         selected=set(roles.values())
-        required=("parent_id","rest_local_transform","joint_axes","joint_limits_rad")
+        contract=values.get("profile_contract",{})
+        independent=(contract.get("kind")=="independent_parentless_transform_v1"
+            and contract.get("joint_metadata_applicability")=="not_a_joint"
+            and bool(contract.get("model_qualification_digest"))
+            and contract==draft.provenance.get("profile_contract")
+            and set(by_id)=={contract.get("object_id")}
+            and roles=={"root":contract.get("object_id")}
+            and by_id[contract["object_id"]].get("parent_id") is None)
+        required=(("parent_id","rest_local_transform") if independent else
+                  ("parent_id","rest_local_transform","joint_axes","joint_limits_rad"))
         for object_id in selected:
             if any(key not in by_id[object_id] for key in required):
                 raise MotionInputError("MISSING_MOTION_INPUTS",f"unobserved rest/hierarchy/joint metadata: {object_id}")
@@ -246,8 +255,8 @@ class MotionInputResolver:
             # export applies context exactly once after composing the chain.
             rest_local_transforms={key:row["rest_local_transform"] for key,row in by_id.items()
                                    if "rest_local_transform" in row},
-            joint_axes={role:by_id[key]["joint_axes"] for role,key in roles.items()},
-            joint_limits_rad={role:by_id[key]["joint_limits_rad"] for role,key in roles.items()},
+            joint_axes={role:by_id[key]["joint_axes"] for role,key in roles.items() if "joint_axes" in by_id[key]},
+            joint_limits_rad={role:by_id[key]["joint_limits_rad"] for role,key in roles.items() if "joint_limits_rad" in by_id[key]},
             bone_lengths_m=values.get("bone_lengths_m",{}),mesh_ids=tuple(values.get("mesh_ids",())),
             controller_adapter_id=values.get("controller_adapter_id",""))
         intent=IntentConstraints.model_validate(intent_policy)

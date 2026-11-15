@@ -75,6 +75,20 @@ def resolve_motion_inputs(draft_ref: str, overrides: dict[str, Any], intent_poli
         return _invalid(str(exc))
 
 
+@mcp.tool()
+def prepare_blender_export_profile(profile: dict[str, Any], timeout_seconds: float = 60) -> dict[str, Any]:
+    """Pin an export profile to the installed Blender before recipe planning.
+
+    Supply explicit axes, units, take, destination and target object/bone maps.
+    A background consumer observes its version and importer bytes. This does
+    not export, import an artifact, authorize a recipe or certify roundtrip quality.
+    """
+    try:
+        return service().prepare_blender_export_profile(profile, timeout_seconds)
+    except (ValueError, TypeError, RuntimeError, OSError) as exc:
+        return _invalid(str(exc))
+
+
 @mcp.resource("cascadeur://capabilities")
 def capabilities_resource() -> str:
     """Version, license, bridge, dependency, and policy status."""

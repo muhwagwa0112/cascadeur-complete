@@ -34,6 +34,35 @@ def _assert_file_source(source, manifest, arguments):
         raise RecipeConflict("FILE_BOOTSTRAP_SOURCE_UNVERIFIED: exact current scene and input manifest are required")
 
 
+def _assert_export_source(source, spec):
+    """Distinguish the authenticated export scope's profile from a rig profile."""
+    from .export_models import ExportProfile
+    scope = source.scope
+    if (scope.get('adapter_id') != 'native-selected-export-v1'
+            or scope.get('operation_name') != 'io.export_fbx' or spec.export is None):
+        raise RecipeConflict('EXPORT_SOURCE_UNVERIFIED: exact native export adapter and recipe export required')
+    profile = ExportProfile.model_validate(scope.get('profile'))
+    arguments = scope.get('operation_arguments')
+    if (not isinstance(arguments, dict)
+            or set(arguments) != {'path','export_profile','export_profile_digest','max_output_bytes'}
+            or scope.get('operation_arguments_digest') != digest(arguments)
+            or digest(scope['profile']) != digest(profile) or digest(profile) != digest(spec.export)
+            or arguments['export_profile_digest'] != digest(profile)
+            or digest(arguments['export_profile']) != digest(profile)):
+        raise RecipeConflict('EXPORT_SOURCE_UNVERIFIED: exact export profile and arguments differ from recipe')
+    mapped = sorted(item.source_id for item in profile.skeleton_map)
+    path = Path(arguments['path'])
+    if (len(mapped) != 1 or mapped != sorted(spec.character.object_ids)
+            or scope.get('object_ids') != mapped or scope.get('export_selected_ids') != mapped
+            or not set(spec.character.layer_ids) <= set(scope.get('layer_ids', []))
+            or profile.first_frame != 0 or scope.get('frames') != [0, profile.last_frame]
+            or not path.is_absolute() or path.name != 'raw.fbx'
+            or type(arguments['max_output_bytes']) is not int
+            or not 0 < arguments['max_output_bytes'] <= 2 * 1024**3
+            or arguments['max_output_bytes'] != min(spec.budgets.output_bytes, spec.budgets.disk_bytes, 2 * 1024**3)):
+        raise RecipeConflict('EXPORT_SOURCE_UNVERIFIED: selected export closure, range or output differs')
+
+
 class RecipeNativeServiceMixin:
     def recipe_observe_target(self, spec, source):
         """Authenticate exact target ownership without rewriting source scope.
@@ -149,7 +178,19 @@ class RecipeNativeServiceMixin:
                 reasons.append({"code": "INITIAL_SOURCE_MISMATCH"})
             if spec.character.derived_target is None and (mode == "continuation" or spec.input.kind == "active_scene"):
                 profile, ownership = source.scope.get("profile", {}), source.scope.get("ownership", {})
-                if profile or ownership:
+                export_scope = (source.scope.get('adapter_id') == 'native-selected-export-v1'
+                                or source.scope.get('operation_name') == 'io.export_fbx')
+                if export_scope:
+                    if source_valid:
+                        try:
+                            _assert_export_source(source, spec)
+                            # ExportProfile proves the requested artifact contract,
+                            # not RigProfile rest/ownership. Reauthenticate those
+                            # through the existing native target observer as well.
+                            self.recipe_observe_target(spec, source)
+                        except (ValueError, TypeError, KeyError, OSError) as exc:
+                            reasons.append({'code':'EXPORT_SOURCE_UNVERIFIED', 'detail':str(exc)})
+                elif profile or ownership:
                     if (digest(profile) != spec.character.rig_profile_digest
                         or profile.get("character_id") != spec.character.character_id
                         or profile.get("role_ids") != spec.character.role_ids
@@ -188,8 +229,18 @@ class RecipeNativeServiceMixin:
             reasons.append({"code": "EXPLICIT_RIG_CREATION_ADAPTER_UNVERIFIED"})
         if spec.motion.mode == "keyposes" and any(item.rotation_euler_xyz_radians is not None for item in spec.motion.keyposes):
             reasons.append({"code": "ROTATION_CONVENTION_UNVERIFIED", "detail": "Keyposes require observed native Euler encoding"})
-        if spec.motion.mode == "retarget" and spec.motion.route == "host" and not capabilities.get("retarget_inputs"):
-            reasons.append({"code": "RETARGET_TARGET_OBSERVATION_UNAVAILABLE"})
+        if spec.motion.mode == "retarget" and spec.motion.route == "host":
+            from .retarget_controller import ADAPTER_ID
+            capability = capabilities.get("retarget_inputs")
+            file_bootstrap = (spec.input.kind == "casc_file" and spec.input.mode == "new_working_scene")
+            if (not isinstance(capability, dict) or capability.get("adapter_id") != ADAPTER_ID
+                    or capability.get("channels") != ["position"] or capability.get("space") != "global"
+                    or capability.get("existing_keys_only") is not True
+                    or capability.get("private_target_observation_required") is not True
+                    or (not file_bootstrap and (capability.get("target_scope") != "observed"
+                        or capability.get("object_ids") != list(spec.character.object_ids)))):
+                reasons.append({"code": "RETARGET_TARGET_OBSERVATION_UNAVAILABLE",
+                    "detail": "Current target requires its privately qualified independent existing-position writer"})
         if any(item.kind == "foot_contacts" for item in spec.cleanup) and not capabilities.get("key_layout_observation"):
             reasons.append({"code": "INTERPOLATION_MODEL_UNVERIFIED"})
         if spec.intent.allow_key_insertion and not capabilities.get("key_topology_write"):
@@ -228,16 +279,111 @@ class RecipeNativeServiceMixin:
         return self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
             "observation": capture.as_dict(), "digest": capture_digest, "kind": "motion_capture"})])
 
+    def _retarget_context(self):
+        import threading
+        return self.__dict__.setdefault("_retarget_execution_local", threading.local())
+
     def observe_retarget_inputs(self, request):
-        return self.client.execute("transform_get", [Operation(name="system.observe_retarget_inputs", arguments=request)])
+        self._retarget_context().observation_digest = None
+        result = self.client.execute("transform_get", [Operation(name="system.observe_retarget_inputs", arguments=request)])
+        if result.ok:
+            value = result.result
+            expected = {"request_digest": digest(request), "source_binding_digest": digest(request["source_binding"]),
+                "profile_digest": digest(request["profile"]), "context_digest": digest(request["context"]),
+                "source_artifact_digest": request["source_artifact_digest"],
+                "declaration_digest": digest(request["declaration"]), "intent_digest": digest(request["intent"]),
+                "runtime_epoch": request["source_binding"]["binding"]["runtime_epoch"],
+                "adapter_fingerprint": request["source_binding"]["adapter_fingerprint"]}
+            if (not isinstance(value, dict) or value.get("schema_version") != 1 or value.get("kind") != "retarget_inputs"
+                    or any(value.get(key) != expected_value for key, expected_value in expected.items())):
+                raise RecipeConflict("RETARGET_TARGET_OBSERVATION_MISMATCH")
+            import copy
+            requests = getattr(self, "_retarget_requests", {})
+            requests[digest(value)] = copy.deepcopy(request)
+            while len(requests) > 16:
+                requests.pop(next(iter(requests)))
+            self._retarget_requests = requests
+        return result
 
     def verify_retarget_inputs(self, observation, observation_digest):
-        return self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
+        result = self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
             "observation": observation, "digest": observation_digest, "kind": "retarget_inputs"})])
+        request = getattr(self, "_retarget_requests", {}).get(observation_digest)
+        if result.ok:
+            if (request is None or digest(observation) != observation_digest
+                    or not isinstance(result.result, dict)
+                    or result.result.get("retarget_inputs_digest") != observation_digest
+                    or result.result.get("request_digest") != digest(request)):
+                raise RecipeConflict("RETARGET_TARGET_PROVENANCE_UNVERIFIED")
+            import copy
+            records = getattr(self, "_retarget_observations", {})
+            records[observation_digest] = copy.deepcopy(observation)
+            while len(records) > 16:
+                records.pop(next(iter(records)))
+            self._retarget_observations = records
+            self._retarget_context().observation_digest = observation_digest
+        return result
+
+    @property
+    def motion_controller_adapter(self):
+        from .retarget_controller import IndependentPositionController
+        return IndependentPositionController(self._verified_position_targets)
 
     def verify_controller_targets(self, request, request_digest):
-        return self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
-            "observation": request, "digest": request_digest, "kind": "controller_targets"})])
+        from .retarget_controller import lower_position_request
+        if digest(request) != request_digest:
+            raise RecipeConflict("RETARGET_CONTROLLER_REQUEST_MISMATCH")
+        lowered = lower_position_request(request)
+        observations = getattr(self, "_retarget_observations", {})
+        observation = observations.get(getattr(self._retarget_context(), "observation_digest", None))
+        if observation is None or observation["profile_digest"] != digest(request["profile"]):
+            raise RecipeConflict("RETARGET_TARGET_PROVENANCE_UNVERIFIED")
+        result = self.client.execute("transform_get", [Operation(name="system.observe_controller_targets", arguments={
+            "retarget_observation": observation, "controller_request": request,
+            "controller_request_digest": request_digest, "controller_targets": lowered})])
+        if not result.ok:
+            return result
+        value = result.result
+        if (not isinstance(value, dict) or value.get("schema_version") != 1 or value.get("kind") != "controller_targets"
+                or value.get("controller_request_digest") != request_digest
+                or value.get("controller_targets_digest") != digest(lowered) or value.get("controller_targets") != lowered
+                or value.get("retarget_inputs_digest") != digest(observation)
+                or any(value.get(key) != observation[key] for key in (
+                    "adapter_id", "source_binding_digest", "profile_digest", "context_digest", "native_projection_digest",
+                    "runtime_epoch", "adapter_fingerprint", "qualification_digest"))):
+            raise RecipeConflict("RETARGET_CONTROLLER_OBSERVATION_MISMATCH")
+        verified = self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
+            "observation": value, "digest": digest(value), "kind": "controller_targets"})])
+        if verified.ok:
+            self._check_controller_proof(verified, value)
+            import copy
+            records = getattr(self, "_retarget_controller_proofs", {})
+            records[(digest(observation), request_digest)] = copy.deepcopy(value)
+            while len(records) > 16:
+                records.pop(next(iter(records)))
+            self._retarget_controller_proofs = records
+        return verified
+
+    @staticmethod
+    def _check_controller_proof(verified, value):
+        expected = {"observation_digest": digest(value), "controller_request_digest": value["controller_request_digest"],
+                    "controller_targets_digest": value["controller_targets_digest"],
+                    "retarget_inputs_digest": value["retarget_inputs_digest"]}
+        if not isinstance(verified.result, dict) or any(verified.result.get(key) != item for key, item in expected.items()):
+            raise RecipeConflict("RETARGET_CONTROLLER_PROVENANCE_UNVERIFIED")
+
+    def _verified_position_targets(self, request, request_digest):
+        import copy
+        observation_digest = getattr(self._retarget_context(), "observation_digest", None)
+        value = getattr(self, "_retarget_controller_proofs", {}).get((observation_digest, request_digest))
+        if value is None or digest(request) != request_digest:
+            raise RecipeConflict("RETARGET_CONTROLLER_PROVENANCE_UNVERIFIED")
+        verified = self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
+            "observation": value, "digest": digest(value), "kind": "controller_targets"})])
+        if not verified.ok:
+            raise RecipeConflict("RETARGET_CONTROLLER_PROVENANCE_UNVERIFIED: " + str(verified.error_message))
+        self._check_controller_proof(verified, value)
+        return {**copy.deepcopy(value), "observation_digest": digest(value)}
 
     def recipe_resolve_stage_effect(self, plan, run, step, context):
         spec, stage = plan.spec, step.stage

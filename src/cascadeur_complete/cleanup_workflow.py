@@ -606,6 +606,8 @@ class CleanupWorkflow:
         cleanup. An import file is never dispatched as a native retarget op.
         """
         from .retargeting import retarget_pose,controller_targets
+        from dataclasses import asdict
+        from .retarget_controller import ADAPTER_ID
         from .motion_solvers import fit_keys
         self._require_contract("retarget")
         self._key_layout_digest=None
@@ -628,6 +630,18 @@ class CleanupWorkflow:
         channels=tuple(settings.get("target_channels",("position",)))
         if channels not in (("position",),("rotation",)):
             raise MotionInputError("COUPLED_CHANNEL_WRITER_UNAVAILABLE","retarget must declare one target channel")
+        if (self.profile.controller_adapter_id != ADAPTER_ID or channels != ("position",)
+                or set(self.profile.role_ids) != {"root"}
+                or settings.get("root_role") != "root" or set(mapping) != {"root"}
+                or settings.get("end_effector_constraints") or settings.get("target_leg_length_m") is not None):
+            return {"status":"unsupported","reason_codes":["RETARGET_CONTROLLER_SCOPE_UNSUPPORTED"],
+                    "report":{"detail":"only the qualified independent parentless root position controller is implemented"}}
+        declaration_fields={"root_role","axis_alignment","root_basis","scale","target_root_anchor_m"}
+        if not declaration_fields <= set(settings):
+            return {"status":"unsupported","reason_codes":["MISSING_RETARGET_MAPPING"],
+                    "report":{"missing":sorted(declaration_fields-set(settings))}}
+        if self.source_binding is None:
+            return {"status":"unsupported","reason_codes":["BINDING_UNAVAILABLE"]}
         fit_limits=settings.get("fit_limits",{})
         if (not isinstance(fit_limits,dict) or set(fit_limits)-{"position_correction_m","velocity_weight",
                 "acceleration_weight","fit_error_m","max_variables","max_nonzeros","max_memory_bytes",
@@ -641,8 +655,11 @@ class CleanupWorkflow:
         verifier=getattr(self.service,"verify_retarget_inputs",None)
         if not callable(reader) or not callable(verifier):
             return {"status":"unsupported","reason_codes":["RETARGET_TARGET_OBSERVATION_UNAVAILABLE"]}
-        receipt=reader({"profile_id":self.profile.profile_id,"role_ids":self.profile.role_ids,
-                        "context":self.context.as_dict(),"source_artifact_digest":canonical_digest(source_artifact)})
+        declaration={key:canonical_data(settings[key]) for key in declaration_fields}
+        declaration.update(mapping=dict(mapping),target_channels=list(channels))
+        receipt=reader({"source_binding":canonical_data(self.source_binding),"profile":canonical_data(asdict(self.profile)),
+                        "context":self.context.as_dict(),"source_artifact_digest":canonical_digest(source_artifact),
+                        "declaration":declaration,"intent":self.intent.model_dump(mode="json")})
         if not getattr(receipt,"ok",False) or not isinstance(receipt.result,dict):
             return {"status":"unsupported","reason_codes":["RETARGET_TARGET_OBSERVATION_UNAVAILABLE"]}
         observed=receipt.result;observed_digest=canonical_digest(observed)

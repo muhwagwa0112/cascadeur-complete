@@ -6436,6 +6436,34 @@
         "type": "object"
       }
     },
+    "prepare_blender_export_profile": {
+      "description": "Pin an export profile to the installed Blender before recipe planning.\n\n    Supply explicit axes, units, take, destination and target object/bone maps.\n    A background consumer observes its version and importer bytes. This does\n    not export, import an artifact, authorize a recipe or certify roundtrip quality.\n    ",
+      "input_schema": {
+        "properties": {
+          "profile": {
+            "additionalProperties": true,
+            "title": "Profile",
+            "type": "object"
+          },
+          "timeout_seconds": {
+            "default": 60,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "title": "prepare_blender_export_profileArguments",
+        "type": "object"
+      },
+      "name": "prepare_blender_export_profile",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "prepare_blender_export_profileDictOutput",
+        "type": "object"
+      }
+    },
     "recipe_artifacts": {
       "description": "List immutable content-addressed artifacts associated with a recipe run.",
       "input_schema": {

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .export_models import ArtifactRef, ExportExpectation, ExportProfile, ValidationReport
+from .export_models import ArtifactRef, ExportExpectation, ExportProfile, TargetImportSettings, ValidationReport
 from .export_publisher import canonical_digest, write_immutable_json
 from .fbx_validation import file_sha256
 
@@ -91,6 +91,94 @@ def verify_blender_fbx(path: str, timeout: float = 240.0) -> dict:
 
 def blender_export_adapter_fingerprint() -> str:
     return file_sha256(Path(__file__).with_name("blender_export_adapter.py"))
+
+
+def observe_blender_installation(*, timeout: float = 60, cancel=None) -> dict:
+    """Read exact installed consumer version/bytes using the fixed adapter.
+
+    This observation prepares profile pins. It grants no import, source-rest,
+    motion-quality or publication claim; validation still runs the real import.
+    """
+    if not np.isfinite(timeout) or timeout <= 0:
+        raise ValueError('Target observation timeout must be finite and positive')
+    blender = find_blender()
+    if blender is None:
+        raise RuntimeError('ROUNDTRIP_ADAPTER_UNAVAILABLE')
+    executable_hash = file_sha256(blender, 512 * 1024**2)
+    adapter = Path(__file__).with_name('blender_export_adapter.py')
+    adapter_hash = blender_export_adapter_fingerprint()
+    nonce = secrets.token_hex(24)
+    with tempfile.TemporaryDirectory(prefix='cascadeur-consumer-') as temporary:
+        directory = Path(temporary)
+        manifest_path, report_path = directory / 'manifest.json', directory / 'installation.json'
+        write_immutable_json(manifest_path, {'mode':'installation', 'nonce':nonce, 'report_path':str(report_path)})
+        code = _run_target_process([str(blender), '--background', '--factory-startup', '--python', str(adapter),
+                                    '--', str(manifest_path)], directory, timeout=timeout,
+                                   max_log_bytes=4 * 1024**2, cancel=cancel)
+        if code != 0:
+            detail = (directory / 'blender.log').read_bytes()[-1500:].decode('utf-8', errors='replace')
+            raise RuntimeError('TARGET_INSTALLATION_OBSERVATION_FAILED: '+detail)
+        if not report_path.is_file() or report_path.is_symlink() or report_path.stat().st_size > 32768:
+            raise RuntimeError('TARGET_INSTALLATION_REPORT_MISSING_OR_OVERSIZED')
+        observed = json.loads(report_path.read_text(encoding='utf-8'))
+    fields = {'schema_version','kind','nonce','blender_version','blender_executable_sha256',
+              'importer_fingerprint','importer_files','adapter_fingerprint'}
+    modules = {'io_scene_fbx','io_scene_fbx.import_fbx','io_scene_fbx.parse_fbx','io_scene_fbx.fbx_utils'}
+    if (set(observed) != fields or observed['schema_version'] != 1 or observed['kind'] != 'installed_consumer'
+            or observed['nonce'] != nonce or observed['adapter_fingerprint'] != adapter_hash
+            or observed['blender_executable_sha256'] != executable_hash
+            or set(observed['importer_files']) != modules
+            or any(not re.fullmatch('[a-f0-9]{64}', value) for value in observed['importer_files'].values())
+            or canonical_digest(observed['importer_files']) != observed['importer_fingerprint']
+            or len(observed['blender_version']) != 3
+            or any(type(value) is not int or value < 0 for value in observed['blender_version'])
+            or file_sha256(blender, 512 * 1024**2) != executable_hash
+            or blender_export_adapter_fingerprint() != adapter_hash):
+        raise RuntimeError('TARGET_INSTALLATION_OBSERVATION_MISMATCH')
+    return observed
+
+
+def bind_blender_target_profile(profile: ExportProfile | dict, *, timeout: float = 60, cancel=None) -> ExportProfile:
+    """Fill absent observed pins, preserving explicit import semantics and pins.
+
+    A raw profile may omit Blender version, byte pins, target adapter and settings
+    digest. The caller supplies basis, exact mappings and importer options through
+    target_import_settings; remaining fields undergo strict ExportProfile
+    validation after observation. Existing nonempty pins must match the actual
+    installation, including a previously bound settings digest. Rebinding to a
+    different installation requires deliberately removing those pins first.
+    No name mapping, pose or coordinate convention is inferred.
+    """
+    if isinstance(profile, ExportProfile):
+        value = profile.model_dump(mode='json')
+    elif isinstance(profile, dict):
+        value = dict(profile)
+    else:
+        raise TypeError('Expected an ExportProfile or raw profile dictionary')
+    settings = value.get('target_import_settings')
+    if not isinstance(settings, dict):
+        raise ValueError('TARGET_ADAPTER_PROFILE_UNAVAILABLE: explicit import settings required')
+    observed = observe_blender_installation(timeout=timeout, cancel=cancel)
+    if tuple(observed['blender_version'][:2]) not in ((4,2), (4,3), (4,5)):
+        raise ValueError('TARGET_ACTION_ADAPTER_UNSUPPORTED')
+    def bind_existing(values, name, actual):
+        existing = values.get(name)
+        if existing is not None and existing != '' and canonical_digest(existing) != canonical_digest(actual):
+            raise ValueError('TARGET_INSTALLATION_PIN_CONFLICT: '+name)
+        return actual
+    pinned = TargetImportSettings.model_validate({**settings, **{
+        name: bind_existing(settings, name, observed[name])
+        for name in ('blender_version','blender_executable_sha256','importer_fingerprint')}})
+    bound = ExportProfile.model_validate({**value,
+        'target_adapter':bind_existing(value, 'target_adapter', 'blender_fbx_classic_v1'),
+        'target_adapter_fingerprint':bind_existing(value, 'target_adapter_fingerprint', observed['adapter_fingerprint']),
+        'target_import_settings':pinned.model_dump(mode='json'),
+        'target_import_settings_digest':bind_existing(value, 'target_import_settings_digest', canonical_digest(pinned))})
+    paths = {item.node_path for item in bound.skeleton_map}
+    if (set(pinned.bone_mapping) != paths or set(pinned.helper_mapping) != set(bound.allowed_helper_nodes)
+            or set(pinned.mesh_mapping) != set(bound.mesh_refs)):
+        raise ValueError('TARGET_IMPORT_MAPPING_INCOMPLETE')
+    return bound
 
 
 def _run_target_process(arguments, directory, *, timeout, max_log_bytes, cancel):

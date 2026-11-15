@@ -25,6 +25,7 @@ PROTOCOL_VERSION = "3.0"
 READ_ONLY_OPERATIONS = {
     "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
     "system.observe_motion_inputs", "system.observe_key_layout", "system.observe_motion_capture", "system.observe_recipe_target",
+    "system.observe_retarget_inputs", "system.observe_controller_targets",
     "system.status",
     "system.logs",
     "system.view_mode_get",
@@ -1010,8 +1011,17 @@ def _run_operation_legacy(scene, operation, request):
         from .native_adapters import status
         return status(), []
     if name == "system.verify_observation":
+        if args["kind"] in {"retarget_inputs", "controller_targets"}:
+            from .native_retarget_inputs import verify_observation as verify_retarget
+            return verify_retarget(scene, args["observation"], args["digest"], args["kind"]), []
         from .native_adapters import verify_observation
         return verify_observation(args["observation"], args["digest"], args["kind"]), []
+    if name == "system.observe_retarget_inputs":
+        from .native_retarget_inputs import observe_retarget_inputs
+        return observe_retarget_inputs(scene, args), []
+    if name == "system.observe_controller_targets":
+        from .native_retarget_inputs import observe_controller_targets
+        return observe_controller_targets(scene, args), []
     if name == "system.rebind_source":
         prior = args["source_binding"]
         guards.assert_source(scene, prior)
@@ -1074,7 +1084,7 @@ def _run_operation_legacy(scene, operation, request):
             state["protocol_version"] = PROTOCOL_VERSION
             state["runtime_epoch"] = guards.RUNTIME_EPOCH
             state["adapter_fingerprint"] = guards.LOADED_FINGERPRINT
-            state["guarded_capabilities"] = guards.capabilities()
+            state["guarded_capabilities"] = guards.capabilities(scene)
             from .native_adapters import status as native_status
             state["native_adapter"] = native_status()
             state["bridge_python"] = tuple(__import__("sys").version_info[:3])

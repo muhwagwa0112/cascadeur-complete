@@ -225,6 +225,30 @@ inverse binds, current animation, physical metadata and FBX defaults. The
 keypose recipe's source capture follows authored motion; its zero preservation
 errors do not establish preservation of the input animation or cleanup quality.
 
+For the privately qualified parentless Transform, `inspect_motion_inputs` and
+`resolve_motion_inputs` can now construct an observed root profile without raw
+rig JSON. They read stored model rest, rotation channels, ownership and the
+registered writer's actual closure. Joint axes and limits are inapplicable to
+this independent object; general character profiles still require those
+observations. FPS, scale and basis remain explicit conversion policy.
+The `independent-parentless-position-v1` host retarget controller supports one
+root's global positions at existing qualified LINEAR/STEP keys. It authenticates
+current native input and exact controller output before protected writing;
+mapping, root anchor and scale are explicit declarations. It does not support
+character IK, coupled channels, rotation writes or inserted keys.
+One real five-frame mapped-position retarget has completed writing, evaluation,
+sampled quality and checkpoint on installed `2026.2.3.0.16863`. Its quality source
+follows authored retarget motion; this does not establish input preservation,
+general character quality or FBX delivery.
+
+`prepare_blender_export_profile(profile)` observes the installed Blender in a
+background process and fills absent version, executable/importer byte pins,
+adapter fingerprint and settings digest before recipe planning. Supply explicit
+axes, units, take, destination, mappings and import options. Existing conflicting
+pins are rejected; deliberately remove old pins to prepare a different consumer.
+The tool returns `profile` and `profile_digest`; it does not import an artifact,
+authorize a recipe or establish roundtrip quality or publication.
+
 See [the cleanup workflow](docs/MOCAP_CLEANUP_WORKFLOW.md) for intent and evidence
 requirements. Its earlier production example is historical context, not evidence
 that this guarded runtime supports every listed stage.

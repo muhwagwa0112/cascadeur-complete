@@ -86,6 +86,11 @@ def read_motion_inputs(scene,arguments):
         raise ValueError("RESOURCE_BUDGET_EXCEEDED: native input discovery exceeds 10000 objects")
     if requested is not None and requested not in all_objects:
         raise ValueError("INVALID_WRITE_SCOPE: character reference is not an observed stable object ID")
+    if requested is not None and len(all_objects) == 1:
+        from .native_independent_inputs import read_independent_inputs
+        independent = read_independent_inputs(scene, arguments, requested)
+        if independent is not None:
+            return independent
     warnings=[];ownership={};rig_rows=[]
 
     def behaviour_reference(link):

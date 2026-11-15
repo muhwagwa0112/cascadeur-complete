@@ -65,6 +65,22 @@ that mapping. Host retargeting uses an immutable canonical source artifact,
 observed target rest/controller data and existing-key fitting before preparation.
 It cannot dispatch a host-only `motion.retarget` operation to the native bridge.
 
+The qualified independent controller currently lowers only one parentless
+Transform's root positions into existing LINEAR/STEP keys. Its profile can be
+resolved from authenticated native input observations plus explicit conversion
+policy; no anatomical roles or joint limits are inferred. Both the native rest
+and the exact direct controller output are privately rechecked against the
+current source before writing. Root mapping, axis alignment, scale, anchor and
+the `explicit_mapped_trajectory` intent remain declarations. This finite route
+does not enable general character retargeting or rotational/coupled writes.
+
+Before planning a Blender export, `prepare_blender_export_profile` can bind an
+explicit export declaration to actual installed consumer bytes. It fills only
+missing observed pins and rejects conflicting pins. Import semantics, maps,
+coordinate conversion and destination remain explicit. Installation observation
+does not replace actual artifact import, original-intent quality or publication
+checks.
+
 ## Historical workflow example
 
 The following example predates the guarded recipe contract. Its thresholds,
