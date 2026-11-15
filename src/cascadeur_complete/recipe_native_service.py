@@ -102,7 +102,8 @@ class RecipeNativeServiceMixin:
                         or profile.get("role_ids") != spec.character.role_ids
                         or any(ownership.get(key) != spec.character.character_id for key in spec.character.object_ids)
                         or not set(spec.character.layer_ids) <= set(source.scope.get("layer_ids", []))):
-                    reasons.append({"code": "RIG_MAPPING_AMBIGUOUS"})
+                    reasons.append({"code": "RIG_MAPPING_AMBIGUOUS",
+                        "detail": "The live source reader has not attested the exact rig profile, semantic mapping and ownership"})
         elif spec.input.kind == "active_scene":
             reasons.append({"code": "SOURCE_BINDING_REQUIRED"})
         verified = set(capabilities.get("operations", []))
@@ -214,7 +215,7 @@ class RecipeNativeServiceMixin:
             directory.mkdir(parents=True, exist_ok=True)
             path, working = str(directory / f"{step.step_id}-backup.casc"), str(directory / f"{step.step_id}-working.casc")
             args = {"checkpoint_path": path, "working_path": working}
-            outputs, successor = [path, working], "working_clone"
+            outputs = [path, working]
         elif stage == "evaluation":
             args = dict(step.fixed_parameters)
         elif stage == "rig":
@@ -333,15 +334,38 @@ class RecipeNativeServiceMixin:
         value["receipt_digest"] = digest(receipt)
         observation = CheckpointObservation.model_validate(value)
         if (receipt.get("phase") != "terminal" or receipt.get("outcome") != "succeeded"
+                or receipt.get("dispatched") is not True or receipt.get("write_phase") != "completed"
                 or observation.operation_digest != effect.operation_digest or observation.source_before != effect.source_binding
+                or effect.source_binding is None or effect.source_binding.binding.model_dump(mode="json") != receipt.get("scene_before")
                 or observation.source_after.binding.model_dump(mode="json") != receipt.get("scene_after")):
             raise RecipeConflict("CHECKPOINT_RECEIPT_MISMATCH")
         for manifest in (observation.checkpoint, observation.working_file):
             sha, length = file_sha256(Path(manifest.path))
             if sha != manifest.sha256 or length != manifest.length:
                 raise RecipeConflict("CHECKPOINT_BYTES_CHANGED")
-        if observation.checkpoint.path not in effect.output_paths:
+        if (observation.checkpoint.path != effect.arguments.get("checkpoint_path")
+                or observation.working_file.path != effect.arguments.get("working_path")
+                or set(effect.output_paths) != {observation.checkpoint.path, observation.working_file.path}):
             raise RecipeConflict("CHECKPOINT_PATH_MISMATCH")
+        before, after = effect.source_binding.binding, observation.source_after.binding
+        if (observation.parent_scene_instance_id != before.scene_instance_id
+                or after.runtime_epoch != before.runtime_epoch or receipt.get("runtime_epoch") != after.runtime_epoch
+                or observation.source_after.adapter_fingerprint != effect.source_binding.adapter_fingerprint
+                or observation.authored_digest != after.content_revision
+                or observation.sample_digest != observation.source_after.sample_digest
+                or (effect.expected_successor == "same_instance" and (after.scene_instance_id != before.scene_instance_id
+                    or after.document_lineage_id != before.document_lineage_id))
+                or (effect.expected_successor != "same_instance" and after.scene_instance_id == before.scene_instance_id)
+                or (effect.expected_successor == "working_clone" and after.document_lineage_id != before.document_lineage_id)):
+            raise RecipeConflict("CHECKPOINT_SUCCESSOR_MISMATCH")
+        manifest = observation.source_after.scope.get("snapshot_manifest") or {}
+        expected_manifest = {"path": observation.checkpoint.path, "sha256": observation.checkpoint.sha256,
+            "bytes": observation.checkpoint.length, "working_path": observation.working_file.path,
+            "working_scene_instance_id": after.scene_instance_id, "document_lineage_id": after.document_lineage_id,
+            "runtime_epoch": after.runtime_epoch, "adapter_fingerprint": observation.source_after.adapter_fingerprint,
+            "native_completion": "observed", "authored_projection_digest": observation.sample_digest}
+        if any(manifest.get(key) != expected for key, expected in expected_manifest.items()):
+            raise RecipeConflict("CHECKPOINT_MANIFEST_MISMATCH")
         if not self.validate_source(observation.source_after).ok:
             raise RecipeConflict("SUCCESSOR_BINDING_UNVERIFIED")
         return observation

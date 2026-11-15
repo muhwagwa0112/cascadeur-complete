@@ -55,6 +55,17 @@ r4의 16개 항목을 대상으로 source/완료/receipt, 입력 수집, recipe 
 
 새 writer의 실제 실패→인증 terminal failure→one-attempt permit→조건부 복구 실행은 아직 관찰하지 않았다. 아래 `c9c355...`의 qualification은 이전 게시 코드 `f9e0cfa`에 대한 결과이며 이번 bridge bytes의 새 자격 확인을 대신하지 않는다. Cascy의 계산 채널 재로드 차이, native FPS/물리 단위·semantic roles/joint limits, 전체 recipe와 원본 intent를 결합한 consumer 품질/최종 게시 문제도 남아 있다.
 
+### host recipe·cleanup 연결 수정
+
+- native checkpoint 관측의 실제 `project_load` 필드를 strict host 모델에서 보존한다. 일반 checkpoint는 현재 소유 탭을 저장하므로 `same_instance`로 처리하고, bootstrap의 별도 instance와 구분한다. receipt의 두 경로·실제 파일 hash·successor manifest·epoch·digest를 함께 확인한다.
+- native 평가가 끝난 다음 source/baseline capture를 실행한다. 이미 runtime이 발급한 canonical batch의 source binding을 나중에 다른 쓰기 scope로 덮어쓰지 않는다.
+- verifying/checkpointing에서 막힌 run의 resume은 기존 receipt 검증을 다시 예약할 때 blocked 상태를 해제한다. 늦은 terminal 성공이 확인된 checkpoint/export의 관측을 재구성할 수 있으며, 알려진 host postcondition 실패는 계속 차단한다. 원 요청을 다시 dispatch하지 않는다.
+- cleanup fitting은 정확한 operation/arguments로 native reader가 자체 source scope와 전체 projection digest를 발급하도록 연결했다. host motion sample의 digest를 native 전체 scene digest로 보내지 않는다. 보존한 canonical capture·평가 receipt를 재인증하고 scene/lineage/epoch/checkpoint/쓰기 인자가 유지되는지 확인한 뒤 후보를 발급한다.
+
+필요한 좁은 host 확인만 실행했다. 위 실제 bootstrap/checkpoint 산출물 두 개의 strict parsing과 임시 저장소의 blocked resume/late terminal/cancel/known-postcondition-failure 재현은 exit 0이었다. cleanup은 실제 sparse LINEAR/STEP fitting의 기존 `[0,2,4]` key grid와 canonical source 요청·stale capture/scene 변경 거부를 제한된 service doubles로 확인했다(exit 0). 이 host 재현은 인증된 queue나 전체 실앱 recipe의 성공 증거가 아니다. broad suite/build/CI는 실행하지 않았다.
+
+현재 runtime source가 정확한 profile·semantic mapping·ownership을 함께 발급하지 않아 active scene recipe는 `RIG_MAPPING_AMBIGUOUS`에서 차단된다. 파일 입력은 bootstrap 승인이 가능하지만 현재 adapter의 후속 continuation은 같은 검증에서 차단된다. 임의 profile이나 boolean으로 이를 통과시키지 않았다. 전체 `recipe_authorize → recipe_start → quality → publish`는 여전히 미완료다.
+
 ## P0: 남아 있는 실행 제한
 
 ### 전체 project 로딩에서 발견한 설정 손실
@@ -67,7 +78,19 @@ bootstrap/restore는 이제 잠근 입력 bytes를 새로운 소유 working path
 
 새 앱 프로세스에서 repository의 최종 helper를 직접 실행했다. runtime fingerprint `e394531202d3cc6c2a4452650d4d47661944404486b411e19246f0c7accf448f`, epoch `c09edd0b-5db8-437d-b139-e858afef2d72`에서 `DataSourceManager.load_scene`의 동기 True 반환과 대상 `csc.domain.Scene`의 정확한 완료 이벤트를 확인했다. 새 파일 저장 후 archive의 FPS 48/UnitLength `m`/Gravity 980이 유지됐으며 원본 SHA와 기존 탭을 보존했다. 진단 탭은 닫고 이전 빈 탭으로 돌아왔다. 증거 `artifacts/native-r4/isolated-runtime/snapshots/project-copy-check-e9cde440-aacd-4e20-a760-5d3cd9105e19/observed.json`, SHA-256 `978de80cb88662a188152f725cd8b4a6d81f0a336c2cbfbc92803884d751681f`. 이는 helper의 실제 복사→load→save 확인이며 변경된 bootstrap/restore 전체 authorization 경로나 Cascy strict restore의 새 qualification을 의미하지 않는다. 이전 프로세스의 adapter 자격은 승계하지 않았다.
 
+같은 fingerprint/epoch에서 `NativeSceneAdapter.execute`의 파일 bootstrap → 후속 checkpoint → `qualify_restore`의 실제 새 탭 복원을 독립 객체 입력으로 이어서 실행했다. 전체 projection exact equality, 동일 lineage/새 instance, 원본 파일·장면 불변과 이전 탭 복귀를 확인했다. bootstrap backup/working, 후속 backup/working, restored working 다섯 파일 모두 FPS 48/UnitLength `m`/Gravity 980을 보존했다. 증거 `artifacts/native-r4/isolated-runtime/snapshots/full-project-entrypoint-e3ae79b1-e9b7-44c8-8056-8f62ef87fa48/observed.json`, SHA-256 `49e194608f523549e2ab841ddb0fcbc0661125a50087574958dba786b05c78cd`. 자격 확인용 private source와 실제 executor를 사용했으며 wire authorization/terminal failure/one-attempt permit은 실행하지 않았다. 이 확인으로 production operation을 새로 등록하지 않았고 Cascy의 strict restore도 재실행하지 않았다.
+
 파일 안의 FPS/UnitLength를 읽을 수 있다는 사실은 현재 편집 중인 장면의 live getter를 확보했다는 뜻이 아니다. SettingsHandler의 조회 후보들은 0/빈 문자열을 반환했으며 기본값으로 사용하지 않았다. 또한 [공식 Measurements 문서](https://cascadeur.com/help/category/302)는 내부 Cascadeur 단위와 scene system units를 구분하므로 UnitLength 문자열만으로 좌표 scale을 치환하지 않는다. 입력 context의 물리 시간·단위 인증은 계속 제한된다.
+
+설치 stub의 `SettingsHandler`는 이름 두 개를 받는 typed getter만 제공하며 키 열거·존재 확인·메모리 내 scene-settings 직렬화 API는 노출하지 않는다. 현재 `MotionContext`의 시간·길이·basis는 명시한 변환 정책으로 source/capture digest에 결합하고 `native_physical_metadata_verified=False`를 유지한다. 저장 파일의 값도 현재 unsaved 설정의 인증으로 승격하지 않는다.
+
+### 전체 로더 적용 뒤 Cascy의 정확 비교 차단
+
+같은 `e394531...` 프로세스에서 Cascy 파일 bootstrap을 실제 실행했지만 `NATIVE_COMPLETION_UNKNOWN: clone or source changed during checkpoint`로 차단됐다. 새 복원은 도달하지 않았다. 증거 `artifacts/native-r4/isolated-runtime/snapshots/cascy-full-project-restore-860a1a77-5bbd-465c-bd2a-3e67eeadc71b/observed.json`, SHA-256 `94d60532704edb5b7db01dc35df12364bbbcd5312fc983e55facbcab2060fbd4`.
+
+별도 소유 복제본에서 load 직후 → 첫 save → 둘째 save를 비교했다. 첫 save에서 3개 owner의 26개 data 값이 바뀌었고 data 외 top-level projection은 같았다. 두 save 뒤 projection은 서로 정확히 같았다. Position/Rotated Additional Vector/Corrected Vector/Angle Rotation/Twist 등의 작은 수치 차이도 임의 cache로 제외하지 않았다. 증거 `cascy-project-save-difference-80290d50-417d-4c32-8222-b99b4b5e8e28/observed.json`, SHA-256 `8bdc1b43c44c5490c003026faf8e04cf98654e213de44e31c78610da8566039d` (위와 같은 snapshots root).
+
+명시적인 native interpolation reload/interpolate를 load와 save 사이에 넣은 별도 진단에서도 evaluated projection은 load 직후와 같았고 첫 save 후에는 달랐다. 증거 `cascy-load-evaluate-save-11e876a3-055a-44f9-a2a1-4b253fc72aee/observed.json`, SHA-256 `80d04439549cab209bafe2a2af352113284ef6c4f1b73fad82e95466d4089353`. 저장·재로드의 정확한 authored/computed 경계가 확보되지 않아 허용 오차나 이름 규칙을 추가하지 않았다. 실패한 소유 탭을 관찰한 후 닫았으며 원본 샘플과 파일·기존 빈 탭을 보존했다. 전체 project 설정 손실 수정과 Cascy 전체 projection 안정성은 서로 다른 문제다.
 
 ### 후속 연결: 실제 보간·키 쓰기·animated FBX·소비자
 
@@ -86,7 +109,7 @@ bootstrap/restore는 이제 잠근 입력 bytes를 새로운 소유 working path
 - 같은 `003f4a9c...` 프로세스의 `scene-qualification-f210d89c-7542-442c-9fab-5ef44b61dc55`는 reader·bootstrap·평가·후속 checkpoint와 소유 탭 정리를 모두 완료했다. 증거 SHA-256 `e2439e25398c6c39d6be9e30663664152471e3bd8dd2948545e093007f358680`. 공식 script server 응답 제한을 넘겼지만 요청을 재실행하지 않고 fsync progress의 `qualification=observed`, `restore_owned_tabs=complete`와 실제 등록 상태를 별도로 확인했다. `export-qualification-3056d4e1-60ac-44c5-b61b-ca6b1113ee0d`의 두 실제 export와 strict parser도 통과해 `io.export_fbx`가 좁은 관찰 profile로 등록됐다. 증거 SHA-256 `9eb406e828976051f985d71c0db7f6f2d908b387b1a9aeb5f67c571966fd8009`; quality는 `not_evaluated`, target roundtrip은 `unverified`다.
 - 독립 객체 복원 진단 `independent-restore-qualification-768ef976-3edd-4f74-a979-901997df2995`는 reload·저장 후 전체 projection이 anchor와 정확히 같았지만 SDK의 `/` 경로와 요청의 `\` 경로 문자열 비교로 차단됐다. 이를 canonical `Path.resolve()` 비교로 수정했다. 실패한 소유 탭/파일은 자동 폐기하지 않으며 current tab은 source로 돌려놓도록 보완했다. 이 변경 뒤에는 새 앱 프로세스에서 다시 관찰해야 한다. Cascy의 실제 계산값 차이는 이 경로 표기 수정으로 해결되지 않는다.
 
-### 현재 bridge의 새 프로세스 확인
+### 이전 bridge의 새 프로세스 확인 (f9e0cfa)
 
 경로 비교 수정 후 Cascadeur를 깨끗이 재시작했다. 아래 결과는 fingerprint `c9c355557327272b66c421db25078d8b852e69be4c9e83133b2f8aa143e60238`, epoch `056bc310-81fe-41d6-a6df-9fe15eea66d8`에서 직접 관찰했다. 앞선 fingerprint의 자격 확인을 가져와 등록하지 않았다.
 
@@ -97,7 +120,7 @@ bootstrap/restore는 이제 잠근 입력 bytes를 새로운 소유 working path
 | animated FBX 두 회와 export 등록 | `export-qualification-ae8e1a25-485c-41d0-a0ac-d54276dd8a6c`, 증거 SHA-256 `234024125375cdf13ef4c08a4a0c44e031f5666073cffd579c0db626c608ad3a`. `io.export_fbx` 등록, 새 독립 객체의 실제 required scope와 complete capture 연결 확인. 생산 recipe export는 실행하지 않음 |
 | 독립 객체 exact restore 명령 | `independent-restore-qualification-192ae0dd-c021-41fd-8a10-989b19af9cd1/restore-qualification-dd62ba67-291e-4087-903e-dec7b63b22ca.json`, 증거 SHA-256 `bfe81cc28e48aab0e87a17eb33fbdf60f415edc612df80072f35d18017fbd25d`. 실제 새 tab reload·save·전체 projection exact equality·동일 lineage/새 instance·원본 보존·탭 복원 통과. `safety.rollback` primitive 등록 |
 
-등록된 일곱 operation은 위 관찰 범위에서만 활성화된다. 실제 실패 후 recovery의 partial-write attestation/인증 terminal failure/one-attempt signed permit, Cascy의 strict restore, 일반 controller·rotation·key insertion, 원본 intent/rest와 결합한 roundtrip 품질·최종 게시는 여전히 미완료다. 독립 객체 복원 성공으로 실패한 Cascy 복원을 통과 처리하지 않는다. 전체 r4 목표를 완료로 표시하지 않았다.
+당시 등록된 일곱 operation은 위 관찰 범위에서만 활성화됐다. 이후 코드 변경·앱 재시작 뒤의 현재 자격을 의미하지 않는다. 실제 실패 후 recovery의 partial-write attestation/인증 terminal failure/one-attempt signed permit, Cascy의 strict restore, 일반 controller·rotation·key insertion, 원본 intent/rest와 결합한 roundtrip 품질·최종 게시는 여전히 미완료다. 독립 객체 복원 성공으로 실패한 Cascy 복원을 통과 처리하지 않는다. 전체 r4 목표를 완료로 표시하지 않았다.
 
 ### 11월 16일 추가 구현과 실제 관찰
 

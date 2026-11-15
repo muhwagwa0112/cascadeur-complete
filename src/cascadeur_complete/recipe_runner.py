@@ -68,7 +68,7 @@ class _PlanningService:
                 "arguments": arguments, "source_binding": _json(kwargs.get("source_binding"))}
 
     def __getattr__(self, name):
-        if name not in {"execute_readonly", "capture_source", "validate_source", "batch", "observe_key_layout", "verify_key_layout", "observe_motion_capture", "recipe_verify_capture",
+        if name not in {"execute_readonly", "capture_source", "validate_source", "recipe_rebind_source", "batch", "observe_key_layout", "verify_key_layout", "observe_motion_capture", "recipe_verify_capture",
                         "observe_retarget_inputs", "verify_retarget_inputs", "motion_controller_adapter", "verify_controller_targets"}:
             raise RecipeConflict("Solver attempted an effect outside read-only planning")
         return getattr(self._service, name)
@@ -218,6 +218,11 @@ class RecipeRunner:
                 self._schedule(run_id)
             return run_view(run)
         if any(item.state in {"verifying", "checkpointing"} for item in run.steps):
+            # A failed observation leaves the native step in this state. Resume
+            # the existing receipt, even after expiry, rather than dispatching it
+            # again or scheduling a worker that immediately exits as blocked.
+            if run.state == "blocked":
+                run = self._update(run, state="cancel_requested" if run.cancel_requested else "running", blocked_reason=None)
             self._schedule(run_id)
             return run_view(run)
         # A process interruption after an applied effect requires the persisted
@@ -399,7 +404,7 @@ class RecipeRunner:
                                profile=self._profile(spec), context=context, intent=spec.intent,
                                source_binding=source, supports=self._supports(spec))
 
-    def _capture(self, spec, operation="motion.capture", arguments=None, source=None):
+    def _capture(self, spec, source=None):
         workflow = self._workflow(spec, source)
         ids = spec.character.object_ids
         rig = self._profile(spec)
@@ -410,11 +415,10 @@ class RecipeRunner:
                for obj in cleanup.object_ids}))
         global_batch = workflow.capture_batch(ids, space="global", required_rotation_ids=rotation_ids)
         local_batch = workflow.capture_batch(ids, space="local", required_rotation_ids=rotation_ids)
-        binding = _json(workflow._bind_source(operation, arguments))
-        result = {"global": _batch_json(global_batch), "local": _batch_json(local_batch)}
-        for value in result.values():
-            value["source_binding"] = binding
-        return result
+        # The native observation registry authenticates these exact canonical
+        # bytes, including their source binding. A newly bound write scope must
+        # never replace that binding on an already issued sample batch.
+        return {"global": _batch_json(global_batch), "local": _batch_json(local_batch)}
 
     def _latest(self, run, prefix):
         records = [item for item in run.steps if item.step_id.split("-", 1)[-1] == prefix and item.result is not None]
@@ -473,8 +477,7 @@ class RecipeRunner:
         record = record.model_copy(update={"state": "ready"})
         run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
         if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback"}:
-            value = (self._capture(plan.spec, "animation.interpolation_refresh", {}, run.current_binding)
-                     if step.stage == "source_capture" else self._capture(plan.spec, source=run.current_binding))
+            value = self._capture(plan.spec, source=run.current_binding)
             binding = SourceBinding.model_validate(value["global"]["source_binding"])
             if not binding.complete:
                 raise RecipeConflict("BINDING_UNAVAILABLE")
@@ -735,7 +738,9 @@ class RecipeRunner:
                 host_result = (record.result or {}).get("host_commit_result")
                 repeatable_evidence = (record.stage_effect is not None and record.stage_effect.operation_name
                                        in {"safety.bootstrap", "safety.checkpoint", "io.export_fbx"})
-                if (host_result is None and not repeatable_evidence) or (host_result is not None and not host_result.get("ok")):
+                recoverable_observation = repeatable_evidence and (host_result is None or (
+                    host_result.get("outcome") == "outcome_unknown" and host_result.get("error_code") != "POSTCONDITION_FAILED"))
+                if not recoverable_observation and (host_result is None or not host_result.get("ok")):
                     reason = "HOST_POSTCONDITION_RESULT_MISSING" if host_result is None else "HOST_POSTCONDITION_FAILED"
                     return self._step_update(run, record.model_copy(update={"state": "blocked",
                                             "execution_outcome": "succeeded", "verification_status": "unverified" if host_result is None else "fail"}),

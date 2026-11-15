@@ -100,6 +100,8 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
         "native_unbaking": ("unbaking", "generation.unbaking"),
     }[mode]
     if mode == "retarget" and spec.motion.route == "host":
+        add("evaluation", "interpolation_refresh", "animation.interpolation_refresh", "evaluation", channels=("evaluation",),
+            postconditions=("evaluation_settled",))
         add("retarget_capture", "transform_get", "motion.capture", "read", postconditions=("complete_retarget_target_capture",))
         add("host_retarget", "motion_retarget", "motion.retarget.solve", "host_compute",
             spec.motion.model_dump(mode="json"), postconditions=("verified_controller_candidate",), lowering="host-retarget-v1")
@@ -107,9 +109,9 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
     add("motion", motion_feature, motion_operation, "scene_mutation", spec.motion.model_dump(mode="json"),
         channels, "existing_motion_preserved" if mode == "existing" else None,
         postconditions=("target_motion_readback", "non_target_unchanged"), lowering="motion-v1")
-    add("source_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("evaluation", "interpolation_refresh", "animation.interpolation_refresh", "evaluation", channels=("evaluation",),
         postconditions=("evaluation_settled",))
+    add("source_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("baseline_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("analyze", "motion_analysis", "motion.analyze", "host_compute", postconditions=("required_metric_eligibility",))
     for index, cleanup in enumerate(spec.cleanup):

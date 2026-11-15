@@ -180,6 +180,10 @@ its exact successor scope and an authenticated, bounded original failure.
 Bootstrap and restore open a fresh owned file copy through the complete project
 loader so persisted scene settings survive; a domain-only load resets FPS/units.
 This preserves saved metadata without certifying live physical input metadata.
+Recipe capture retains its runtime-issued source and evaluation evidence. Cleanup
+candidates obtain a new exact write scope from the native reader; host sample
+digests are not substituted for the native dependency projection. Resume can
+continue checkpoint verification from the original terminal receipt.
 
 See [the r4 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
 the limits of checks performed, and the next implementation steps.

@@ -156,6 +156,7 @@ class CheckpointObservation(StageModel):
     completion: Literal["native_observed"]
     checkpoint: FileManifest
     working_file: FileManifest
+    project_load: dict[str, JsonValue] | None = None
     source_before: SourceBinding | None
     source_after: SourceBinding
     parent_scene_instance_id: str | None

@@ -16,7 +16,7 @@ from . import motion_cleanup as mc
 from .capture import canonical_data, canonical_digest, partition_writes, sample_projection, validate_write_scope
 from .motion_context import IntentConstraints, MotionContext, MotionInputError, RigProfile, SampleBatch, validate_samples
 from .motion_quality import QualityPolicy, compare_captures, evaluate_metrics
-from .models import Operation
+from .models import Operation, SourceBinding
 
 if TYPE_CHECKING:
     from .service import CascadeurService
@@ -54,6 +54,7 @@ class CleanupWorkflow:
         self.supports = {key: SupportTrack(**value) if isinstance(value,dict) else value for key,value in (supports or {}).items()}
         self._captures = []
         self._capture_scopes = []
+        self._native_captures = []
         self._mesh_artifacts = []
         if self.context is not None and any(len(support.origin_m)!=len(self.context.frames) for support in self.supports.values()):
             raise CleanupError("INCOMPLETE_CAPTURE: support traces must cover the exact motion time grid")
@@ -73,9 +74,72 @@ class CleanupWorkflow:
         if styling and self.intent.action != "styling":
             raise CleanupError("INTENT_LOCK_VIOLATION: this pass changes style and needs a declared styling intent")
 
+    def _bind_native_source(self,kind,arguments):
+        """Bind exact writes to the native reader, retaining evaluated inputs.
+
+        Canonical motion samples and the native full dependency projection
+        have different hashes. Only the runtime can issue the latter; host
+        fitting must not submit a motion-sample hash as that projection.
+        """
+        from dataclasses import asdict
+        if arguments is None or self.source_binding is None:
+            raise CleanupError("BINDING_UNAVAILABLE: native candidates require exact arguments and an issued prior source")
+        capture=getattr(self.service,"capture_source",None)
+        validate=getattr(self.service,"validate_source",None)
+        verify=getattr(self.service,"recipe_verify_capture",None)
+        if not all(callable(method) for method in (capture,validate,verify)):
+            raise CleanupError("BINDING_UNAVAILABLE: native source and evaluated-capture authenticators are required")
+        prior=SourceBinding.model_validate(self.source_binding)
+        checked=validate(prior)
+        if not prior.complete or not getattr(checked,"ok",False):
+            raise CleanupError("SCENE_CHANGED: prior native source no longer matches the working scene")
+        inputs=canonical_data({"context":self.context.as_dict(),"profile":asdict(self.profile),
+            "intent":self.intent.model_dump(mode="json"),
+            "support_tracks":{key:asdict(value) for key,value in self.supports.items()},
+            "planning_parameters":getattr(self,"_planning_parameters",{}),
+            "key_layout_digest":getattr(self,"_key_layout_digest",None),
+            "mesh_artifacts":self._mesh_artifacts,
+            "evaluated_captures":[{"capture_digest":item["capture_digest"],
+                                   "evaluation_receipt_digest":item["evaluation_receipt_digest"]}
+                                  for item in self._native_captures]})
+        inputs_digest=canonical_digest(inputs)
+        # This exact two-field request asks the installed adapter to derive
+        # its own scope. Do not include host-only profile/captures in a native
+        # required_scope, or provide their unrelated sample digest here.
+        bound=SourceBinding.model_validate(capture({"operation_name":kind,
+            "operation_arguments":canonical_data(arguments)},inputs_digest,None))
+        if (not bound.complete or bound.inputs_digest!=inputs_digest
+                or bound.binding.runtime_epoch!=prior.binding.runtime_epoch
+                or bound.binding.scene_instance_id!=prior.binding.scene_instance_id
+                or bound.binding.document_lineage_id!=prior.binding.document_lineage_id
+                or bound.adapter_fingerprint!=prior.adapter_fingerprint
+                or bound.scope.get("operation_name")!=kind
+                or bound.scope.get("operation_arguments")!=canonical_data(arguments)
+                or bound.scope.get("operation_arguments_digest")!=canonical_digest(arguments)
+                or bound.scope.get("snapshot_manifest")!=prior.scope.get("snapshot_manifest")):
+            raise CleanupError("BINDING_UNAVAILABLE: native write attestation changed scene, checkpoint or exact arguments")
+        # Reauthenticate retained immutable batches after issuance. This ties
+        # the fitted inputs to the current native projection rather than just
+        # trusting a successfully issued source for an unrelated current pose.
+        for item in self._native_captures:
+            batch=SampleBatch.from_dict(item["canonical_batch"])
+            receipt=verify(batch,item["capture_digest"])
+            result=getattr(receipt,"result",None)
+            if (not getattr(receipt,"ok",False) or not isinstance(result,dict)
+                    or result.get("capture_digest")!=item["capture_digest"]
+                    or result.get("evaluation_receipt_digest")!=item["evaluation_receipt_digest"]):
+                raise CleanupError("CAPTURE_UNVERIFIED: fitted inputs no longer match the current evaluated native source")
+        checked=validate(bound,operation_name=kind,arguments=arguments)
+        if not getattr(checked,"ok",False):
+            raise CleanupError("SCENE_CHANGED: exact native write source changed during candidate binding")
+        self.source_binding=bound
+        return bound
+
     def _bind_source(self, kind, arguments=None):
         if not self._captures:
             raise CleanupError("INCOMPLETE_CAPTURE: no complete sampled source")
+        if self._native_captures:
+            return self._bind_native_source(kind,arguments)
         from dataclasses import asdict
         scope = {"operation_name": kind, "captures": self._capture_scopes,
                  "requested_ids": sorted(set().union(*(set(c["ids"]) for c in self._capture_scopes))),
@@ -313,7 +377,8 @@ class CleanupWorkflow:
                 raise CleanupError("CAPTURE_UNVERIFIED: runtime-issued capture authenticator unavailable")
             verified=verifier(batch,issued["capture_digest"])
             if (not getattr(verified,"ok",False) or not isinstance(verified.result,dict)
-                    or verified.result.get("capture_digest")!=issued["capture_digest"]):
+                    or verified.result.get("capture_digest")!=issued["capture_digest"]
+                    or verified.result.get("evaluation_receipt_digest")!=issued.get("evaluation_receipt_digest")):
                 raise CleanupError("CAPTURE_UNVERIFIED: current native capture provenance could not be authenticated")
             if not issued.get("evaluation_receipt_digest"):
                 raise CleanupError("EVALUATION_RECEIPT_UNAVAILABLE: native capture has no durable evaluation receipt")
@@ -329,6 +394,8 @@ class CleanupWorkflow:
             self._captures.append(canonical_data(raw))
             self._capture_scopes.append({"space":space,"frames":grid.tolist(),"ids":sorted(ids),
                 "channels":{key:["position"]+(["rotation"] if key in batch.rotation_wxyz else []) for key in sorted(ids)}})
+            self._native_captures.append({"canonical_batch":canonical_data(batch.as_dict()),
+                "capture_digest":issued["capture_digest"],"evaluation_receipt_digest":issued["evaluation_receipt_digest"]})
             return batch
         # Legacy read-only clients without the private native observation hook
         # can still analyze samples; this path issues no evaluated-capture proof.
