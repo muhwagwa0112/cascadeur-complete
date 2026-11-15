@@ -2,7 +2,8 @@
 
 This reader deliberately returns a partial draft when the SDK observation does
 not establish units, basis, physical FPS, semantic roles or rest transforms.
-Current-frame/default Transform values are never relabelled as a bind pose.
+Skin inverse-bind assets can establish rest transforms for their exact ordered
+joint mapping. Current-frame/default Transform values are never a bind pose.
 """
 from __future__ import annotations
 
@@ -119,7 +120,9 @@ def read_motion_inputs(scene,arguments):
                         field["value"]=None if link.is_null() else rt._id_string(link)
                         if name=="Basic" and prop=="parent":row["parent_id"]=field["value"]
                     elif kind=="ObjectRangeType":
-                        field["value"]=sorted(rt._id_string(x) for x in bv.get_behaviour_objects_range(behaviour,prop))
+                        # MeshObject.linked_objects is indexed by inverse-bind
+                        # matrices; sorting an SDK range destroys that mapping.
+                        field["value"]=[rt._id_string(x) for x in bv.get_behaviour_objects_range(behaviour,prop)]
                     elif kind=="AssetType":
                         link=bv.get_behaviour_asset(behaviour,prop)
                         field["asset_id"]=None if link.is_null() else rt._id_string(link)
@@ -157,6 +160,19 @@ def read_motion_inputs(scene,arguments):
         text=str(name)
         try:descriptions[text]=str(dv.get_any_description_value_by_name(text))
         except (RuntimeError,ValueError,TypeError) as exc:descriptions[text]={"unobserved_reason":str(exc)[:300]}
+    from .native_bind_rest import read_native_bind_rest
+    bind_rest=read_native_bind_rest(scene,sorted(selected))
+    bind_evidence_digest=_digest(bind_rest["raw_evidence"])
+    for obj in objects:
+        rest=bind_rest["rest_local_transforms"].get(obj["id"])
+        if rest is not None:
+            obj["rest_local_transform"]=rest
+            obj["rest_local_transform_provenance"]={
+                "reader":"native_mesh_inverse_bind_v1",
+                "evidence_digest":bind_evidence_digest,
+                "coordinate_space":bind_rest["coordinate_space"],"units":bind_rest["units"]}
+    for reason in bind_rest["errors"]:
+        warnings.append("NATIVE_BIND_REST_UNOBSERVED:"+str(reason)[:300])
     structure_objects=[]
     for obj in objects:
         behaviors=[]
@@ -167,21 +183,36 @@ def read_motion_inputs(scene,arguments):
             behaviors.append({"id":behavior["id"],"name":behavior["name"],"properties":properties})
         structure_objects.append({"id":obj["id"],"parent_id":obj.get("parent_id"),
                                   "character_id":obj["character_id"],"behaviors":behaviors})
-    structure={"objects":structure_objects,"rig_membership":rig_rows}
+    # A sampled animated mesh-conversion value belongs to the source, not the
+    # reusable rig structure. Native inverse-bind assets and ordered joint links
+    # do change the structure's rest contract.
+    bind_structure={"basic_parents":bind_rest["raw_evidence"].get("basic_parents",{}),
+        "meshes":[{key:value for key,value in mesh.items() if key in (
+            "mesh_object_id","behaviour_id","linked_object_ids","mesh_dependency_id",
+            "inverse_bind_matrices","bind_shape_data_id")}
+            for mesh in bind_rest["raw_evidence"].get("meshes",[])]}
+    structure={"objects":structure_objects,"rig_membership":rig_rows,
+               "bind_rest_evidence":bind_structure}
     source={"objects":source_rows,"layers":list(layers.values()),"descriptions":descriptions,
-            "frame_range":list(frame_range),"current_frame":frame,"support_refs":arguments.get("support_refs",[])}
+            "frame_range":list(frame_range),"current_frame":frame,"support_refs":arguments.get("support_refs",[]),
+            "bind_rest_observation":bind_rest}
     values={"context":{"frames":list(range(first,last+1))},"objects":objects,"role_candidates":{},
             "root_rotation_id":None,"layers":list(layers.values()),"native_descriptions":descriptions,
+            "native_bind_rest":bind_rest,
             "rig_metadata":rig_rows,"mesh_ids":[x["id"] for x in objects if any(b["name"]=="MeshObject" for b in x["behaviors"])],
             "name_candidates":[{"id":x["id"],"name":x["name"]} for x in objects],
             "source_coverage":"raw_native_properties_and_layer_keys_no_evaluation_refresh",
             "unobserved_fields":["physical_fps","metres_per_scene_unit","scene_to_solver_basis","rest_local_transforms",
                                  "joint_axes","joint_limits_rad","semantic_roles","root_rotation_role","support_evaluated_tracks"],
             "observation_warnings":sorted(set(warnings))}
+    if objects and all("rest_local_transform" in obj for obj in objects):
+        values["unobserved_fields"].remove("rest_local_transforms")
     build=installed_build()
     provenance={"objects":{"reader":"csc.model.ModelViewer/BehaviourViewer/DataViewer","build":build,
                             "ownership":"RigInfo object ranges; absent/overlap stays unresolved"},
                 "layers":{"reader":"csc.layers.Viewer","build":build},
+                "rest_local_transforms":{**bind_rest["provenance"],"build":build,
+                    "status":bind_rest["status"],"unobserved":bind_rest["unobserved"]},
                 "context":{"frames":"requested integer interval; physical metadata unobserved"},
                 "role_candidates":{"status":"unobserved","reason":"names and raw QRT JSON are not semantic authority"},
                 "root_rotation_id":{"status":"unobserved","reason":"rotation channel existence does not identify root orientation role"}}

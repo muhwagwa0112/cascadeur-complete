@@ -168,8 +168,15 @@ original request and schedules remaining observation work without replaying it.
 The narrow independent-transform adapter does not establish humanoid rig,
 controller, mesh, retarget, native export settings/completion, or full recipe
 support. Preflight lists missing observed adapters. Export preparation, sealing,
-consumer validation and journaled publication are connected, but native export
-remains gated until its actual settings, target closure and completion are observed.
+consumer validation and journaled publication are connected. Native export is
+qualified only for the explicitly observed independent Transform profile;
+general character export and end-to-end quality/publication remain gated.
+
+Motion input discovery reads ordered skin inverse-bind assets as native rest
+evidence where joint mapping and parent closure are complete. Missing physical
+FPS, units, semantic roles and joint constraints still block profile resolution.
+Recovery reconciles the original request without replay; native restore requires
+its exact successor scope and an authenticated, bounded original failure.
 
 See [the r4 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
 the limits of checks performed, and the next implementation steps.

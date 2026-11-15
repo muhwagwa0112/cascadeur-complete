@@ -39,6 +39,22 @@ r4의 16개 항목을 대상으로 source/완료/receipt, 입력 수집, recipe 
 
 실앱 연결 과정에서 두 결함을 수정했다. runtime wrapper와 내부 실행기가 confirmation token을 이중 소비해 첫 쓰기부터 거부하던 결함을 고쳤다. recipe가 사용하던 `snapshot` 기능 ID가 registry에 없어 후속 준비가 `KeyError`로 실패하던 문제도 고쳤으며, 자격 확인된 runtime 안전 기능으로 노출했다. prepare 자체는 저장이나 장면 변경을 하지 않는다.
 
+## 후속 구현: bind 입력과 복구 결과 연결
+
+원격 개선안 `6a9338c`를 다시 fetch해 변경 없음을 확인했다. 설치 실행 파일의 ProductVersion/FileVersion은 모두 `2026.2.3.0.16863`이며 기존 프로세스 PID 8012와 script server가 응답한다.
+
+- 설치 SDK의 공식 `commands/go_to_bind_pose.py`와 `MeshDependency.inverse_bind_matrices()`를 근거로 순서 있는 `MeshObject.linked_objects`를 연결하는 compact bind reader를 입력 수집에 추가했다. 현재 pose나 behaviour 기본값을 rest로 사용하지 않는다. 관찰한 mesh bind evidence를 source/rig structure fingerprint에 포함하며 parent closure가 없는 객체의 local rest는 누락으로 남긴다. native scene 좌표/단위이며 물리 단위나 FBX 좌표 변환을 인증하지 않는다.
+- rollback host postcondition은 checkpoint의 실제 부모 폴더에서 successor 파일을 찾는다. 중첩 snapshot 경로 한 건의 직접 host check를 통과했다. 원 결과의 snapshot ID도 파일명에서 추측하지 않고 manifest UUID를 사용한다.
+- native recovery는 predecessor/successor identity, 동일 lineage/새 instance, successor manifest·scope와 실제 저장 bytes를 함께 확인한다. native proof가 빠졌다고 legacy byte-copy 성공으로 전환하지 않는다. 실제 임시 파일을 사용하는 좁은 host predicate check에서 native resave를 허용하고 누락 proof·다른 lineage·stale workspace·같은 instance·변경된 bytes를 거부했다.
+- 늦게 도착한 recovery receipt와 이미 소비된 rollback token은 원 요청을 재확인한다. 복구 요청을 새로 만들거나 재실행하지 않는다.
+- independent position writer에 요청별 private failure attestation 경로를 추가했다. native transaction이 동기적으로 정상 반환하고 완료된 setter prefix와 전체 projection·post-source가 정확히 일치하는 실제 실패만 대상으로 한다. setter 도중 예외·미완료/재진입 callback·native 예외·scope 밖 변경은 계속 unknown이다. 성공 trial을 실패 증거로 재사용하지 않는다.
+
+실앱의 첫 입력 진단에서 Cascy의 `bindShapeMatrix`가 Animation data여서 불필요한 static gate에 막혔다. 공식 native bind 경로는 이 행렬을 적용하지 않으므로 이 조건을 분리했다. 이제 해당 값은 현재 frame 한 개의 진단 metadata로만 보존하고 native→FBX 변환은 unobserved로 명시한다. inverse-bind 자산의 유효성·순서 매핑·공유 joint 일치·부모 closure 조건은 유지했다.
+
+수정 후 최종 reader bytes를 별도 진단 namespace에서 실제 앱에 읽혔다. 기존 product 모듈을 reload하거나 adapter를 등록하지 않았다. 샘플의 선택된 288 객체 중 mesh 하나에서 **57 global bind / 57 local rest**를 관찰했고 입력 draft의 57 객체 row에도 연결됐다. 오류는 없으며 나머지 231 객체는 `BIND_POSE_NOT_OBSERVED`로 남는다. 증거는 `artifacts/native-r4/bind-input-observation-b59c3315-c90a-4c93-831b-ec34771b5601.json`, SHA-256 `ec6c2be686710e8ede9620890bfa58df2e658541f2d9c6e5da47329e000b763c`이다. 원본 `Cascy.casc`의 SHA-256 `0d6ae171db831e4738fddc86014fd0a0b77e9991c74308972603810ee34fc723`은 동일하고 원래 빈 탭으로 복원했다. 진단 artifact는 ignored local 산출물이며 Git에 포함하지 않는다.
+
+새 writer의 실제 실패→인증 terminal failure→one-attempt permit→조건부 복구 실행은 아직 관찰하지 않았다. 아래 `c9c355...`의 qualification은 이전 게시 코드 `f9e0cfa`에 대한 결과이며 이번 bridge bytes의 새 자격 확인을 대신하지 않는다. Cascy의 계산 채널 재로드 차이, native FPS/물리 단위·semantic roles/joint limits, 전체 recipe와 원본 intent를 결합한 consumer 품질/최종 게시 문제도 남아 있다.
+
 ## P0: 남아 있는 실행 제한
 
 ### 후속 연결: 실제 보간·키 쓰기·animated FBX·소비자

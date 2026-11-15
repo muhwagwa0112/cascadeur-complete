@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import threading
 
 from . import guarded_runtime as guards
 from .native_scene_adapter import NativeSceneAdapter
@@ -19,6 +20,11 @@ _WRITER_BYTES = None
 _PROBE = None
 _ALLOWED_DIAGNOSTICS = {"RUNTIME_ISSUED_MOTION_CAPTURE_UNAVAILABLE", "FINITE_INTERPOLATION_MODEL_NOT_QUALIFIED"}
 _MISSING=object()
+_FAILURE_CONTRACT="synchronous_returned_write_prefix_exact_projection_v1"
+
+
+def _freeze(value):
+    return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False,allow_nan=False).encode()
 
 
 def _scope_failure(before,expected,actual,*,operation,space,data_id,callbacks,active_scene):
@@ -345,11 +351,133 @@ class NativeIndependentPositionAdapter(NativeSceneAdapter):
         if actual!=source: raise ValueError("SCENE_CHANGED: disposable probe source differs")
         return actual
 
+    def _observe_failed_write(self,scene,request,operation,arguments,before,driver,writes,identity,trace,error):
+        """Attest an actual failure only after a bounded, returned native call.
+
+        A setter that raised is in flight even if its immediate value looks
+        plausible. Native exceptions, False replies, callback replay/yield and
+        unexpected graph changes likewise provide no completion evidence.
+        Successful qualification trials never manufacture failure evidence.
+        """
+        from . import runtime as rt
+        reason="NATIVE_FAILURE_COMPLETION_UNBOUNDED"
+        try:
+            self._assert_qualified()
+            count=len(trace["returned"])
+            if (not request.get("request_id") or getattr(guards._LOCAL,"request",None) is not request
+                    or (_PROBE is not None and _PROBE[0] is self)
+                    or not trace["native_returned"] or not trace["native_succeeded"]
+                    or trace["native_active"] or trace["unbounded_callback"]
+                    or trace["callback_attempts"]!=1 or not trace["callback_entered"]
+                    or not trace["callback_exited"] or trace["started"]!=list(range(count))
+                    or trace["returned"]!=list(range(count)) or not 1<=count<=len(writes)):
+                raise ValueError(reason)
+            bounded_trace=copy.deepcopy(trace)
+            if rt._scene_view() is not scene or dict(guards.scene_instance(scene))!=identity:
+                raise ValueError("SCENE_CHANGED_DURING_NATIVE_FAILURE")
+            expected=_expected_projection(before,driver,writes[:count])
+            after=self.read_scene(scene)
+            if after!=expected:
+                raise ValueError("NATIVE_FAILURE_OUTSIDE_EXACT_COMPLETED_WRITE_PREFIX")
+            # Issue from an independent complete read using the same public
+            # source path as runtime's subsequent post-dispatch capture.
+            original=request["source_binding"]
+            post=guards.capture_source(scene,original["scope"],original["inputs_digest"])
+            self._source(scene,post,operation,arguments)
+            if (post["sample_digest"]!=guards.digest(after) or self.read_scene(scene)!=after
+                    or rt._scene_view() is not scene or dict(guards.scene_instance(scene))!=identity):
+                raise ValueError("NATIVE_FAILURE_POST_SOURCE_CHANGED")
+            detail={"failure_contract":_FAILURE_CONTRACT,"request_digest":guards.digest(request),
+                "requested_write_count":len(writes),"completed_write_count":count,
+                "native_transaction":bounded_trace,"post_source_digest":guards.digest(post),
+                "authored_projection_digest":guards.digest(after),
+                "evaluation":"domain_modify_native_graph_observed",
+                "durable_interpolation_receipt":"separate_explicit_operation_required"}
+            if after==before:
+                if trace!=bounded_trace:
+                    raise ValueError("NATIVE_FAILURE_CALLBACK_BOUNDARY_CHANGED")
+                return guards.observe_effect(operation,"no_effect",scene_before=identity,scene_after=identity,detail=detail)
+            observation={"operation_name":operation,"completion":"completed",
+                         "scene_before":identity,"scene_after":identity,"detail":detail}
+            record={"schema_version":1,"contract":_FAILURE_CONTRACT,
+                "runtime_fingerprint":guards.LOADED_FINGERPRINT,"runtime_epoch":guards.RUNTIME_EPOCH,
+                "installed_build":self.observed_build(),"request_id":request["request_id"],
+                "request_digest":guards.digest(request),"operation_name":operation,
+                "original_source_digest":guards.digest(original),"post_source":post,
+                "before_projection_digest":guards.digest(before),"after_projection_digest":guards.digest(after),
+                "writer_evidence_digest":guards.digest(json.loads(self.evidence_bytes)),
+                "native_transaction":bounded_trace,"effect_observation":observation,
+                "failure_type":type(error).__name__}
+            # Keep the trace reference as well as immutable evidence: a late
+            # rejected callback invalidates eligibility rather than being
+            # hidden by the already serialized observation.
+            frozen=_freeze(record)
+            attestation={"runtime_fingerprint":guards.LOADED_FINGERPRINT,
+                "installed_build":record["installed_build"],"known_effect_classes":["scene"],
+                "evidence_sha256":guards.digest(record),"request_digest":record["request_digest"],
+                "post_source_digest":guards.digest(post),"contract":_FAILURE_CONTRACT}
+            if trace!=bounded_trace:
+                raise ValueError("NATIVE_FAILURE_CALLBACK_BOUNDARY_CHANGED")
+            observed=guards.observe_effect(operation,"completed",scene_before=identity,scene_after=identity,detail=detail)
+            self._failure_evidence_bytes=frozen
+            self._failure_trace=trace
+            self.verification["recovery_after_partial_write_observed"]=attestation
+            return observed
+        except Exception as observation_error:
+            reason=str(observation_error).split(":",1)[0][:128]
+        # Preserve the original executor error; this observation cannot turn
+        # it into a success or an eligible recovery.
+        self._failure_evidence_bytes=None
+        self._failure_trace=None
+        self.verification.pop("recovery_after_partial_write_observed",None)
+        return guards.observe_effect(operation,"unknown",scene_before=identity,scene_after=None,
+            detail={"failure_contract":_FAILURE_CONTRACT,"reason_code":reason,
+                    "native_transaction":copy.deepcopy(trace)})
+
+    def prepare_recovery_binding(self,scene,request,result):
+        """Recheck private request-specific failure evidence before restoration."""
+        from . import runtime as rt
+        self._assert_qualified()
+        frozen=getattr(self,"_failure_evidence_bytes",None)
+        trace=getattr(self,"_failure_trace",None)
+        if not isinstance(frozen,bytes) or not isinstance(trace,dict):
+            raise ValueError("RECOVERY_FAILURE_ATTESTATION_UNAVAILABLE")
+        record=json.loads(frozen)
+        post=(result.get("result") or {}).get("post_source_binding")
+        effects=guards.effect_observations()
+        attestation=self.verification.get("recovery_after_partial_write_observed") or {}
+        if (result.get("ok") is not False or result.get("outcome")!="failed_after_dispatch"
+                or result.get("dispatched") is not True or result.get("write_phase") not in ("started","completed")
+                or result.get("failure_kind")=="guard_rejected_before_first_write"
+                or record["contract"]!=_FAILURE_CONTRACT or record["request_id"]!=request.get("request_id")
+                or record["request_digest"]!=guards.digest(request)
+                or record["runtime_epoch"]!=guards.RUNTIME_EPOCH
+                or record["runtime_fingerprint"]!=guards.LOADED_FINGERPRINT
+                or record["installed_build"]!=self.observed_build()
+                or record["writer_evidence_digest"]!=guards.digest(json.loads(self.evidence_bytes))
+                or record["original_source_digest"]!=guards.digest(request.get("source_binding"))
+                or post!=record["post_source"] or trace!=record["native_transaction"]
+                or attestation.get("evidence_sha256")!=guards.digest(record)
+                or attestation.get("request_digest")!=record["request_digest"]
+                or attestation.get("post_source_digest")!=guards.digest(post)
+                or not effects or effects[-1]!=record["effect_observation"]
+                or (result.get("result") or {}).get("native_effect_observations")!=effects
+                or rt._scene_view() is not scene
+                or dict(guards.scene_instance(scene))!=record["effect_observation"]["scene_after"]):
+            raise ValueError("RECOVERY_FAILURE_ATTESTATION_DIFFERS")
+        self._source(scene,post,record["operation_name"],request["operations"][0]["arguments"])
+        if guards.digest(self.read_scene(scene))!=record["after_projection_digest"]:
+            raise ValueError("RECOVERY_FAILURE_POST_SOURCE_CHANGED")
+        return super().prepare_recovery_binding(scene,request,result)
+
     def execute(self,scene,arguments,request):
         import csc
         import numpy as np
         from . import runtime as rt
         from .handler_registry import transact
+        self._failure_evidence_bytes=None
+        self._failure_trace=None
+        self.verification.pop("recovery_after_partial_write_observed",None)
         operations=request.get("operations")
         if not isinstance(operations,list) or len(operations)!=1 or operations[0].get("arguments")!=arguments:
             raise ValueError("INVALID_POLICY: one exact independent position operation required")
@@ -374,33 +502,84 @@ class NativeIndependentPositionAdapter(NativeSceneAdapter):
             if self.read_scene(scene)!=before:
                 raise ValueError("SCENE_CHANGED: independent position source changed before write")
         callbacks=[]
+        owner_thread=threading.get_ident()
+        completion=[None]
+        trace={"native_entered":False,"native_active":False,"native_returned":False,
+            "native_succeeded":False,"callback_attempts":0,"callback_entered":False,
+            "callback_exited":False,"callback_completed":False,"unbounded_callback":False,
+            "started":[],"returned":[]}
+        def modify(label,callback):
+            trace["native_entered"]=True
+            trace["native_active"]=True
+            def observed_callback(*args):
+                trace["callback_attempts"]+=1
+                if (not trace["native_active"] or trace["callback_attempts"]!=1
+                        or threading.get_ident()!=owner_thread):
+                    trace["unbounded_callback"]=True
+                    # Keep a retained completion observation truthful if the
+                    # SDK attempts a late callback after returning. The
+                    # expired callback never reaches the author or setters.
+                    if completion[0] is not None:
+                        completion[0]["completion"]="unknown"
+                        completion[0]["detail"]["reason_code"]="NATIVE_CALLBACK_OUTSIDE_SYNCHRONOUS_PERMIT"
+                    if getattr(self,"_failure_trace",None) is trace:
+                        self._failure_evidence_bytes=None
+                        self._failure_trace=None
+                        self.verification.pop("recovery_after_partial_write_observed",None)
+                    raise RuntimeError("NATIVE_COMPLETION_UNKNOWN: callback yielded, changed thread or replayed")
+                try:
+                    value=callback(*args)
+                    trace["callback_completed"]=True
+                    return value
+                finally:
+                    trace["callback_exited"]=True
+            try:
+                value=domain.modify(label,observed_callback)
+                trace["native_returned"]=True
+                trace["native_succeeded"]=value is True
+                return value
+            finally:
+                trace["native_active"]=False
         def author(model,_update,_callback_scene):
-            for row,value in encoded:
-                model.data_editor().set_data_value(write_data_id,row["frame"],value)
+            trace["callback_entered"]=True
+            for index,(row,value) in enumerate(encoded):
+                editor=model.data_editor()
+                trace["started"].append(index)
+                editor.set_data_value(write_data_id,row["frame"],value)
+                trace["returned"].append(index)
             callbacks.append("authored_existing_positions")
-        transact(domain.modify,"Cascadeur Complete: author independent existing position keys",author,before_write=guard)
-        after=self.read_scene(scene)
-        if callbacks!=["authored_existing_positions"] or after!=expected or rt._scene_view() is not scene:
-            raise ValueError(_scope_failure(before,expected,after,operation=operation,space=arguments["space"],
-                data_id=authoritative_id,callbacks=callbacks,active_scene=rt._scene_view() is scene))
-        readback=[]
-        worst=0.
-        for row,value in encoded:
-            actual=np.asarray(domain.data_viewer().get_data_value(requested_data_id,row["frame"]),dtype=float).reshape(-1)
-            if actual.shape!=(3,) or not np.array_equal(actual,value[:,0].astype(float)):
-                raise ValueError("POSTCONDITION_FAILED: exact native float32 key readback differs")
-            worst=max(worst,float(np.linalg.norm(actual-np.asarray(row["position"],dtype=float))))
-            readback.append({"id":row["id"],"frame":row["frame"],"position":actual.tolist()})
-        guards.observe_effect(operation,"completed" if after!=before else "no_effect",scene_before=identity,
+        try:
+            transact(modify,"Cascadeur Complete: author independent existing position keys",author,before_write=guard)
+            if (not trace["native_succeeded"] or trace["unbounded_callback"]
+                    or trace["callback_attempts"]!=1 or not trace["callback_completed"]):
+                raise ValueError("NATIVE_COMPLETION_UNKNOWN: native transaction did not return synchronous success")
+            after=self.read_scene(scene)
+            if callbacks!=["authored_existing_positions"] or after!=expected or rt._scene_view() is not scene:
+                raise ValueError(_scope_failure(before,expected,after,operation=operation,space=arguments["space"],
+                    data_id=authoritative_id,callbacks=callbacks,active_scene=rt._scene_view() is scene))
+            readback=[]
+            worst=0.
+            for row,value in encoded:
+                actual=np.asarray(domain.data_viewer().get_data_value(requested_data_id,row["frame"]),dtype=float).reshape(-1)
+                if actual.shape!=(3,) or not np.array_equal(actual,value[:,0].astype(float)):
+                    raise ValueError("POSTCONDITION_FAILED: exact native float32 key readback differs")
+                worst=max(worst,float(np.linalg.norm(actual-np.asarray(row["position"],dtype=float))))
+                readback.append({"id":row["id"],"frame":row["frame"],"position":actual.tolist()})
+        except Exception as exc:
+            completion[0]=self._observe_failed_write(scene,request,operation,arguments,before,driver,writes,identity,trace,exc)
+            raise
+        completion[0]=guards.observe_effect(operation,"completed" if after!=before else "no_effect",scene_before=identity,
             scene_after=dict(guards.scene_instance(scene)),detail={"readback":readback,"evaluation":"domain_modify_native_graph_observed",
                 "durable_interpolation_receipt":"separate_explicit_operation_required",
                 "declared_channel_space":arguments["space"],"requested_position_data_id":driver["data_id"],
                 "authoritative_write_data_id":authoritative_id,
+                "native_transaction":copy.deepcopy(trace),
                 "authored_projection_digest":guards.digest(after),"key_id_kind":"layer_frame_locator"})
         return {"native_completion":"observed","space":arguments["space"],"write_count":len(writes),
             "object_count":1,"frame_count":len(writes),"transforms":readback,"max_position_error":worst,
             "observed_postconditions":["transform_equals_requested" if operation=="animation.transform_set" else "position_keys_equal_request"],
             "evaluation":"domain_modify_native_graph_observed","durable_interpolation_receipt":"separate_explicit_operation_required",
+            "native_transaction":copy.deepcopy(trace),
             "authored_projection_digest":guards.digest(after)},[]
 
 
@@ -469,7 +648,8 @@ def qualify_independent_position_writer():
                         "observed_full_projection_digest":guards.digest(observed)})
         evidence={"schema_version":1,"operations":list(_OPERATIONS),"native_build":probe.observed_build(),
             "runtime_epoch":guards.RUNTIME_EPOCH,"runtime_fingerprint":guards.LOADED_FINGERPRINT,
-            "model_qualification_digest":guards.digest(model),"writer_contract":"existing_position_authoritative_local_graph_v3",
+            "model_qualification_digest":guards.digest(model),"writer_contract":"existing_position_authoritative_local_graph_v4",
+            "failure_observation_contract":_FAILURE_CONTRACT,"failure_trials":[],
             "closure_conditions":closure_conditions,"evaluation":"domain_modify_native_graph_observed",
             "durable_interpolation_receipt":"separate_explicit_operation_required","trials":trials}
     finally:

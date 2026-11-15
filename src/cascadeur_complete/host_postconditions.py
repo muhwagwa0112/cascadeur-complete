@@ -231,7 +231,11 @@ class HostPostconditionsMixin:
         )
 
     def _await_rollback_scene(self, record, result: ResultEnvelope, observed: CommitObservation) -> ResultEnvelope:
-        working_path = self.paths.snapshots / (str(record.operation.arguments["working_id"]) + ".working.casc")
+        # The restore executor creates the successor beside its checkpoint,
+        # including checkpoints owned by a nested snapshot/run directory.
+        working_path = Path(record.operation.arguments["path"]).parent / (
+            str(record.operation.arguments["working_id"]) + ".working.casc"
+        )
         return self._wait_for_open_scene(result, str(working_path), observed.timeout)
 
     def _await_auto_physics_snap(self, record, result: ResultEnvelope, observed: CommitObservation) -> ResultEnvelope:

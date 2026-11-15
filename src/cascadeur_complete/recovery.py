@@ -91,6 +91,9 @@ def recovery_candidate(record, failed, receipt):
             or receipt.dispatched is not True or receipt.effect_class not in ("scene", "mixed")
             or receipt.write_phase not in ("started", "completed")
             or receipt.failure_kind == "guard_rejected_before_first_write"
+            or terminal.get("phase") != "terminal" or terminal.get("outcome") != "failed_after_dispatch"
+            or terminal.get("dispatched") is not True or terminal.get("write_phase") not in ("started", "completed")
+            or terminal.get("failure_kind") == "guard_rejected_before_first_write"
             or terminal.get("recovery_eligible") is not True
             or failed.request_id != record.mutation_request_id
             or receipt.request_id != record.mutation_request_id
@@ -129,7 +132,9 @@ def validate_recovery_source(source, post, manifest, failed_request_id):
     args = scope.get("operation_arguments")
     binding = source.binding
     if (not source.complete or scope.get("operation_name") != "safety.rollback"
-            or not isinstance(args, dict) or scope.get("operation_arguments_digest") != canonical_digest(args)
+            or not post.complete or not isinstance(args, dict)
+            or set(args) != {"path", "snapshot_id", "working_id", "failed_request_id", "snapshot_manifest_digest", "post_source_digest"}
+            or scope.get("operation_arguments_digest") != canonical_digest(args)
             or source.adapter_fingerprint != post.adapter_fingerprint
             or binding.runtime_epoch != post.binding.runtime_epoch
             or binding.scene_instance_id != post.binding.scene_instance_id
@@ -234,22 +239,42 @@ def recovery_succeeded(result, permit):
         return False
     observation = data.get("recovery_observation")
     saved = data.get("working_file")
+    manifest = permit["snapshot_manifest"]
+    # An observed native save may serialize different bytes. Its full readback
+    # contract is mandatory; matching bytes alone must not downgrade it to the
+    # older copy-only protocol when native completion evidence is missing.
+    if observation is None and (manifest.get("native_completion") == "observed" or "authored_projection_digest" in manifest):
+        return False
     if observation is not None:
         try:
             successor = SourceBinding.model_validate(data.get("post_source_binding"))
         except (TypeError, ValueError):
             return False
-        projection = permit["snapshot_manifest"].get("authored_projection_digest")
+        projection = manifest.get("authored_projection_digest")
+        before_identity = {key: getattr(source.binding, key) for key in ("scene_instance_id", "document_lineage_id")}
+        after_identity = {key: getattr(successor.binding, key) for key in ("scene_instance_id", "document_lineage_id")}
+        successor_manifest = {**manifest, "working_path": expected_working,
+                              "working_scene_instance_id": successor.binding.scene_instance_id}
         if (not isinstance(observation, dict) or not isinstance(saved, dict)
                 or not isinstance(projection, str) or len(projection) != 64
+                or any(character not in "0123456789abcdef" for character in projection)
                 or data.get("native_completion") != "observed" or not successor.complete
                 or successor.binding != result.scene_after
                 or result.scene_before != source.binding
+                or successor.binding.scope_digest != canonical_digest(successor.scope)
                 or successor.inputs_digest != source.inputs_digest
                 or successor.adapter_fingerprint != source.adapter_fingerprint
+                or successor.scope.get("snapshot_manifest") != successor_manifest
+                or successor.scope.get("operation_name") != "safety.rollback"
+                or successor.scope.get("operation_arguments") != permit["arguments"]
+                or successor.scope.get("operation_arguments_digest") != canonical_digest(permit["arguments"])
+                or successor.scope.get("recovery") != source.scope.get("recovery")
+                or data.get("source_binding") != _json(successor)
                 or successor.sample_digest != projection or data.get("restored_projection_digest") != projection
                 or data.get("snapshot_manifest_digest") != canonical_digest(permit["snapshot_manifest"])
                 or observation.get("completion") != "native_observed"
+                or observation.get("schema_version") != 1 or saved.get("schema_version") != 1
+                or observation.get("scene_before") != before_identity or observation.get("scene_after") != after_identity
                 or observation.get("dispatch_semantics") != "synchronous_no_yield"
                 or observation.get("runtime_epoch") != source.binding.runtime_epoch
                 or observation.get("runtime_fingerprint") != source.adapter_fingerprint
@@ -264,7 +289,9 @@ def recovery_succeeded(result, permit):
                 or observation.get("source_after_digest") != canonical_digest(_json(successor))):
             return False
     path = Path(expected_working)
-    if path.is_symlink() or not path.is_file():
+    if (not path.is_absolute() or path != path.resolve() or not path.is_file()
+            or any(parent.is_symlink() or (parent.exists() and getattr(parent.lstat(), "st_file_attributes", 0) & 0x400)
+                   for parent in (path, *path.parents))):
         return False
     digest, count = hashlib.sha256(), 0
     with path.open("rb") as stream:

@@ -229,7 +229,8 @@ class ChangeFlowMixin:
                 allow_overwrite=bool(record.operation.arguments.get("allow_overwrite")),
             ),
         )
-        result.snapshot_id = Path(record.backup_path).stem if record.backup_path else None
+        result.snapshot_id = ((record.source_binding.scope.get("snapshot_manifest") or {}).get("snapshot_id")
+                              if record.backup_path else None)
         result.operation_id = record.operation.name
         result.status = "outcome_unknown" if result.outcome == "outcome_unknown" else ("succeeded" if result.ok else "failed")
         result.scene_revision_before = record.scene_revision
@@ -313,7 +314,16 @@ class ChangeFlowMixin:
                 if result:
                     if not permit or result["permit_digest"] != canonical_digest(permit):
                         raise ValueError("RECOVERY_JOURNAL_PERMIT_DIFFERS")
-                    failed.recovery_state = result["state"]
+                    if result["state"] == "blocked_recovery_outcome_unknown":
+                        # The immutable record describes what that owner knew,
+                        # not a permanent verdict on a later original receipt.
+                        # Reconcile only that same request; never prepare again.
+                        observed = self.client.reconcile_request(permit["recovery_request_id"])
+                        failed.recovery_state = ("recovered" if recovery_succeeded(observed, permit)
+                            else "blocked_recovery_outcome_unknown" if observed.outcome == "outcome_unknown"
+                            else "recovery_failed")
+                    else:
+                        failed.recovery_state = result["state"]
                 elif permit:
                     observed = self.client.reconcile_request(permit["recovery_request_id"])
                     failed.recovery_state = "recovered" if recovery_succeeded(observed, permit) else "blocked_recovery_outcome_unknown"
@@ -415,13 +425,20 @@ class ChangeFlowMixin:
 
     def rollback(self, confirmation_token: str, timeout: float = 120.0) -> ResultEnvelope:
         try:
-            record = self.changes.load(confirmation_token)
+            try:
+                record = self.changes.load(confirmation_token)
+            except SafetyError:
+                record = self.changes.consumed(confirmation_token)
+                if record is None:
+                    raise SafetyError("Unknown rollback confirmation token")
         except SafetyError as exc:
             return self._host_error("change_rollback", ErrorCode.INVALID_REQUEST, str(exc))
         if record.feature_id != "change_rollback" or record.operation.name != "safety.rollback":
             return self._host_error(
                 "change_rollback", ErrorCode.INVALID_REQUEST, "Token is not bound to a rollback operation"
             )
+        if record.used:
+            return self.client.reconcile_request(record.mutation_request_id)
         return self.commit_change(confirmation_token, timeout)
 
     def _rollback_internal(self, snapshot_id: str, *, source_binding=None, recovery_permit=None,
