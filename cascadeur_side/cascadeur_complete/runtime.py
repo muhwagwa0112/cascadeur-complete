@@ -26,6 +26,7 @@ READ_ONLY_OPERATIONS = {
     "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
     "system.observe_motion_inputs", "system.observe_key_layout", "system.observe_motion_capture", "system.observe_recipe_target",
     "system.observe_retarget_inputs", "system.observe_controller_targets",
+    "system.verify_key_insertion", "system.verify_key_topology",
     "system.status",
     "system.logs",
     "system.view_mode_get",
@@ -1012,6 +1013,10 @@ def _run_operation_legacy(scene, operation, request):
     if name == "system.native_adapter_status":
         from .native_adapters import status
         return status(), []
+    if name in {"system.verify_key_insertion", "system.verify_key_topology"}:
+        from .native_key_insertion_evidence import verify_key_insertion, verify_key_topology
+        reader = verify_key_insertion if name == "system.verify_key_insertion" else verify_key_topology
+        return reader(scene, args), []
     if name == "system.verify_observation":
         if args["kind"] in {"retarget_inputs", "controller_targets"}:
             from .native_retarget_inputs import verify_observation as verify_retarget
@@ -1648,6 +1653,8 @@ def execute_request(scene, request):
                                   effect_class=effect, dispatched=dispatched)
     from .native_scene_adapter import finalize_evaluation
     finalize_evaluation(_scene_view() or scene, request, result, receipt)
+    from .native_key_insertion_evidence import finalize_insertion
+    finalize_insertion(_scene_view() or scene, request, result, receipt)
     return result
 
 

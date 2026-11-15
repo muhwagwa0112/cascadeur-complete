@@ -167,31 +167,15 @@ def _section(row, original):
     return section, encoded
 
 
-def insert_positions(scene, source, *, before_write=None):
-    """Insert only absent keys using the same primitive exercised by the probe.
+def predict_insertion(before, driver, additions):
+    """Use the executor's exact section and full-projection prediction.
 
-    Unknown completion consumes the source. Reconciliation reads status and the
-    retained scene; it never replays this call with the consumed source.
+    The caller must have obtained ``before``/``driver`` from ``_inspect`` in
+    this process. Constructing section values does not write to a scene.
     """
-    import csc
     from bisect import bisect_right
-    from . import runtime as rt
-    from .native_scene_reader import read_scene
-    from .native_independent_position import _position, _expected_projection, _scope_failure
-    record = _SOURCES.get(source.get("source_id")) if isinstance(source, dict) else None
-    if (record is None or record["scene"] is not scene or record["source_bytes"] != _freeze(source)
-            or record["state"] != "prepared"):
-        raise ValueError("KEY_INSERTION_SOURCE_UNAVAILABLE: exact unconsumed private source required")
-    before, driver, additions = _inspect(scene, source["object_id"], source["layer_id"], source["additions"])
-    if (source["scene_identity"] != guards.scene_instance(scene)
-            or source["runtime_epoch"] != guards.RUNTIME_EPOCH
-            or source["runtime_fingerprint"] != guards.LOADED_FINGERPRINT
-            or source["model_qualification_digest"] != guards.digest(_model())
-            or before != record["before"] or guards.digest(before) != source["before_projection_digest"]):
-        raise ValueError("SCENE_CHANGED: insertion source differs")
-    if _PROBE_SCENE is not scene and qualification() is None:
-        raise ValueError("KEY_INSERTION_UNQUALIFIED")
-    layer_index = next(index for index, layer in enumerate(before["layers"]) if layer["id"] == source["layer_id"])
+    from .native_independent_position import _position, _expected_projection
+    layer_index = next(index for index, layer in enumerate(before["layers"]) if layer["id"] == driver["layer_id"])
     owning_layer = before["layers"][layer_index]
     old_sections = {row["frame"]: row for row in owning_layer["sections"]}
     authored, new_sections = [], []
@@ -208,6 +192,33 @@ def insert_positions(scene, source, *, before_write=None):
     expected = _expected_projection(before, target_driver, additions)
     expected["layers"][layer_index]["keys"] = target_driver["frames"]
     expected["layers"][layer_index]["sections"] = sorted(owning_layer["sections"] + new_sections, key=lambda row: row["frame"])
+    return authored, expected
+
+
+def insert_positions(scene, source, *, before_write=None):
+    """Insert only absent keys using the same primitive exercised by the probe.
+
+    Unknown completion consumes the source. Reconciliation reads status and the
+    retained scene; it never replays this call with the consumed source.
+    """
+    import csc
+    from . import runtime as rt
+    from .native_scene_reader import read_scene
+    from .native_independent_position import _scope_failure
+    record = _SOURCES.get(source.get("source_id")) if isinstance(source, dict) else None
+    if (record is None or record["scene"] is not scene or record["source_bytes"] != _freeze(source)
+            or record["state"] != "prepared"):
+        raise ValueError("KEY_INSERTION_SOURCE_UNAVAILABLE: exact unconsumed private source required")
+    before, driver, additions = _inspect(scene, source["object_id"], source["layer_id"], source["additions"])
+    if (source["scene_identity"] != guards.scene_instance(scene)
+            or source["runtime_epoch"] != guards.RUNTIME_EPOCH
+            or source["runtime_fingerprint"] != guards.LOADED_FINGERPRINT
+            or source["model_qualification_digest"] != guards.digest(_model())
+            or before != record["before"] or guards.digest(before) != source["before_projection_digest"]):
+        raise ValueError("SCENE_CHANGED: insertion source differs")
+    if _PROBE_SCENE is not scene and qualification() is None:
+        raise ValueError("KEY_INSERTION_UNQUALIFIED")
+    authored, expected = predict_insertion(before, driver, additions)
     domain = rt._domain_scene(scene)
     data_id = csc.model.DataId(driver["position_closure"]["data_ids"]["local_position"])
     layer_id = rt._guid(source["layer_id"])

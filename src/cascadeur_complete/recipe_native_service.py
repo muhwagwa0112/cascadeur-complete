@@ -288,6 +288,69 @@ class RecipeNativeServiceMixin:
         return self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
             "observation": value, "digest": observation_digest, "kind": "key_layout"})])
 
+    def verify_key_insertion(self, request, request_digest):
+        """Observe an exact native insertion prediction without authorizing a write."""
+        from .capture import canonical_digest
+        from .motion_key_layout import KeyAddition, LocatorInsertionEvidence
+        if (not isinstance(request, dict) or set(request) != {"key_layout_digest", "additions"}
+                or not isinstance(request["key_layout_digest"], str)
+                or len(request["key_layout_digest"]) != 64
+                or any(c not in "0123456789abcdef" for c in request["key_layout_digest"])
+                or not isinstance(request["additions"], list) or not 1 <= len(request["additions"]) <= 8):
+            raise RecipeConflict("INVALID_POLICY: exact observed key layout and one-to-eight additions required")
+        additions = tuple(KeyAddition.model_validate(row) for row in request["additions"])
+        identities = {(row.object_id, row.channel, row.layer_id) for row in additions}
+        if (len(identities) != 1 or len({row.frame for row in additions}) != len(additions)
+                or any(not row.object_id or not row.layer_id or row.channel != "position"
+                       or row.mode not in {"LINEAR", "STEP"} or row.frame < 0 or len(row.value) != 3
+                       for row in additions)):
+            raise RecipeConflict("INVALID_POLICY: one exact position driver with unique finite LINEAR/STEP additions required")
+        value = {"key_layout_digest": request["key_layout_digest"],
+                 "additions": [row.model_dump(mode="json") for row in additions]}
+        if canonical_digest(value) != request_digest or canonical_digest(request) != request_digest:
+            raise RecipeConflict("KEY_INSERTION_ADAPTER_UNVERIFIED: request digest differs from exact typed additions")
+        result = self.client.execute("transform_get", [Operation(name="system.verify_key_insertion", arguments={
+            "request": value, "digest": request_digest})])
+        if not result.ok:
+            return result
+        observed = result.result
+        if not isinstance(observed, dict):
+            raise RecipeConflict("KEY_INSERTION_ADAPTER_UNVERIFIED: missing native observation")
+        proof = LocatorInsertionEvidence.model_validate(observed.get("locator_insertion"))
+        if (observed.get("request_digest") != request_digest or proof.request_digest != request_digest
+                or proof.key_layout_digest != value["key_layout_digest"]
+                or observed.get("shared_layer_effects_observed") is not True
+                or not isinstance(observed.get("adapter_evidence_ref"), str)
+                or not observed["adapter_evidence_ref"]):
+            raise RecipeConflict("KEY_INSERTION_ADAPTER_UNVERIFIED: native evidence belongs to a different request")
+        return result
+
+    def verify_key_topology(self, observation, observation_digest, adapter_evidence_ref):
+        """Read actual completed topology evidence; parsing never grants mutation authority."""
+        from .capture import canonical_digest
+        from .motion_key_layout import KeyLayoutObservation, LocatorInsertionCompletion
+        typed = KeyLayoutObservation.model_validate(observation)
+        value = typed.model_dump(mode="json")
+        if (not isinstance(adapter_evidence_ref, str) or not adapter_evidence_ref
+                or canonical_digest(value) != observation_digest
+                or canonical_digest(observation) != observation_digest):
+            raise RecipeConflict("KEY_TOPOLOGY_READBACK_UNVERIFIED: exact observed topology digest and evidence reference required")
+        result = self.client.execute("transform_get", [Operation(name="system.verify_key_topology", arguments={
+            "observation": value, "digest": observation_digest, "adapter_evidence_ref": adapter_evidence_ref})])
+        if not result.ok:
+            return result
+        observed = result.result
+        if not isinstance(observed, dict):
+            raise RecipeConflict("KEY_TOPOLOGY_READBACK_UNVERIFIED: missing native completion observation")
+        completed = LocatorInsertionCompletion.model_validate(observed.get("locator_insertion_completion"))
+        if (observed.get("key_layout_digest") != observation_digest
+                or completed.key_layout_digest != observation_digest
+                or completed.adapter_evidence_ref != adapter_evidence_ref
+                or completed.completion_receipt_digest != observed.get("completion_receipt_digest")
+                or typed.support_status != "supported" or typed.reason_codes):
+            raise RecipeConflict("KEY_TOPOLOGY_READBACK_UNVERIFIED: native completion differs from the exact observed topology")
+        return result
+
     def recipe_verify_capture(self, capture, capture_digest):
         return self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
             "observation": capture.as_dict(), "digest": capture_digest, "kind": "motion_capture"})])

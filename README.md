@@ -126,8 +126,18 @@ The additional explicit setup commands are:
   when a one-frame interval was introduced. Full native projection equality,
   one-use authorization and successor capture remain mandatory; explicit
   interpolation is a separate operation. Honest layer/frame locators do not
-  become persistent native key GUIDs. Recipe topology authorization, private
-  planner/completion attestations and baseline quality remain gated.
+  become persistent native key GUIDs. Recipe topology authorization, sparse
+  solver/stage integration and baseline quality remain gated.
+  `position_keys_insertion_plan` reads a private prediction from an exact
+  runtime-issued evaluated key layout and explicit `KeyAddition` rows. It
+  preserves the original capture/source and uses the executor's full-projection
+  prediction. It grants no mutation authority. After a separately authorized
+  insertion and explicit evaluation/capture, `position_keys_topology_verify`
+  requires that exact private plan, original successful durable terminal receipt,
+  unchanged checkpoint and full actual projection/driver. Unknown completion,
+  a new process or changed package bytes cannot create completion evidence.
+  These evidence routes are implemented but have not been observed in the app;
+  fresh-process qualification is required after this native package change.
   The actual one-frame commit remains `outcome_unknown`; the existing global
   unresolved-effect barrier blocks further host source capture. Public success,
   successor and evaluation receipts for the two-frame route are not yet observed.

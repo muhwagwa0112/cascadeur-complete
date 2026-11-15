@@ -753,6 +753,43 @@ def animation_unbaking_prepare(object_ids: list[str], layer_ids: list[str], firs
 
 
 @mcp.tool()
+def position_keys_insertion_plan(key_layout_digest: str, additions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Read a native prediction for absent local scene-unit position keys.
+
+    Requires a current runtime-issued key-layout digest. This observes exact
+    locator/section effects; it does not authorize intent, budgets or recipes.
+    Writing still requires a current source, position_keys_insert_prepare and
+    change_commit. Each addition supplies object_id, channel='position',
+    layer_id, frame, value, mode and the exact observed-model tangent metadata.
+    """
+    from .capture import canonical_digest
+    from .motion_key_layout import KeyAddition
+    try:
+        if not isinstance(additions, list) or not 1 <= len(additions) <= 8:
+            return _invalid('One-to-eight exact position key additions required')
+        request = {"key_layout_digest": key_layout_digest,
+                   "additions": [KeyAddition.model_validate(row).model_dump(mode="json") for row in additions]}
+        return service().verify_key_insertion(request, canonical_digest(request)).model_dump(mode="json")
+    except (ValueError, TypeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def position_keys_topology_verify(observation: dict[str, Any], digest: str,
+                                  adapter_evidence_ref: str) -> dict[str, Any]:
+    """Read private terminal-completion evidence for an actual key-layout observation.
+
+    The digest must match the complete typed observation. Evidence remains
+    observational: this grants no intent/budget authorization or recipe support.
+    An unknown or unverified native completion stays unverified.
+    """
+    try:
+        return service().verify_key_topology(observation, digest, adapter_evidence_ref).model_dump(mode="json")
+    except (ValueError, TypeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
 def position_keys_insert_prepare(object_id: str, layer_id: str, additions: list[dict[str, Any]],
                                  max_added_keys: int, allow_key_insertion: bool=False,
                                  ttl: float=300, source_binding: SourceBinding | None=None) -> dict[str, Any]:

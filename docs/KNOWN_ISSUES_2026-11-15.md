@@ -7,7 +7,17 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 소유 checkpoint의 키 삽입 연결과 실제 unknown 경계
+### 최신 추가: private locator 예측과 durable 완료 인증 연결
+
+`native_key_insertion_evidence.py`와 실제 공개 readonly 도구 `position_keys_insertion_plan`, `position_keys_topology_verify`를 연결했다. 예측은 현재 native registry가 발급한 evaluated capture/key-layout와 source, 전체 frame grid, owned checkpoint, 현재 finite/insertion proof만 사용한다. caller가 준 layout/완료 flag를 registry에 등록하지 않는다. 실행기의 section/전체 projection 예측 함수를 공유하며 기존 key/section·비대상 채널을 생략하지 않는다. 값은 정확한 native float32 local scene units, tangent는 실제 생성할 section 값과 같아야 한다. 예측 자체는 intent·삽입 예산·recipe 권한을 발급하지 않는다.
+
+실제 삽입 전 기존 private prediction을 그 원 request와 single-use native source에 연결한다. runtime이 원 terminal event를 durable 기록한 **뒤에만**, 성공 outcome·완료된 native source·정확한 전체 예상 projection·successor source를 대조해 private 완료를 봉인한다. readback은 원 authenticated terminal chain을 다시 읽고 private 완료·현재 checkpoint/epoch/fingerprint·전체 projection·별도 explicit evaluation의 fresh capture·전체 driver가 모두 맞아야 한다. unknown, 실패/미완료, scene 변경, 재시작으로 유실된 private evidence는 완료로 바뀌지 않는다. registry는 16개 예측/시도로 제한하며 초과하면 거절한다. host는 strict DTO와 원/후속 digest를 대조하고 native 실패/unknown 응답을 보존한다.
+
+필요한 host locator 계약 사례만 실행해 **`6 passed, 27 deselected in 0.84s`**였다. 원 source와 request 결합, 기존 section·새 event·가짜 GUID 거절 및 exact readback 계약을 확인하는 synthetic domain 사례이며 새 native emitter나 실제 terminal/evaluation 성공 증거가 아니다. 전체 suite/build/CI는 실행하지 않았다. 이번 native bytes는 실행 중인 앱에 hot reload하지 않았고 새 실앱 qualification도 실행하지 않았다. 아래 기존 unknown/global barrier와 native crash는 미해결이며, 새 코드의 실제 관측에는 새 프로세스와 그 epoch의 명시적 qualification이 필요하다.
+
+조사한 production 호출 경로에서 sparse fitter는 여전히 기존 key frames만 반환하고 부족하면 `KEY_LAYOUT_INSUFFICIENT`로 거절한다. recipe에는 삽입 전용 stage/permit/lowering·added-key 계상·원 baseline quality 및 실제 topology readback 연결이 남아 있어 capability와 runner의 삽입 차단을 유지한다. 설치 SDK의 `ActionManager.call_action(str) -> None` 및 AnimationUnbakingTool에는 action 완료를 인증할 공개 인터페이스가 확인되지 않았다. 설치 `ml/editable_animation.py`에는 dialog 지연·선택 layer 확장 분기도 있어 projection 반복 조회를 완료 신호로 사용하지 않는다. unbaking 전용 동기 transaction·scope/예산/완료 adapter가 필요하다. 전체 16개 목표는 계속 진행 중이다.
+
+### 이전 추가: 소유 checkpoint의 키 삽입 연결과 실제 unknown 경계
 
 원격 개선안을 다시 fetch했으며 r4 최신은 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 동일하다. 전체 16개 목표는 계속 진행 중이다. 아래에는 이번 구현과 실제 관측을 구분했다. 이전 절의 "production 미등록"은 당시 관측이며 현재의 명시적 제한 route 등록과 구분한다.
 

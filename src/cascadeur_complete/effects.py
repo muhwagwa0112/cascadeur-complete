@@ -5,6 +5,7 @@ READ_ONLY_OPERATIONS = frozenset({
     "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
     "system.observe_motion_inputs", "system.observe_key_layout", "system.observe_motion_capture", "system.observe_recipe_target",
     "system.observe_retarget_inputs", "system.observe_controller_targets",
+    "system.verify_key_insertion", "system.verify_key_topology",
     "system.status", "system.logs", "system.view_mode_get", "system.tools", "system.introspect",
     "scene.summary", "scene.objects", "scene.list", "scene.validate", "selection.get", "selection.filter",
     "object.hierarchy", "object.properties", "object.behaviors", "timeline.get", "timeline.range",

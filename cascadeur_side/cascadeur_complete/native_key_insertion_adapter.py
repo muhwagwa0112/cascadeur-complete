@@ -113,6 +113,8 @@ class NativeKeyInsertionAdapter(NativeSceneAdapter):
         if completed:
             raise ValueError("KEY_INSERTION_SOURCE_CONSUMED: completed insertion cannot be replayed")
         private = core.prepare_insertion(scene, arguments["object_id"], arguments["layer_id"], arguments["additions"])
+        from .native_key_insertion_evidence import bind_execution
+        bind_execution(scene, arguments, request, private)
         result = core.insert_positions(scene, private, before_write=lambda: guards.assert_source(
             scene, source, operation_name=OPERATION, arguments=arguments))
         key = (guards.scene_instance(scene)["scene_instance_id"], guards.digest(arguments))
