@@ -321,6 +321,9 @@ Verification uses disposable state and the shared source/frozen stdio smoke clie
 Windows subprocess checks and a clean restart of the installed Cascadeur build
 confirmed handle exclusion; full source/frozen installer replacement has not been
 observed. Older clients without the gate still require the process idle scan.
+The latest native restore probe returned an exact readback before Cascadeur
+crashed in `Qt6Core.dll`; native tab lifecycle stability remains unresolved.
+See [the issue memo](docs/KNOWN_ISSUES_2026-11-15.md) for the observation limits.
 
 ## Build an unsigned local package
 

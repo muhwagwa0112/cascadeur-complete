@@ -77,6 +77,48 @@ def test_r4_late_terminal_receipt_resume_schedules_original_step(tmp_path):
     assert restored.state == "verifying" and restored.request_id == "original" and restored.calls_used == record.calls_used
 
 
+def test_late_failed_receipt_continues_same_consumed_recovery_without_changing_original_outcome(tmp_path):
+    """Host continuation routing only, not native failure/completion evidence."""
+    paths, store, _, _, run = allocated(tmp_path)
+    record = run.steps[1].model_copy(update={"state": "blocked", "request_id": "original",
+        "attempt_id": "attempt", "dispatch_lease_epoch": run.lease_epoch, "token_ref": "consumed-token",
+        "execution_outcome": "outcome_unknown"})
+    run = store.compare_and_update(run.run_id, expected_seq=run.seq, lease_epoch=run.lease_epoch,
+        transition={"state": "blocked", "blocked_reason": "outcome_unknown", "steps": [
+            record.model_dump(mode="json") if item.step_id == record.step_id else item.model_dump(mode="json") for item in run.steps]})
+    receipt = {"phase": "terminal", "outcome": "failed_after_dispatch", "request_id": "original",
+        "run_id": run.run_id, "step_id": record.step_id, "attempt_id": "attempt", "lease_epoch": run.lease_epoch,
+        "terminal_result": {"recovery_eligible": True, "outcome": "failed_after_dispatch"}}
+    calls, scheduled = [], []
+    recovery_state = "blocked_recovery_outcome_unknown"
+    def continue_consumed(token, **expected):
+        calls.append((token, expected))
+        return {"ok": False, "request_id": "original", "phase": "terminal",
+                "outcome": "failed_after_dispatch", "recovery_state": recovery_state}
+    runner = RecipeRunner(SimpleNamespace(paths=paths, client=SimpleNamespace(request_status=lambda _: receipt),
+        reconcile_consumed_change=continue_consumed))
+    runner._schedule = scheduled.append
+    runner.resume(run.run_id)
+    waiting = store.read(run.run_id)
+    assert waiting.state == "blocked" and waiting.blocked_reason == recovery_state
+    failed_step = next(item for item in waiting.steps if item.step_id == record.step_id)
+    assert failed_step.execution_outcome == "failed_after_dispatch" and failed_step.state == "blocked"
+    assert failed_step.result["host_commit_result"]["recovery_state"] == recovery_state
+    runner.status(run.run_id)
+    assert len(calls) == 1  # Status is observation, not recovery execution.
+    recovery_state = "recovered"
+    runner.resume(run.run_id)
+    finished = store.read(run.run_id)
+    failed_step = next(item for item in finished.steps if item.step_id == record.step_id)
+    assert finished.state == failed_step.state == "failed"
+    assert failed_step.execution_outcome == receipt["outcome"] == "failed_after_dispatch"
+    assert failed_step.result["host_commit_result"]["recovery_state"] == "recovered"
+    assert failed_step.request_id == record.request_id and failed_step.calls_used == record.calls_used
+    assert calls == [("consumed-token", {"expected_request_id": "original", "expected_execution_context": {
+        "run_id": run.run_id, "step_id": record.step_id, "attempt_id": "attempt",
+        "lease_epoch": run.lease_epoch, "request_id": "original"}})] * 2
+
+
 def test_r4_worker_exit_preserves_pending_wakeup(tmp_path):
     import threading
     paths, _, _, _, run = allocated(tmp_path)

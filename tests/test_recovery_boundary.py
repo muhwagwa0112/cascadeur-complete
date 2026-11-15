@@ -5,10 +5,68 @@ from types import SimpleNamespace
 import pytest
 
 from cascadeur_complete.change_flow import ChangeFlowMixin
-from cascadeur_complete.models import ResultEnvelope, ExecutionMode, SourceBinding, RequestReceipt
+from cascadeur_complete.models import ResultEnvelope, ExecutionMode, SourceBinding, RequestReceipt, Operation, BridgeRequest, SafetyContext
 from cascadeur_complete.paths import RuntimePaths
 from cascadeur_complete.request_ledger import canonical_digest
 from cascadeur_complete.safety import ChangeManager
+
+
+@pytest.mark.parametrize("recipe_context", [True, False])
+def test_consumed_continuation_authenticates_actual_wire_before_observing_or_recovering(tmp_path, recipe_context):
+    """Host routing double only; this does not certify a native partial failure."""
+    import time
+    from cascadeur_complete.atomic_queue import AtomicQueue
+    paths = RuntimePaths.discover(tmp_path)
+    changes, queue = ChangeManager(paths), AtomicQueue(paths)
+    request_id = str(uuid.uuid4())
+    context = {"run_id": "run", "step_id": "step", "attempt_id": "attempt",
+               "lease_epoch": 1, "request_id": request_id}
+    if not recipe_context:
+        context = {"caller": "existing-custom-client"}
+    source = SourceBinding(binding={"runtime_epoch": "epoch", "scene_instance_id": "scene",
+        "document_lineage_id": "lineage", "scope_digest": "scope", "content_revision": "before"},
+        scope={}, sample_digest="sample", inputs_digest="inputs", adapter_fingerprint="fingerprint", complete=True)
+    record = changes.prepare(feature_id="original", scene_id="scene", scene_revision=None,
+        selection_fingerprint=None, operation=Operation(name="objects.edit", arguments={}), impact={},
+        backup_path="owned-checkpoint.casc", source_binding=source, mutation_request_id=request_id,
+        execution_context=context)
+    changes.consume(record.token, scene_id="scene", scene_revision=None, selection_fingerprint=None)
+    queue.submit(BridgeRequest(request_id=request_id, feature_id=record.feature_id, scene_id=record.scene_id,
+        operations=[record.operation], source_binding=source, execution_context=context,
+        safety_context=SafetyContext(confirmation_token=record.token), created_at=time.time(), expires_at=time.time()+30))
+    failed = ResultEnvelope(ok=False, feature_id="original", execution_mode=ExecutionMode.NATIVE,
+        request_id=request_id, phase="terminal", outcome="failed_after_dispatch", recovery_eligible=True)
+    observations, recovery_calls = [], []
+
+    class Service(ChangeFlowMixin):
+        def _host_error(self, feature, code, message):
+            return ResultEnvelope(ok=False, feature_id=feature, execution_mode=ExecutionMode.NATIVE,
+                                  error_code=code, error_message=message)
+        def _restore_failed_change(self, consumed, result):
+            recovery_calls.append(consumed.mutation_request_id)
+            return result.model_copy(update={"recovery_state": "blocked_recovery_outcome_unknown"})
+        def _supported_build_error(self, feature):
+            return None
+
+    service = Service()
+    service.changes = changes
+    service.client = SimpleNamespace(queue=queue, reconcile_request=lambda request:
+        observations.append(request) or failed)
+    assert service.commit_change(record.token).recovery_state == "blocked_recovery_outcome_unknown"
+    assert observations == recovery_calls == [request_id]
+    rejected = service.reconcile_consumed_change(record.token, expected_request_id=request_id,
+        expected_execution_context={**context, "request_id": "different"})
+    assert not rejected.ok and "BINDING_MISMATCH" in rejected.error_message
+    assert observations == recovery_calls == [request_id]
+    # Even an authenticated consumed token cannot authorize a different outbox.
+    other = changes.prepare(feature_id="other", scene_id="scene", scene_revision=None,
+        selection_fingerprint=None, operation=record.operation, impact={}, backup_path=record.backup_path,
+        source_binding=source, mutation_request_id=request_id, execution_context=context)
+    changes.consume(other.token, scene_id="scene", scene_revision=None, selection_fingerprint=None)
+    rejected = service.reconcile_consumed_change(other.token, expected_request_id=request_id,
+                                               expected_execution_context=context)
+    assert not rejected.ok and "REQUEST_MISMATCH" in rejected.error_message
+    assert observations == recovery_calls == [request_id]
 
 
 @pytest.mark.parametrize("scenario", ["success", "unknown", "stale_snapshot", "stale_source"])
@@ -57,7 +115,13 @@ def test_source_bound_recovery_uses_protected_lane_once_and_keeps_original_failu
             self.paths = paths
             self.calls = []
             self.client = SimpleNamespace(queue=SimpleNamespace(ledger=SimpleNamespace(
-                read_receipt=lambda _: receipt, read_request=lambda _: request)))
+                read_receipt=lambda _: receipt, read_request=lambda _: request)),
+                reconcile_request=self.observe_recovery)
+
+        def observe_recovery(self, request_id):
+            self.calls.append(("reconcile", request_id))
+            return ResultEnvelope(ok=False, feature_id="change_rollback", execution_mode=ExecutionMode.NATIVE,
+                request_id=request_id, receipt_id=request_id, phase="dispatch_started", outcome="outcome_unknown")
 
         def validate_source(self, source, **kwargs):
             self.calls.append("validate")
@@ -94,6 +158,10 @@ def test_source_bound_recovery_uses_protected_lane_once_and_keeps_original_failu
     assert sum(isinstance(call, tuple) and call[0] == "commit" for call in service.calls) == expected_calls
     service._restore_failed_change(record, failed)
     assert sum(isinstance(call, tuple) and call[0] == "commit" for call in service.calls) == expected_calls
+    if scenario == "unknown":
+        assert failed.recovery_state == "blocked_recovery_outcome_unknown"
+        assert [call for call in service.calls if isinstance(call, tuple) and call[0] == "reconcile"] == [
+            ("reconcile", service.recovery_request_id)]
     unknown = failed.model_copy(update={"outcome": "outcome_unknown"})
     assert service._restore_failed_change(record, unknown).recovery_state == "not_eligible"
     first_write_rejection = failed.model_copy(update={"failure_kind": "guard_rejected_before_first_write"})

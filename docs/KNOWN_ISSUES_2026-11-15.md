@@ -7,7 +7,31 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 설치 maintenance lease와 실제 앱 재시작
+### 최신 추가: 늦은 실패 복구 연결과 native crash 정정
+
+소스 추적에서 타임아웃 후 늦은 `failed_after_dispatch/recovery_eligible` receipt를 받은 경우 자동 조건부 복구가 빠지는 결함을 확인했다. `commit_change`의 consumed-token 재호출은 기존 request 조회만 했고, recipe resume도 원 실패만 terminal로 기록했다.
+
+- `reconcile_consumed_change`는 인증된 `.used` 승인, 원 immutable outbox의 feature/operation/source/scene/token, 정확한 request ID와 execution context를 대조한다. 원 native operation은 dispatch하지 않고 원 request만 조회한다. terminal eligible 실패일 때만 기존 source/snapshot 검사·일회용 claim·서명 permit 경로로 연결한다.
+- 이미 claim한 복구는 기존 recovery request ID만 조회한다. recipe는 원 실패 receipt와 별도 host recovery 결과 artifact를 보존한다. 복구 unknown/owner unresolved이면 blocked로 남아 resume가 같은 복구를 관측하고, recovered가 되어도 원 run/step의 `failed_after_dispatch`를 성공으로 바꾸지 않는다. `request_reconcile`, `recipe_status`는 계속 읽기 전용이다.
+- 필요한 호스트 회귀 세 유형만 실행했다: 실제 `ChangeManager.consume`/`AtomicQueue.submit` outbox 대조, unknown 복구의 동일 ID 조회/재dispatch 방지, 늦은 실패의 recipe resume·원 실패 보존. 최초 `3 passed` 뒤, 일반 custom context에 내부 `request_id`가 없어도 기존 계약대로 허용하도록 불필요한 제한을 제거했다. 영향받은 outbox 대조만 recipe/custom 두 context로 다시 확인해 `2 passed`였다. 전체 recovery/recipe suite 결과가 아니며, 이 fixture들은 host routing 확인용으로 실제 native partial-failure attestation/permit 증거가 아니다. host 구현 digest 변경 후 과거 plan/grant를 새 실행에 사용하지 않는다.
+
+**실앱 관측 정정:** 아래 복원 helper는 `04:34:47.897`에 성공 메시지를 쓰고 `04:34:48`에 HTTP 응답을 반환했지만, `2026-11-16 04:34:49 KST` Windows Application Error 1000은 **PID `12340` (`0x3034`), `Qt6Core.dll` 6.5.3.0, 예외 `0xc0000005`, offset `0x00000000000ae88c`**의 crash를 기록했다. 따라서 반환된 exact projection/파일 근거만 보존하며 안정된 restore 성공이나 현재 활성 runtime의 증거로 쓰지 않는다. 이 epoch는 종료됐고 새 프로세스에서 옛 private proof를 재사용할 수 없다.
+
+또한 앞서 정상 종료로 판단했던 PID `34864` (`0x8830`)도 Alt+F4 이후 `04:21:22 KST` 같은 모듈/예외, offset `0x00000000000b4c7f`의 crash 이벤트가 있었다. **종료 UI 동작과 프로세스 소멸만으로 정상 종료를 단정했던 표기를 정정한다.** 종료 전에 두 소유 작업 탭을 새 `.casc`로 보존한 사실은 유지한다.
+
+이벤트는 ignored `artifacts/native-r4/maintenance-restore-crash-events.json`, 복원 직전·반환 시각의 제품 로그 발췌는 `independent-restore-crash-log-tail.txt`에 보존했다. 확인된 실행은 scene-idle script callback 안의 파일 bootstrap·새 탭 복원·소유 탭 정리지만, 어느 native 호출/지연 callback이 원인인지 특정하지 못했다. WER 상세 archive 폴더는 OS 접근 거부였으며 이를 우회하지 않았다. native 탭 수명/Qt crash는 미해결이다. 이 crash를 인증된 부분 쓰기 실패나 복구 eligibility로 변환하지 않는다.
+
+crash 뒤 설치된 앱을 `04:44:21 KST`에 다시 실행했다(PID `7452`). 새 빈 `untitled` 장면과 응답하는 main window를 확인했다. 이 프로세스에는 SDK script server나 위 qualification을 실행하지 않았으므로 현재 MCP qualification·안정성 근거는 없다. 표시된 사용자 autosave는 열거나 삭제하지 않았다.
+
+### 이전 추가: 독립 checkpoint의 실제 복원 primitive
+
+아래 새 PID `12340`/epoch `9d124044-b683-4d39-b56d-936e1af2cf10`에서, 실제 독립 Transform `.casc` 입력을 새 소유 working tab으로 bootstrap하고 checkpoint를 만든 뒤 제품 `qualify_checkpoint_restore_adapter.run`을 실행했다. checkpoint를 또 다른 새 `.working.casc`/탭으로 로드·저장하고, 원 checkpoint의 완전한 authored projection과 정확히 같은지, 새 instance/같은 lineage인지, 원 탭과 projection이 유지되는지 직접 관찰했다. 성공한 qualification 탭과 소유 복제본만 닫고 원 빈 탭을 복원했다.
+
+`safety.rollback` primitive가 해당 프로세스에 등록됐다. 근거는 ignored `artifacts/native-r4/isolated-runtime/snapshots/independent-restore-qualification-5cfc9ec2-c83e-4ae1-9f92-a4162721cb51/restore-qualification-736a4069-55fd-4d95-99a2-d888c69015a6.json`, SHA-256 `ee4393c894e34b7716a76610649c7c84c3d6d25eaf40fb3ea24cce67048c1137`이다. helper 응답은 `artifacts/native-r4/independent-restore-qualification-response.json`에 보존했다.
+
+이는 실패가 없는 명시적 code-owned qualification이다. 실제 부분 실패 receipt·failure attestation·일회용 recovery permit을 발급하거나 이전 unknown을 처리한 증거가 아니다. 현재 독립 position writer의 정상 legal 입력에서 안전하게 의도할 수 있는 진짜 bounded partial-failure 경로는 확인되지 않았다. 의도적 예외나 fake callback/receipt를 native 실패 증거로 대체하지 않는다. 일반 character의 exact restore는 여전히 별도 미확인이다.
+
+### 이전 추가: 설치 maintenance lease와 실제 앱 재시작
 
 원격을 다시 fetch했으며 r4 개선안 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`다. 기존 16개 목표를 유지한다. 이번 변경은 R4-16의 설치·재실행 경합을 줄이며 전체 목표나 실제 installer 교체 완료를 뜻하지 않는다.
 
@@ -24,7 +48,7 @@
 | 비정상 종료·stale 파일 | 해당 재현용 child를 종료하면 OS가 handle을 해제. 남은 gate 파일을 삭제하지 않고 reader와 installer가 다시 획득. 기존 sentinel bytes 보존 |
 | source smoke | 실제 root 독점 lease 중 별도 state의 `--smoke --server`에서 initialize/list/status 성공, 도구 108개. 실제 설치·Codex 등록·버전 검사 전체를 통과한 증거는 아님 |
 
-native bytes 변경 때문에 이전 Cascadeur를 hot reload하지 않았다. 기존 탭은 빈 탭 또는 소유한 단일 객체 복제본인지 SDK로 확인하고, 복제본 두 개를 `restart-preservation-d69c58b3-4a66-4288-a20b-f6c37bb6a672/owned-tab-1.casc`, `owned-tab-2.casc`에 각각 13,989 bytes로 저장했다(각 SHA-256 `19dd95910c03b671d006268fb2fea54f45983b00766c9aed565826e14791951f`). 앱 정상 종료 후 설치된 **Cascadeur `2026.2.3.0.16863`, PID `12340`, embedded Python `3.11.0`**을 새로 실행했다.
+native bytes 변경 때문에 이전 Cascadeur를 hot reload하지 않았다. 기존 탭은 빈 탭 또는 소유한 단일 객체 복제본인지 SDK로 확인하고, 복제본 두 개를 `restart-preservation-d69c58b3-4a66-4288-a20b-f6c37bb6a672/owned-tab-1.casc`, `owned-tab-2.casc`에 각각 13,989 bytes로 저장했다(각 SHA-256 `19dd95910c03b671d006268fb2fea54f45983b00766c9aed565826e14791951f`). 종료 UI 동작 뒤 이전 프로세스가 사라진 것을 확인하고 설치된 **Cascadeur `2026.2.3.0.16863`, PID `12340`, embedded Python `3.11.0`**을 새로 실행했다. 이전 종료를 정상 종료라고 표현했던 내용은 위 crash 이벤트에 따라 정정한다.
 
 새 프로세스는 checkout의 `cascadeur_side/cascadeur_complete/installation_guard.py`를 로드했으며 isolated runtime을 사용한다. epoch `9d124044-b683-4d39-b56d-936e1af2cf10`, loaded bridge fingerprint `dfbd3b9afbd68e7d80606d5a57b9d88505d8fbc4e38de80ebb32c1e15d862e99`를 현재 disk bytes와 대조했다. pump `last_error=null`, 실제 native reader가 같은 root의 installer 독점 open을 차단했다. 관측은 `artifacts/native-r4/maintenance-actual-process-observation.json`이다. 전역 MCP 설치를 교체하거나 재등록한 결과는 아니다.
 

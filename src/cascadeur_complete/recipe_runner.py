@@ -820,12 +820,39 @@ class RecipeRunner:
                                             "execution_outcome": "succeeded", "verification_status": "unverified" if host_result is None else "fail"}),
                                             state="blocked", blocked_reason=reason)
             ref = self.store.artifact(run_id, "runtime_receipt", receipt)
+            artifacts = [*run.artifacts, ref]
+            record = record.model_copy(update={"artifact_refs": (*record.artifact_refs, ref), "receipt_ref": ref.path})
+            terminal = receipt.get("terminal_result") or {}
+            if outcome == "failed_after_dispatch" and terminal.get("recovery_eligible") is True:
+                # The receipt above authenticates the original failed effect.
+                # Only its consumed approval may continue conditional recovery;
+                # neither request_status nor request_reconcile executes it.
+                execution = {"run_id": run.run_id, "step_id": record.step_id,
+                    "attempt_id": record.attempt_id, "lease_epoch": record.dispatch_lease_epoch or run.lease_epoch,
+                    "request_id": record.request_id}
+                if record.token_ref is None:
+                    return self._step_update(run, record.model_copy(update={"state": "blocked",
+                        "execution_outcome": outcome}), state="blocked", blocked_reason="RECOVERY_APPROVAL_MISSING",
+                        artifacts=[item.model_dump(mode="json") for item in artifacts])
+                host_result = _json(self.service.reconcile_consumed_change(record.token_ref,
+                    expected_request_id=record.request_id, expected_execution_context=execution))
+                host_ref = self.store.artifact(run_id, "host_commit_result", host_result)
+                artifacts.append(host_ref)
+                record = record.model_copy(update={"result": {**(record.result or {}), "host_commit_result": host_result},
+                    "artifact_refs": (*record.artifact_refs, host_ref)})
+                recovery_state = host_result.get("recovery_state")
+                if (host_result.get("request_id") != record.request_id
+                        or host_result.get("outcome") != outcome
+                        or recovery_state not in {"recovered", "recovery_failed", "not_eligible", "blocked_recursive_recovery"}):
+                    return self._step_update(run, record.model_copy(update={"state": "blocked",
+                        "execution_outcome": outcome}), state="blocked",
+                        blocked_reason=recovery_state or "RECOVERY_CONTINUATION_BLOCKED",
+                        artifacts=[item.model_dump(mode="json") for item in artifacts])
             updated = record.model_copy(update={"state": "verifying" if outcome == "succeeded" else "failed",
-                                               "execution_outcome": outcome, "receipt_ref": ref.path,
-                                               "artifact_refs": (*record.artifact_refs, ref)})
+                                               "execution_outcome": outcome})
             return self._step_update(run, updated, state="running" if outcome == "succeeded" and not run.cancel_requested
                                      else "cancel_requested" if outcome == "succeeded" else "canceled" if outcome == "canceled_pre_dispatch" else "failed",
-                                     blocked_reason=None, artifacts=[item.model_dump(mode="json") for item in (*run.artifacts, ref)])
+                                     blocked_reason=None, artifacts=[item.model_dump(mode="json") for item in artifacts])
 
     def _finish_native(self, run, record, step, plan):
         # No further evaluation or transform read occurs while outcome is

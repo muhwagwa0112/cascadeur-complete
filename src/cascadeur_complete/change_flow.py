@@ -189,7 +189,9 @@ class ChangeFlowMixin:
             try:
                 consumed = self.changes.consumed(token)
                 if consumed and consumed.schema_version == 3 and consumed.mutation_request_id:
-                    return self.client.reconcile_request(consumed.mutation_request_id)
+                    return self.reconcile_consumed_change(token,
+                        expected_request_id=consumed.mutation_request_id,
+                        expected_execution_context=consumed.execution_context)
             except (SafetyError, ValueError):
                 pass
             return self._host_error("change_commit", ErrorCode.INVALID_REQUEST, str(exc))
@@ -265,6 +267,41 @@ class ChangeFlowMixin:
         self._remember_scene_result(result)
         return result
 
+    def reconcile_consumed_change(self, token: str, *, expected_request_id: str,
+                                  expected_execution_context) -> ResultEnvelope:
+        """Observe a consumed approval and finish only its conditional recovery.
+
+        This is an execution-service continuation, not the read-only request
+        reconciliation API. It cannot dispatch the approved original operation.
+        Expired approvals remain authentic evidence for that original request.
+        """
+        try:
+            record = self.changes.consumed(token)
+            if (record is None or record.schema_version != 3 or record.source_binding is None
+                    or not record.mutation_request_id
+                    or record.mutation_request_id != expected_request_id
+                    or record.execution_context != expected_execution_context):
+                raise SafetyError("CONSUMED_CHANGE_BINDING_MISMATCH")
+            original = self.client.queue.ledger.read_request(expected_request_id)
+            if (original is None or original.get("request_id") != expected_request_id
+                    or original.get("feature_id") != record.feature_id
+                    or original.get("operations") != [record.operation.model_dump(mode="json")]
+                    or original.get("source_binding") != record.source_binding.model_dump(mode="json")
+                    or original.get("execution_context") != record.execution_context
+                    or original.get("scene_id") != record.scene_id
+                    or (original.get("safety_context") or {}).get("confirmation_token") != token):
+                raise SafetyError("CONSUMED_CHANGE_REQUEST_MISMATCH")
+            result = self.client.reconcile_request(expected_request_id)
+            if result.request_id != expected_request_id:
+                raise SafetyError("CONSUMED_CHANGE_RESULT_MISMATCH")
+            if (result.phase == "terminal" and result.outcome == "failed_after_dispatch"
+                    and result.recovery_eligible and record.backup_path):
+                result = self._restore_failed_change(record, result)
+            return result
+        except (SafetyError, OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            return self._host_error("change_commit", ErrorCode.INVALID_REQUEST,
+                "Consumed change continuation blocked: " + str(exc)[:500])
+
     def commit_initial_checkpoint(self, grant, token: str, timeout: float = 120.0) -> ResultEnvelope:
         """Initial checkpoint uses only the exact persisted bootstrap grant."""
         try:
@@ -279,7 +316,9 @@ class ChangeFlowMixin:
                     or record.impact.get("bootstrap_grant") != supplied.model_dump(mode="json")):
                 raise ValueError("BOOTSTRAP_GRANT_MISMATCH")
             if record.used:
-                return self.client.reconcile_request(record.mutation_request_id)
+                return self.reconcile_consumed_change(token,
+                    expected_request_id=record.mutation_request_id,
+                    expected_execution_context=record.execution_context)
             self.recipes.store.verify_bootstrap(supplied)
             return self.commit_change(token, timeout)
         except (ValueError, SafetyError) as exc:
