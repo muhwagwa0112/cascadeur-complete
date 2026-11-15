@@ -46,6 +46,11 @@ An unverified consumer result blocks publication and can be observed again only
 on explicit resume, using the same sealed inputs and the original read-retry
 budget. Retained consumer/export JSON reads enforce file-byte budgets and
 descriptor consistency before parsing; these are not whole-process memory caps.
+Quality policies must include `non_target_scope_rad` when the original capture
+contains protected rotation channels, and `key_pose_rotation_rad` for observed
+rotation locks or frames outside the editable interval. Recipes check these
+observed obligations at baseline capture before solving or writing. Missing
+thresholds or actual channels block the workflow.
 
 See [the support matrix](docs/SUPPORT_MATRIX.md) for the evidence rules and
 limitations, and [the support status](docs/SUPPORT_STATUS.md) for the per-feature

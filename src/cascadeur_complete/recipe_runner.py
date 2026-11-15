@@ -586,6 +586,11 @@ class RecipeRunner:
             binding = SourceBinding.model_validate(value["global"]["source_binding"])
             if not binding.complete:
                 raise RecipeConflict("BINDING_UNAVAILABLE")
+            if step.stage == "baseline_capture":
+                # Observed rotation channels close the quality obligations
+                # before any solve/write; never invent a threshold at runtime.
+                validate_quality_policy(plan.spec.quality, self._profile(plan.spec), plan.spec.intent,
+                    self._include_mesh(plan.spec,self._profile(plan.spec)),capture=_batch(value["global"]))
             if step.stage == "actual_readback":
                 verification = self._verify_actual(run, plan, value)
                 value["verification"] = verification

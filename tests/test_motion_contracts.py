@@ -22,6 +22,66 @@ def batch(positions,n):
                        {key:np.tile([True,False],(n,1)) for key in positions},None)
 
 
+@pytest.mark.parametrize("protected_role", [True,False])
+def test_original_quality_measures_protected_rotation_for_roles_and_dependencies(protected_role):
+    from cascadeur_complete.motion_quality import (QualityPolicy,evaluate_metrics,original_intent_metrics,
+                                                   required_motion_metrics)
+    n=3
+    ids=("root","protected")
+    positions={key:np.zeros((n,3)) for key in ids}
+    rotation={key:np.tile([1.,0.,0.,0.],(n,1)) for key in ids}
+    if not protected_role:
+        del rotation["root"]
+    validity={key:np.ones((n,2),dtype=bool) for key in ids}
+    before=SampleBatch(context(n),ids,"global",positions,rotation,validity,None)
+    changed={**rotation,"protected":Rotation.from_euler("z",np.array([0,.25,0])[:,None]).as_quat()[:,[3,0,1,2]]}
+    after=SampleBatch(context(n),ids,"global",positions,changed,validity,None)
+    roles={"root":"root",**({"fixed":"protected"} if protected_role else {})}
+    rig=RigProfile("p","c",roles,frozenset(("root",)),
+                   dependency_ids=frozenset() if protected_role else frozenset(("protected",)))
+    intent=IntentConstraints(editable_frames=(0,2),root_policy="explicit_mapped_trajectory",
+                             correction_envelope={"position_m":0.,"rotation_rad":1.})
+    required=required_motion_metrics(rig,intent,capture=before)
+    assert "non_target_scope_rad" in required
+    policy=QualityPolicy(profile_id="p",profile_revision="r",required_metrics=tuple(sorted(required)),
+                         limits_si={name:1. if name=="rotation_correction_rad" else 0. for name in required})
+    metrics=original_intent_metrics(before,after,rig,intent)
+    assert metrics["non_target_scope_m"]["max"]==0
+    assert metrics["non_target_scope_rad"]["max"]==pytest.approx(.25)
+    report=evaluate_metrics(metrics,policy,rig=rig,intent=intent,capture=before)
+    assert report.status=="fail" and report.reason_codes==["METRIC_FAILED:non_target_scope_rad"]
+    # A missing observed rotation cannot be converted to a zero preservation error.
+    incomplete=SampleBatch(context(n),ids,"global",positions,
+                           {key:value for key,value in rotation.items() if key!="protected"},validity,None)
+    with pytest.raises(MotionInputError,match="INCOMPLETE_CAPTURE"):
+        original_intent_metrics(before,incomplete,rig,intent)
+
+
+def test_original_quality_rejects_missing_role_and_frame_relabeling():
+    from cascadeur_complete.motion_quality import original_intent_metrics
+    capture=batch({"root":np.zeros((3,3))},3)
+    intent=IntentConstraints(editable_frames=(0,2))
+    missing=RigProfile("p","c",{"root":"root","missing":"missing"},frozenset(("root",)))
+    with pytest.raises(MotionInputError,match="INCOMPLETE_CAPTURE"):
+        original_intent_metrics(capture,capture,missing,intent)
+    shifted=MotionContext(np.arange(3)+1,np.arange(3)/60,"explicit",60,1,.01,np.eye(3),
+                          {"source":"explicit_test_profile"})
+    after=SampleBatch(shifted,capture.object_ids,capture.space,capture.position_m,{},capture.channel_valid,None)
+    with pytest.raises(MotionInputError,match="complete original time grid"):
+        original_intent_metrics(capture,after,RigProfile("p","c",{"root":"root"},frozenset(("root",))),intent)
+
+
+@pytest.mark.parametrize("locked", [True,False])
+def test_quality_requires_observed_rotation_locks(locked):
+    from cascadeur_complete.motion_quality import required_motion_metrics
+    capture=SampleBatch(context(3),("root",),"global",{"root":np.zeros((3,3))},
+        {"root":np.tile([1.,0.,0.,0.],(3,1))},{"root":np.ones((3,2),dtype=bool)},None)
+    rig=RigProfile("p","c",{"root":"root"},frozenset(("root",)))
+    intent=IntentConstraints(editable_frames=(0,2) if locked else (1,2),
+                             locked_roles_frames={"root":(1,)} if locked else {})
+    assert "key_pose_rotation_rad" in required_motion_metrics(rig,intent,capture=capture)
+
+
 def test_half_turn_sign_and_intentional_chart_crossing_are_not_spikes():
     q=Rotation.from_euler("z",np.array([179,180,181])[:,None],degrees=True).as_quat()[:,[3,0,1,2]]
     q[1]*=-1

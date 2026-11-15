@@ -7,7 +7,19 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: export 검증 재개와 메모리·보고서 경계
+### 최신 추가: 비대상 회전 보존과 baseline 품질 의무
+
+R4-08의 원본 보존 경로에서 비대상 role/dependency의 위치만 비교하고 회전 변화는 누락하는 결함을 수정했다. 원본 capture에 회전 채널이 관측된 비대상 객체에는 `non_target_scope_rad`와 원래 승인된 임계값을 요구한다. 위치가 같다는 이유로 회전 보존을 pass로 만들지 않는다. 원본에 관측된 회전이 실제 capture에서 누락되면 `INCOMPLETE_CAPTURE`로 거절하며, 필수 role/dependency의 누락도 건너뛰지 않는다. 시간값이 같아도 frame ID가 다르면 원본 grid 불일치로 거절한다.
+
+잠긴 role/frame 또는 editable 범위 밖에 관측된 회전이 있으면 `key_pose_rotation_rad`도 필수다. 비대상 dependency 회전은 보존 오차뿐 아니라 실제 회전 correction/envelope와 범위 밖 잠금에도 포함한다. recipe는 새 baseline capture의 실제 채널을 기준으로 quality policy의 필수 지표를 **solve/write 전에** 검사한다. 누락된 임계값을 새 기본값으로 채우거나 기존 승인 policy를 재서명하지 않는다. native 품질과 소비자 roundtrip이 같은 공통 metrics/필수 지표 경로를 사용한다.
+
+필요한 호스트 사례 6개를 확인했다. 비대상 role/dependency의 위치 오차가 0이어도 0.25 rad 회전은 실패하며, 누락 회전·필수 role·frame 재지정, 잠금/범위 밖 회전 의무, baseline의 정책 누락을 차단한다. 첫 실행은 테스트의 SciPy 단일축 angle 배열 모양 오류로 `2 failed, 4 passed`였고, 입력 모양 수정 후 해당 두 사례만 `2 passed`였다. dependency만 회전 채널을 가진 경우까지 연결한 뒤 영향받은 같은 두 사례를 다시 확인해 `2 passed in 0.71s`였다. 실제 native recipe나 전체 suite/build/CI는 실행하지 않았다. 이 host bytes 변경 후 이전 plan/grant를 재사용하지 않는다.
+
+설치 SDK와 원격 r4의 키 삽입 요구도 한정 확인했다. SDK `csc.layers.Layer`는 layer GUID/frame locator와 section/ownership을 노출하지만 영구 key GUID는 노출하지 않는다. 원격 R4-09는 영구 GUID 자체를 명시적으로 요구하지 않는다. 따라서 남은 연결 조건은 locator를 native ID로 위장하는 것이 아니라, source/epoch/전체 layer·channel closure에 묶인 별도 locator 계약과 실제 absent-frame 삽입 후 기존 key/section·공유 채널 보존·평가 검증이다. 기존-key writer/전체 fixture key-grid 재작성은 그 증거를 대신하지 못한다. 이번에는 이 증거를 만들지 않았으므로 현재 삽입 gate를 해제하지 않았다.
+
+R4-10 native unbaking에는 추가 연결 누락이 있다. 현재 lowering은 `{step}`만 만들며 handler는 UI의 현 layer/range를 사용한다. 승인된 대상 object/layer/range를 실행 인자에 고정하고 실제 전후 topology와 생성 key 예산을 검증하는 전용 adapter가 필요하다. SDK `call_action(str) -> None`은 완료 신호가 아니다. 현재 미자격 adapter gate가 있어 이 route를 실행하지 않았으며 단순히 gate를 해제하지 않는다. native 탭 수명/종료 crash, 실제 부분 실패 복구 및 일반 리그 입력·설치 교체는 계속 미완료다.
+
+### 이전 추가: export 검증 재개와 메모리·보고서 경계
 
 원격 r4 문서를 다시 fetch했으며 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 같다. 기존 16개 목표를 유지한다. 이번에는 native bytes를 바꾸지 않았고 실제 설치 경로 `C:\Program Files\Cascadeur\cascadeur.exe`의 PID `31060`이 계속 응답함을 확인했다. 아래 호스트 확인은 이전 epoch의 native 실행 근거를 새 구현의 실행 근거로 승계하지 않는다.
 

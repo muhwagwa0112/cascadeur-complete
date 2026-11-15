@@ -122,6 +122,29 @@ def test_legacy_success_marked_failed_readback_cannot_resume_past_its_artifact(t
     assert store.read_artifact(run.run_id, ref) == observation
 
 
+def test_baseline_quality_obligations_are_checked_before_solve_or_write(tmp_path):
+    from cascadeur_complete.models import SourceBinding
+    from cascadeur_complete.motion_context import MotionInputError
+    paths,store,plan,run,_=allocated_readback(tmp_path,skip_before_readback=False)
+    source=SourceBinding(binding=plan.spec.input.binding,scope={},sample_digest="sample",
+                         inputs_digest="inputs",adapter_fingerprint="fingerprint",complete=True)
+    context={"frames":[5,6,7],"time_s":[0,1/24,2/24],"time_source":"fps","fps_num":24,"fps_den":1,
+             "metres_per_scene_unit":.01,"scene_to_solver_basis":[[1,0,0],[0,1,0],[0,0,1]],
+             "metadata_provenance":{"source":"explicit_test_profile"}}
+    value={"context":context,"object_ids":["root"],"space":"global",
+           "position_m":{"root":[[0,0,0]]*3},"rotation_wxyz":{"root":[[1,0,0,0]]*3},
+           "channel_valid":{"root":[[True,True]]*3},"source_binding":source.model_dump(mode="json")}
+    runner=RecipeRunner(SimpleNamespace(paths=paths))
+    runner._capture=lambda *args,**kwargs:{"global":value}
+    step=next(item for item in plan.steps if item.stage=="baseline_capture")
+    record=next(item for item in run.steps if item.step_id==step.step_id)
+    with pytest.raises(MotionInputError,match="rotation_correction_rad"):
+        runner._host_step(run,record,step,plan)
+    observed=store.read(run.run_id)
+    assert next(item for item in observed.steps if item.step_id==step.step_id).state!="succeeded"
+    assert all(item.calls_used==0 for item in observed.steps if item.step_id.endswith(("-solve","-apply")))
+
+
 def export_validation_fixture(tmp_path, monkeypatch, validation_result):
     """Real host persistence with consumer doubles; no native/FBX quality proof."""
     import hashlib

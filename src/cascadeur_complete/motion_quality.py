@@ -69,8 +69,19 @@ def required_motion_metrics(rig,intent,include_mesh=False,*,capture=None):
     if capture is not None:
         if any(np.asarray(value).shape==(len(capture.context.frames),4) for value in capture.rotation_wxyz.values()):
             required.add("rotation_correction_rad")
-        if np.any((capture.context.frames<intent.editable_frames[0])|(capture.context.frames>intent.editable_frames[1])):
+        non_target_ids=set(capture.object_ids)-rig.writable_ids
+        if non_target_ids:
+            required.add("non_target_scope_m")
+        if non_target_ids & set(capture.rotation_wxyz):
+            required.add("non_target_scope_rad")
+        outside=np.any((capture.context.frames<intent.editable_frames[0])|(capture.context.frames>intent.editable_frames[1]))
+        if outside:
             required.add("key_pose_position_m")
+        locked_rotation_ids={rig.role_ids[role] for role,frames in intent.locked_roles_frames.items()
+                             if frames and role in rig.role_ids}
+        if ((outside and capture.rotation_wxyz)
+                or locked_rotation_ids & set(capture.rotation_wxyz)):
+            required.add("key_pose_rotation_rad")
     elif any("finger" in role.lower() or role.lower().endswith("hand_frame") for role in rig.role_ids):
         required.add("rotation_correction_rad")
     contacts=[contact for contact in intent.contacts if contact.mode!="free"]
@@ -210,18 +221,21 @@ def compare_captures(before: SampleBatch, after: SampleBatch, mapping=None):
 
 def original_intent_metrics(before: SampleBatch, after: SampleBatch, rig, intent):
     """Measure invariants against the original capture, never an accepted prefix."""
-    from .motion_math import angular_velocity, temporal_operators
-    if before.space != after.space or not np.array_equal(before.context.time_s, after.context.time_s):
+    from .motion_math import angular_velocity
+    if (before.space != after.space or not np.array_equal(before.context.time_s, after.context.time_s)
+            or not np.array_equal(before.context.frames, after.context.frames)):
         raise MotionInputError("INCOMPLETE_CAPTURE", "intent comparison requires the complete original time grid")
+    required_ids=set(rig.role_ids.values())|rig.dependency_ids|rig.derived_ids|set(before.object_ids)
+    channels={key:("position","rotation") if key in before.rotation_wxyz else ("position",)
+              for key in required_ids}
+    validate_samples(before,channels)
+    validate_samples(after,channels)
     frames, n = before.context.frames, len(before.context.frames)
     outside = (frames < intent.editable_frames[0]) | (frames > intent.editable_frames[1])
-    root_position, root_rotation, lock_position, lock_rotation, non_target, lengths = [], [], [], [], [], []
+    root_position, root_rotation, lock_position, lock_rotation, non_target, non_target_rotation, lengths = [], [], [], [], [], [], []
     corrections, angle_corrections, acceleration, jerk, angular_acceleration = [], [], [], [], []
     envelope_violations=[]
-    d1, d2 = temporal_operators(before.context.time_s)
     for role,key in rig.role_ids.items():
-        if key not in before.position_m or key not in after.position_m:
-            continue
         channels=("position","rotation") if key in before.rotation_wxyz else ("position",)
         validate_samples(before,{key:channels}); validate_samples(after,{key:channels})
         error=np.linalg.norm(after.position_m[key]-before.position_m[key],axis=1)
@@ -275,14 +289,23 @@ def original_intent_metrics(before: SampleBatch, after: SampleBatch, rig, intent
             lock_rotation.extend(angle[mask])
             if root and intent.root_policy=="preserve":
                 root_rotation.extend(angle)
+            if key not in rig.writable_ids:
+                non_target_rotation.extend(angle)
             if n>=3:
                 omega=angular_velocity(after.rotation_wxyz[key],after.context.time_s)
                 midpoint=(after.context.time_s[1:]+after.context.time_s[:-1])/2
                 angular_acceleration.extend(np.linalg.norm(np.diff(omega,axis=0)/np.diff(midpoint)[:,None],axis=1))
     for key in set(before.object_ids)-set(rig.role_ids.values()):
         if key not in rig.writable_ids:
-            validate_samples(before,{key:("position",)});validate_samples(after,{key:("position",)})
             non_target.extend(np.linalg.norm(after.position_m[key]-before.position_m[key],axis=1))
+            if key in before.rotation_wxyz:
+                a=Rotation.from_quat(before.rotation_wxyz[key][:,[1,2,3,0]])
+                b=Rotation.from_quat(after.rotation_wxyz[key][:,[1,2,3,0]])
+                angle=(a.inv()*b).magnitude()
+                non_target_rotation.extend(angle)
+                angle_corrections.extend(angle)
+                lock_rotation.extend(angle[outside])
+                envelope_violations.extend((angle>intent.correction_envelope.get("rotation_rad",0.)+1e-9).astype(float))
     for side in ("Left","Right"):
         for bone,first,last in (("upper_leg","hip","knee"),("lower_leg","knee","ankle"),
                                ("upper_arm","shoulder","elbow"),("forearm","elbow","wrist")):
@@ -297,7 +320,8 @@ def original_intent_metrics(before: SampleBatch, after: SampleBatch, rig, intent
     result={"duration_error_s":measured_metric([abs((after.context.time_s[-1]-after.context.time_s[0])-(before.context.time_s[-1]-before.context.time_s[0]))],units="s")}
     for name,values,units in (("root_preservation_m",root_position,"m"),("root_preservation_rad",root_rotation,"rad"),
           ("key_pose_position_m",lock_position,"m"),("key_pose_rotation_rad",lock_rotation,"rad"),
-          ("non_target_scope_m",non_target,"m"),("bone_length_error_m",lengths,"m"),
+          ("non_target_scope_m",non_target,"m"),("non_target_scope_rad",non_target_rotation,"rad"),
+          ("bone_length_error_m",lengths,"m"),
           ("position_correction_m",corrections,"m"),("rotation_correction_rad",angle_corrections,"rad"),
           ("acceleration_m_s2",acceleration,"m/s2"),("jerk_m_s3",jerk,"m/s3"),
           ("angular_acceleration_rad_s2",angular_acceleration,"rad/s2"),
