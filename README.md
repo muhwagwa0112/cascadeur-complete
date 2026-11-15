@@ -102,7 +102,13 @@ The additional explicit setup commands are:
   layers. This separate profile preserves exact save equality; it does not
   qualify the character route when Cascy's first save changes data channels.
 - `Cascadeur Complete.Qualify checkpoint restore adapter`: exact new-tab restore
-  of the active owned checkpoint. Computed readback differences block it.
+  of the active owned checkpoint. It returns a pending qualification ID and
+  retains the restored tab; a later source-idle callback verifies both scenes
+  and the tab inventory before registering the adapter. Query
+  `qualification_status(id)` for its in-process result. Repeating the command
+  on the same source/checkpoint returns that observation without restoring
+  again. Computed readback differences block it. It never closes the restored
+  tab automatically; native tab lifecycle crashes remain under investigation.
   Restoring a real failed request additionally requires its authenticated
   terminal failure, an observed partial-write contract and the signed permit.
 - `Cascadeur Complete.Qualify independent export adapter`: two real animated
@@ -323,8 +329,11 @@ Verification uses disposable state and the shared source/frozen stdio smoke clie
 Windows subprocess checks and a clean restart of the installed Cascadeur build
 confirmed handle exclusion; full source/frozen installer replacement has not been
 observed. Older clients without the gate still require the process idle scan.
-The latest native restore probe returned an exact readback before Cascadeur
-crashed in `Qt6Core.dll`; native tab lifecycle stability remains unresolved.
+Native restore/cleanup and exit probes encountered `Qt6Core.dll` access
+violations and an interpolator `bad allocation` fatal exit. The qualifier now
+retains its restored tab and verifies it on a later source idle; that bounded
+path completed on the installed build. Native tab and exit stability remain
+unresolved; this is not a general crash fix or full-build qualification.
 See [the issue memo](docs/KNOWN_ISSUES_2026-11-15.md) for the observation limits.
 
 ## Build an unsigned local package

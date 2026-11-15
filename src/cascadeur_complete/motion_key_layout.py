@@ -1,6 +1,7 @@
 """Observed interpolation and opt-in key-topology plans, without native effects."""
 from __future__ import annotations
 
+from bisect import bisect_right
 from typing import Literal
 
 from pydantic import Field, StrictInt, model_validator
@@ -115,7 +116,9 @@ def plan_key_insertion(observation, capture, rig, intent, additions, *, verifier
     """Create an exact topology delta only for an authenticated insertion adapter.
 
     Planning neither performs insertion nor turns an unsupported adapter on.
-    Deletions, retimes and interpolation changes are deliberately absent.
+    Existing-key outgoing modes stay unchanged. A new key's outgoing mode
+    requires interpolation-change authority only if it differs from the
+    original segment being split. Deletions and retimes are absent.
     """
     observed,digest=verify_key_layout(observation,capture,verifier)
     if not intent.allow_key_insertion:
@@ -143,7 +146,12 @@ def plan_key_insertion(observation, capture, rig, intent, additions, *, verifier
         if any(row.get("event") or row.get("locked") for row in layout.boundary_keys
                if row.get("frame")==value.frame):
             raise MotionInputError("INTENT_LOCK_VIOLATION","event or boundary key is protected")
-        if value.mode not in ("LINEAR","STEP") or any(mode!=value.mode for mode in layout.segment_modes):
+        # The old left key retains its outgoing mode up to the first addition.
+        # Each added key owns the following subsegment, so compare its mode to
+        # that original segment, including multiple additions in one segment.
+        segment_index=bisect_right(layout.frames,value.frame)-1
+        original_mode=layout.segment_modes[segment_index]
+        if value.mode not in ("LINEAR","STEP") or value.mode!=original_mode:
             if not intent.allow_interpolation_change:
                 raise MotionInputError("INTERPOLATION_CHANGE_NOT_AUTHORIZED","new segment changes interpolation semantics")
         if len(value.value)!=(3 if value.channel=="position" else 4):

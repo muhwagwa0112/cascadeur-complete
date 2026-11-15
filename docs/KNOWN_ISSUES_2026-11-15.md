@@ -7,7 +7,24 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: actual readback 실패의 재개 우회 차단
+### 최신 추가: 혼합 키 구간 계획과 복원 qualification 수명
+
+원격 r4 문서를 다시 fetch했으며 최신 SHA는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`다. 기존 16개 목표를 유지한다. 아래 변경은 일반 리그, 실제 부분 실패 복구나 설치 교체의 완료를 뜻하지 않는다.
+
+- 키 삽입 계획은 새 키의 outgoing mode를 해당 키가 나누는 원래 구간과 비교한다. 기존에는 클립의 모든 구간과 비교해 혼합 LINEAR/STEP 클립의 정당한 삽입을 거절했다. 기존 키의 모드 보존, 새 모드 변경에 대한 별도 권한, endpoint/기존 키/중복 거절은 유지한다.
+- 필요한 순수 host 대상 두 개만 실행해 `2 passed`였다. 혼합 구간별 삽입과 기존 모드 보존, 새 outgoing mode 변경 권한을 확인했다. 추가한 경계 거절 사례는 실행하지 않았다. 테스트의 receipt double은 native 자격 근거가 아니다. 공개 네이티브 삽입 경로는 아직 연결되지 않았으며 SDK의 `layer_frame_locator`를 영구 native key ID로 승격하지 않는다.
+- PID `7452`에서 실제 checkpoint bootstrap→exact 새 탭 복원→별도 source-idle callback의 단일 target 닫기→다음 callback 확인을 관찰했다. 원 작업 탭도 원 빈 탭을 활성화한 뒤 별도 callback에서 닫았고 원 projection/inventory를 보존했다. `staged-restore-observation-41fc570f-0858-4d27-970a-908f6f8cdfa1/restore-qualification.json`의 SHA-256은 `7c9e00dde166859b12a75c438acd7f0df55216e0a000b51c058babb7bd6877ea`다. 이후 해당 epoch에서 primitive만 등록했으며 실패 receipt나 permit은 발급하지 않았다. 이 수동 관찰은 아래 제품 명령의 후속 확인과 구분한다.
+- **종료 crash 재관찰:** 원 빈 탭만 남은 PID `7452`에 Alt+F4를 보낸 뒤 `2026-11-16 05:10:55 KST` Event 1000이 `Qt6Core.dll` 6.5.3.0, `0xc0000005`, offset `0xb4c7f`, report `f71a5956-7211-4a8f-a42c-97166c8f8d6b`를 기록했다. 종료 전 응답과 callback 분리만으로 종료 안정성이 해결됐다고 볼 수 없다. ignored 근거는 `artifacts/native-r4/staged-restore-exit-crash-events.json`이다. 정확한 native 원인은 여전히 미확인이며 이 이벤트를 인증된 부분 쓰기 실패로 바꾸지 않는다.
+
+복원 qualifier의 자동 정리를 후속 idle로 나눈 중간 구현도 새 PID `15404`에서 실제 확인했다. `05:15:56.162 KST`에는 `pending/awaiting_close`, production operations 빈 목록을 반환했고, 로그 `05:15:56.863`에는 검증 후 등록 성공 메시지가 있었다. 그러나 `05:15:56.866` 보간기 `[0,101]` reload가 `bad allocation`으로 실패하고 `05:15:57.291` FATAL 종료했다. Event 1000은 `ucrtbase.dll`, `0xc0000409`, offset `0xa527e`, report `a674c3f5-1165-4aad-b3bc-4b00071db554`다. 당시 fingerprint는 `5069238115c734f7ecb02cc733e43fb62ea8477328e9f5c10ccd2d6887b6149a`, epoch는 `1c2b874f-26fa-432a-9189-43bba2424016`이었다. `product-restore-observation-dc46d408-2087-435a-af2e-8ea178e9d4a5/restore-qualification-659ba1e3-140c-466d-9c22-5e34e30dca9f.json`은 SHA-256 `5272677aa9ceec6708f2f8e699d468271b5c96daebe6b8a3b8d360c0b088717e`로 남았지만 종료한 epoch의 근거이며 현재 자격으로 승계하지 않는다. 로그와 이벤트는 ignored `product-restore-crash-log-tail.txt`, `product-restore-crash-events.json`에 보존했다.
+
+설치 SDK의 `execute_when_idle`은 같은 idle manager 호출의 persistent callback 순회 뒤 실행되며 Qt/native event 반환 경계를 보장하지 않는다. C++ scene-idle caller 구현은 노출되지 않아 scene 목록 무효화나 특정 native API를 원인으로 확정하지 못했다. **최종 제품 변경은 복원 실행 자체에 필요하지 않은 자동 close/remove를 제거한다.** 새 owned 복원 탭을 유지하고 다음 source-idle에서 실제 source/target instance·path·전체 projection, 원 inventory, checkpoint manifest·epoch·disk fingerprint를 확인한 뒤 evidence를 `xb/fsync`로 저장하고 등록한다. `pending` 결과에는 qualification ID와 retained target path/ID를 돌려준다. `qualification_status(id)`는 SDK 호출 없는 snapshot이며, 같은 source/checkpoint의 재호출은 원 관측 조회만 한다. source/manifest가 바뀌면 과거 완료를 새 자격으로 쓰지 않고 거절한다. 진행 중 write/재진입은 차단하고 실패한 관측을 재실행하거나 남은 파일·탭을 자동 정리하지 않는다. 이 변경을 native crash 원인 해결로 표현하지 않는다.
+
+최종 bytes는 hot reload 없이 다시 실행한 **PID `31060`**, 실제 build `2026.2.3.0.16863`, fingerprint `0a0213db88ecad5d45cf24f83016f82fb7049bd43c9bd4d822035ff148d27505`, epoch `9de8bfd8-a874-4f21-90bf-fa1ca4d30849`에서 직접 확인했다. 새 소유 입력 복제/checkpoint 후 제품 명령의 `pending/awaiting_verification`에서는 미등록, 이후 조회에서는 `complete`와 `safety.rollback` 등록을 관찰했다. 원 빈 탭·작업 source·retained 복원 target의 전체 projection, 세 탭 inventory와 target path/새 instance·동일 lineage를 보존했다. 같은 source의 재호출도 같은 결과·같은 inventory였으며 loaded/disk fingerprint가 일치했다. 앱은 응답했다. 근거는 ignored `retained-restore-observation-4dbdb391-9604-48dc-91d6-a5632ea65dc8/{bootstrap-observation,qualification-start,qualification-status}.json`과 같은 폴더의 `restore-qualification-92c454c2-d6a7-4538-9550-71591bf366c9.json`, SHA-256 `f4b1ef6eabee52ac2fcceadf307dde22513a8d2df7cfeb26d4e66042889298ae`다.
+
+최종 확인은 작은 독립 객체의 exact restore와 관측 조회 범위다. 작업·복원 탭 두 개는 각 새 `.casc` 파일과 함께 열어 두었고 종료·장시간 안정성은 확인하지 않았다. 실제 부분 쓰기 실패 receipt/attestation/일회용 permit은 발급하지 않았으며 일반 character·키 삽입·전체 installer 교체는 여전히 미완료다. 사용자 autosave·전역 runtime/auth·기존 unknown·원 receipt는 변경하지 않았다. 전체 suite/build/CI를 실행하지 않았다.
+
+### 이전 추가: actual readback 실패의 재개 우회 차단
 
 실제값이 candidate와 어긋나 `DRIVER_READBACK_MISMATCH`가 발생해도, 기존 runner는 run만 `blocked/ACTUAL_READBACK_FAILED`로 쓰고 step은 기본 `succeeded`로 저장했다. resume가 이 blocked reason을 유지하지 않아 이미 완료 표시된 readback을 건너뛰고 다음 checkpoint·quality로 진행할 수 있었다. 원 intent의 correction envelope 안인 불일치라면 뒤의 quality만으로 앞선 candidate 검증 실패가 사라질 수 있었다.
 
@@ -15,13 +32,13 @@
 - 이전 코드로 이미 `succeeded`가 된 readback은 원 terminal step을 고치지 않는다. resume/advance가 소유 run의 hash·길이를 확인한 immutable artifact를 읽고 실패가 있으면 run을 `failed/ACTUAL_READBACK_FAILED`로 종결한다. 이 확인은 승인 갱신·취소 계속 진행·early publish보다 앞선다. 관측 누락/무결성 오류는 차단하며 새 native dispatch나 게시를 실행하지 않는다. 이미 terminal인 과거 run을 다시 쓰지는 않는다.
 - 필요한 대상만 실행했다: 새 실패 저장과 legacy resume/advance/early-publish 세 경로, `4 passed`. 실제 store/artifact 저장을 사용하는 host 상태 회귀이며 capture/verification double은 실제 native 실패 증거가 아니다. 전체 suite/build/CI는 실행하지 않았다.
 
-### 실제 파일 닫기의 별도 관찰
+### 이전 관찰: 실제 파일 닫기
 
 아래 crash의 root cause를 확인할 native stack은 확보하지 못했다. 설치 SDK `samples/change_visibility_data_type.py`는 `DataSourceManager.load_scene` 뒤 `close_scene`을 사용하고, `samples/casc_import_export.py`는 `ProjectLoader.load_from` 뒤 `SceneManager.remove_application_scene`을 사용한다. 둘 중 하나의 API 자체가 금지됐다고 단정할 근거는 없다. 직전 복원 helper가 한 callback에서 새 파일 load/save 후 서로 다른 세 소유 탭을 연속 제거한 사실만 확인했다.
 
 PID `7452`의 새 epoch `e23c2520-9a66-4dd6-bba9-7c35b7bf1da1`에서, 기존의 14,001-byte 단일 객체 소유 fixture를 새로운 `working.casc`로 복사해 제품 `load_project_copy`로 로드하고 `_save_observed`로 저장했다. 별도 callback에서 원 빈 탭을 활성화한 뒤, 다시 원 탭의 idle callback에서 SDK `DataSourceManager.close_scene`으로 새 탭 하나만 닫았다. 그 다음 callback에서 원 탭·projection·inventory 보존을 확인했고, 이후 main window와 PID도 응답했다. bridge fingerprint는 `dfbd3b9afbd68e7d80606d5a57b9d88505d8fbc4e38de80ebb32c1e15d862e99`였다.
 
-ignored 근거는 `artifacts/native-r4/isolated-runtime/snapshots/project-close-observation-577d94ee-2c41-4de9-872f-3eb656d24ffe/{load-observation,close-started,close-returned,next-callback}.json`과 `artifacts/native-r4/project-close-*-response.json`이다. 이 관찰은 단일 파일의 로드·저장·닫기 경로만 다루며, 앞선 연속 복원/정리 crash의 원인이나 해결·장시간 안정성 증거가 아니다. 제품 native 코드는 이 가설로 변경하지 않았고, production operation은 하나도 등록하지 않았다. 현재 앱은 원 빈 탭이며 사용자의 autosave·전역 인증키·기존 unknown은 변경하지 않았다.
+ignored 근거는 `artifacts/native-r4/isolated-runtime/snapshots/project-close-observation-577d94ee-2c41-4de9-872f-3eb656d24ffe/{load-observation,close-started,close-returned,next-callback}.json`과 `artifacts/native-r4/project-close-*-response.json`이다. 이 관찰은 단일 파일의 로드·저장·닫기 경로만 다루며, 앞선 연속 복원/정리 crash의 원인이나 해결·장시간 안정성 증거가 아니다. 이 관찰 시점에는 제품 native 코드를 변경하거나 production operation을 등록하지 않았다. 당시 원 빈 탭으로 복귀했고 사용자의 autosave·전역 인증키·기존 unknown은 변경하지 않았다. 이후 같은 프로세스의 복원 관찰과 종료 crash는 위에 따로 기록했다.
 
 ### 이전 추가: 늦은 실패 복구 연결과 native crash 정정
 

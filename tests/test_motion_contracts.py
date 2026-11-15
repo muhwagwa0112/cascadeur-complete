@@ -230,3 +230,73 @@ def test_observed_piecewise_keys_fit_the_native_segment_schedule_without_invente
     observed["support_status"]="unverified"
     with pytest.raises(MotionInputError,match="INTERPOLATION_MODEL_UNVERIFIED"):
         build_key_model(capture,rig,key_layout=observed,verifier=verifier)
+
+
+def _plan_domain_key_insertions(additions, *, allow_interpolation_change=False):
+    from types import SimpleNamespace
+    from cascadeur_complete.capture import canonical_digest
+    from cascadeur_complete.motion_key_layout import plan_key_insertion
+    capture=batch({"a":np.column_stack(([0,.01,.02,.03,.04,.04,.04,.04,.08],np.zeros((9,2))))},9)
+    rig=RigProfile("p","c",{"a":"a"},frozenset(("a",)))
+    intent=IntentConstraints(editable_frames=(0,8),allow_key_insertion=True,
+        allow_interpolation_change=allow_interpolation_change,correction_envelope={"added_keys":2})
+    observed={"build_fingerprint":"domain-test-build","evaluator_fingerprint":"domain-test-evaluator",
+        "source_fingerprint":"domain-test-source","capture_digest":canonical_digest(capture.as_dict()),
+        "evidence_ref":"domain-test-record","support_status":"supported","drivers":[{
+            "object_id":"a","channel":"position","space":"global","layer_id":"layer",
+            "key_ids":["k0","k4","k8"],"frames":[0,4,8],
+            "values":[[0,0,0],[.04,0,0],[.08,0,0]],"tangents":[{},{},{}],
+            "segment_modes":["LINEAR","STEP"],"influences":{"controllers":[],"blend":[],"cycle":[]}}]}
+    # These receipts exercise the pure planner contract, not native qualification.
+    verifier=lambda _,digest:SimpleNamespace(ok=True,result={"key_layout_digest":digest,
+                                                           "completion_receipt_digest":"domain-test-completion"})
+    insertion_verifier=lambda _,digest:SimpleNamespace(ok=True,result={"request_digest":digest,
+        "shared_layer_effects_observed":True,"adapter_evidence_ref":"domain-test-insertion"})
+    delta=plan_key_insertion(observed,capture,rig,intent,additions,verifier=verifier,
+        insertion_verifier=insertion_verifier,generated_keys_budget=2)
+    return delta,observed,verifier
+
+
+def _domain_key_addition(frame,mode):
+    return {"object_id":"a","channel":"position","layer_id":"layer","frame":frame,
+            "value":[min(frame,4)*.01,0,0],"mode":mode,"tangent":{}}
+
+
+def test_key_insertion_preserves_mixed_original_segments_and_old_outgoing_modes():
+    from copy import deepcopy
+    from cascadeur_complete.motion_key_layout import validate_key_topology_readback
+    # Reverse request order also checks that each addition uses its own interval.
+    delta,observed,verifier=_plan_domain_key_insertions([
+        _domain_key_addition(6,"STEP"),_domain_key_addition(2,"LINEAR")])
+    after=deepcopy(observed)
+    after["drivers"][0].update(frames=[0,2,4,6,8],key_ids=["k0","new2","k4","new6","k8"],
+        values=[[0,0,0],[.02,0,0],[.04,0,0],[.04,0,0],[.08,0,0]],tangents=[{}]*5,
+        segment_modes=["LINEAR","LINEAR","STEP","STEP"])
+    assert validate_key_topology_readback(delta,after,verifier=verifier)["added_keys"]==2
+    after["drivers"][0]["segment_modes"][0]="STEP"
+    with pytest.raises(MotionInputError,match="KEY_TOPOLOGY_MISMATCH"):
+        validate_key_topology_readback(delta,after,verifier=verifier)
+
+
+def test_key_insertion_requires_authority_for_its_new_outgoing_mode_only():
+    from copy import deepcopy
+    from cascadeur_complete.motion_key_layout import validate_key_topology_readback
+    addition=_domain_key_addition(2,"STEP")
+    with pytest.raises(MotionInputError,match="INTERPOLATION_CHANGE_NOT_AUTHORIZED"):
+        _plan_domain_key_insertions([addition])
+    delta,observed,verifier=_plan_domain_key_insertions([addition],allow_interpolation_change=True)
+    after=deepcopy(observed)
+    after["drivers"][0].update(frames=[0,2,4,8],key_ids=["k0","new2","k4","k8"],
+        values=[[0,0,0],[.02,0,0],[.04,0,0],[.08,0,0]],tangents=[{}]*4,
+        segment_modes=["LINEAR","STEP","STEP"])
+    assert validate_key_topology_readback(delta,after,verifier=verifier)["status"]=="matched"
+    # Even authorized new-key mode changes do not authorize rewriting old modes.
+    after["drivers"][0]["segment_modes"][0]="STEP"
+    with pytest.raises(MotionInputError,match="KEY_TOPOLOGY_MISMATCH"):
+        validate_key_topology_readback(delta,after,verifier=verifier)
+
+
+@pytest.mark.parametrize("frames",[(0,),(4,),(8,),(-1,),(9,),(2,2)])
+def test_key_insertion_still_rejects_endpoints_existing_keys_and_duplicates(frames):
+    with pytest.raises(MotionInputError,match="KEY_LAYOUT_INSUFFICIENT"):
+        _plan_domain_key_insertions([_domain_key_addition(frame,"LINEAR") for frame in frames])
