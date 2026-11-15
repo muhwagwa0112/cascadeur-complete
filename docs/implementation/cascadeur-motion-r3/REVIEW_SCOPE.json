@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "revision": "r3",
+  "as_of": "2026-11-15",
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "refs": {
+    "main": "82b350cad4deda2ff5df288f46764a899115252d",
+    "planning_base_pr8": "1bb447898e8ced16b6931b72cfeb0f563127f746"
+  },
+  "files": [
+    {
+      "path": "IMPLEMENTATION_PLAN.md",
+      "sha256": "563703cf4ef1370e0f299c4f24016ac654ef0a77f3c55b5a48dd939f7a20e1ff",
+      "bytes": 24763
+    },
+    {
+      "path": "QUALITY_SPEC.md",
+      "sha256": "a392a629dce3f71cdc55588dea37e4e08cefbb843359feb8da5bc3eed39ef920",
+      "bytes": 58034
+    },
+    {
+      "path": "AUTOMATION_SPEC.md",
+      "sha256": "44ffe99a94ca311c2c46938e10d03dc8ecc6a3a85988b727786dc6cd19b92e5d",
+      "bytes": 63433
+    },
+    {
+      "path": "STABILITY_SPEC.md",
+      "sha256": "74e9b4d0ab6ad9e046be44809f864b32c0a2e469527ebd4deeb747390c5b954f",
+      "bytes": 39381
+    },
+    {
+      "path": "implementation_tasks.json",
+      "sha256": "354df5430e8e60d6cdc4ffb8af776e132e6c54fe935fd84c4c1d131992c29840",
+      "bytes": 54580
+    }
+  ],
+  "rubric": [
+    "기존 관련 결함의 구현 작업 누락 없음",
+    "중요 입력·출력·상태 전이·실패 정책의 미정 사항 없음",
+    "실행·품질·파일 공개의 잘못된 성공 처리 없음",
+    "원본·타 캐릭터·승인된 의도 범위 보호",
+    "설계 검수와 runtime 검증 구분 및 미확인 기능의 명시적 중단"
+  ],
+  "repository_code_modified": false,
+  "repository_tests_run": [],
+  "artifact_checks": {
+    "json_parsed": true,
+    "tasks": 32,
+    "dependency_cycles": false,
+    "completion_dependency_closure": 32
+  },
+  "scope_note": "Implementation design review only; no assertion of runtime motion perfection."
+}

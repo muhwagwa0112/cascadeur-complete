@@ -1,0 +1,1294 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "implementation_ready_design",
+  "as_of": "2026-11-15",
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "refs": {
+    "main": "82b350cad4deda2ff5df288f46764a899115252d",
+    "planning_base_pr8": "1bb447898e8ced16b6931b72cfeb0f563127f746"
+  },
+  "status": "implementation_spec_r3_not_executed",
+  "product_code_modified": false,
+  "repository_tests_run": [],
+  "execution_policy": {
+    "default": "minimum sufficient L1-L3 only",
+    "L4": "not run; future explicit approval required",
+    "new_dependencies": "none planned",
+    "external_changes": "not authorized by this design task",
+    "runtime_sampling_note": "Per-output motion/FBX sampling is product functionality; acceptance E2E runs are separately authorized."
+  },
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "PR #8 기반 확정과 MCP 호출 호환",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/server.py",
+        "tests/test_direct_mutation_tools.py",
+        "tests/test_mcp_contract.py"
+      ],
+      "symbols": [
+        "_prepare",
+        "*_prepare",
+        "deprecated direct mutation tools"
+      ],
+      "depends_on": [],
+      "patch": [
+        "PR8 준비·batch gate·원자 쓰기·root 수정은 유지하고 중복 구현하지 않는다.",
+        "삭제된 직접 mutation 도구는 write를 하지 않는 NEEDS_PREPARE shim과 대체도구 안내로 이행한다.",
+        "공개 응답의 execution/quality/export 상태를 분리하고 변경 표면에 해당하는 contract만 갱신한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "구 이름 호출은 write 0건이며 migration 정보를 반환한다.",
+          "실제 prepare는 요청 feature writes0이고 snapshot/working scene activation은 별 journaled effect이며, migration shim은 prepare도 호출하지 않는다.",
+          "읽기 전용 기존 경로와 변경된 도구 목록의 호환 계약을 확인한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T02",
+      "title": "공용 타입·protocol 3 handshake·정확한 성공 상태",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/models.py",
+        "src/cascadeur_complete/bridge_client.py",
+        "cascadeur_side/cascadeur_complete/runtime.py",
+        "src/cascadeur_complete/safety.py"
+      ],
+      "symbols": [
+        "BridgeRequest",
+        "ResultEnvelope",
+        "ChangeToken",
+        "protocol negotiation"
+      ],
+      "depends_on": [
+        "T01"
+      ],
+      "patch": [
+        "SceneBinding/SourceBinding/RequestReceipt와 typed SolverResult/QualityReport/WorkflowPlan/ExportProfile를 정의한다.",
+        "guarded mutation에 필요한 필드의 미제공·알 수 없는 protocol·adapter fingerprint mismatch는 dispatch 전에 거부한다.",
+        "protocol2 read-only와 protocol3 guarded mutation의 명시적 호환표를 구현한다.",
+        "execution applied와 quality pass 및 export published를 서로 추론하지 않는다.",
+        "기존 ErrorCode enum을 유지하며 PROTOCOL_MISMATCH/NEEDS_PREPARE 등 상세 이유는 result.error_details.code에 담는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "구 host/new bridge 및 new host/구 bridge mutation은 write 0건이다.",
+          "solver failed/no writes/quality skipped는 workflow succeeded가 아니다.",
+          "동일 요청 receipt deserialize와 unknown enum/schema 처리를 확인한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T03",
+      "title": "scene instance와 실제 content scope 식별",
+      "priority": "P0",
+      "files": [
+        "cascadeur_side/cascadeur_complete/runtime.py",
+        "src/cascadeur_complete/models.py"
+      ],
+      "symbols": [
+        "scene_state",
+        "_transform_fingerprint",
+        "_model_data_fingerprint",
+        "new SceneRegistry and scope_digest"
+      ],
+      "depends_on": [
+        "T02"
+      ],
+      "patch": [
+        "runtime epoch와 강한 참조 기반 scene instance registry를 사용하고 path/name/tab index 식별을 폐기한다.",
+        "read/write dependency closure의 실제 key 값·보간·rig/constraint/mesh 설정을 canonical hash한다.",
+        "playhead·selection·view 상태와 content를 분리한다.",
+        "clone/reopen은 새 instance를 발급하고 snapshot parent lineage만 연결한다.",
+        "scope_digest는 scope descriptor hash, content_revision은 actual scoped values hash, sample_digest는 evaluated sample hash로 projection을 구분한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "같은 파일을 연 두 scene과 unnamed scene을 혼동하지 않는다.",
+          "현재 frame 외 기존 key 값·보간 변경을 검출한다.",
+          "playhead만 이동한 경우 불필요한 content conflict가 없다.",
+          "누락된 dependency reader는 supported로 표시하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "설치 csc scene wrapper identity 안정성",
+        "전체 필요한 native channel/constraint 읽기 가능 범위"
+      ]
+    },
+    {
+      "id": "T04",
+      "title": "sample→solve→prepare→write의 원본 바인딩",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/cleanup_workflow.py",
+        "src/cascadeur_complete/change_flow.py",
+        "src/cascadeur_complete/safety.py",
+        "cascadeur_side/cascadeur_complete/runtime.py",
+        "cascadeur_side/cascadeur_complete/handlers/animation.py",
+        "cascadeur_side/cascadeur_complete/handler_registry.py"
+      ],
+      "symbols": [
+        "CleanupWorkflow._read",
+        "CleanupWorkflow.sample",
+        "ChangeFlowMixin.prepare_change",
+        "ChangeFlowMixin.commit_change",
+        "transact",
+        "position_keys_set",
+        "rotation_keys_set"
+      ],
+      "depends_on": [
+        "T03"
+      ],
+      "patch": [
+        "일관된 acquisition 결과를 immutable sample artifact와 SourceBinding으로 저장한다.",
+        "cleanup prepared result에 원래 SourceBinding을 필수로 전달하고 현재 상태를 새 원본인 것처럼 re-stamp하지 않는다.",
+        "실제 modify callback의 첫 write 직전에 대상/lineage/scope digest/권한을 검사한다.",
+        "동일 비양보 경계에서 검증할 수 없는 adapter 또는 scope budget 초과는 write 전에 거부한다.",
+        "ABA mixed read·source→working clone 재바인딩·write 이후 stamp는 STABILITY_SPEC의 단일 계약을 따른다.",
+        "SourceBinding.complete는 runtime/검증된 adapter가 required dependency closure와 실제 sample coverage를 확인한 뒤에만 발급한다. client bool을 권한으로 신뢰하지 않는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "샘플 후 key 편집, scene switch, clone/reopen, 다른 chunk 사이 변경은 stale write를 막는다.",
+          "검증 실패 시 write 0건이며 불필요한 rollback이 없다.",
+          "write payload가 read/write allowlist를 벗어나면 거부한다.",
+          "지연된 callback의 guard 거절은 dispatched=true여도 write_phase=not_started이며 rollback하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "modify callback의 실제 scheduling/yield/후속 native write 계약"
+      ]
+    },
+    {
+      "id": "T05",
+      "title": "durable receipt와 중복 방지·결과 불명 처리",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/bridge_client.py",
+        "src/cascadeur_complete/atomic_queue.py",
+        "src/cascadeur_complete/change_flow.py",
+        "cascadeur_side/cascadeur_complete/pump.py",
+        "cascadeur_side/cascadeur_complete/runtime.py"
+      ],
+      "symbols": [
+        "BridgeClient._execute_once",
+        "_wait_response",
+        "pump request claim",
+        "ChangeFlowMixin.commit_change",
+        "new request journal"
+      ],
+      "depends_on": [
+        "T02",
+        "T03"
+      ],
+      "patch": [
+        "request_id/stage_id/idempotency_key를 enqueue 전 journal에 기록하고 모든 응답에 유지한다.",
+        "bridge claim/dispatch/applied/observation terminal receipt를 durable하게 남긴다.",
+        "claim 후 timeout은 outcome_unknown이며 새 ID 재전송과 즉시 rollback을 막는다.",
+        "원래 요청의 receipt와 late response만 재조정하고 동일 key의 중복 dispatch를 거부한다.",
+        "write와 receipt 사이 crash를 exactly-once로 보장한다고 주장하지 않고 unknown으로 보존한다.",
+        "write_phase/failure_kind/recovery_eligible로 dispatch 이후 첫 write 전 guard 거절과 실제 부분 write 실패를 구분한다.",
+        "runtime _error는 immutable before와 별도 after 관측을 사용한다. 예외 시 현재 state를 before/after 양쪽에 덮지 않고 after를 읽지 못하면 null/unknown을 유지한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "enqueue 전후, claim 전후, 적용 전후, receipt 기록 전후 crash window의 재진입 상태를 확인한다.",
+          "late success와 중복 응답이 추가 mutation을 발생시키지 않는다.",
+          "request ID 없는 timeout 응답을 없앤다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T06",
+      "title": "lineage가 맞는 snapshot·조건부 복구",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/change_flow.py",
+        "src/cascadeur_complete/safety.py",
+        "cascadeur_side/cascadeur_complete/runtime.py"
+      ],
+      "symbols": [
+        "_restore_failed_change",
+        "prepare_rollback",
+        "_rollback_internal",
+        "_save_snapshot",
+        "safety.rollback_internal"
+      ],
+      "depends_on": [
+        "T03",
+        "T04",
+        "T05"
+      ],
+      "patch": [
+        "snapshot bytes hash·source/working lineage·owned change 범위를 기록한다.",
+        "pre-dispatch 거부/취소에는 rollback하지 않는다.",
+        "결과 불명 또는 사용자/다른 작업이 편집한 lineage에는 자동 rollback을 하지 않는다.",
+        "실행 종료 확인 후 소유한 실패 branch만 별도 복구 장면으로 열고 새 binding을 발급한다.",
+        "scene rollback으로 이미 공개된 외부 파일을 복구할 수 있다고 간주하지 않는다.",
+        "guard_rejected_before_first_write는 dispatch 유무와 무관하게 자동 rollback하지 않는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "다른 active tab·변경된 working scene·tampered snapshot에서 자동 복구가 거부된다.",
+          "복구가 새 scene instance를 만들며 원본과 기존 외부 파일을 훼손하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "snapshot save/open의 완료와 scene lineage 관측"
+      ]
+    },
+    {
+      "id": "T07",
+      "title": "JobStore 경합·worker 종료 처리",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/jobs.py",
+        "src/cascadeur_complete/service.py",
+        "src/cascadeur_complete/models.py"
+      ],
+      "symbols": [
+        "JobStore.update",
+        "JobStore.cancel",
+        "JobStore.recover_incomplete",
+        "submit_job worker"
+      ],
+      "depends_on": [
+        "T02"
+      ],
+      "patch": [
+        "read-modify-write를 단일 임계구역/CAS state_version으로 처리한다.",
+        "cancel_requested와 canceled를 분리하고 running 전이와 취소 경합을 원자적으로 해결한다.",
+        "worker 최상위 try/finally에서 종료 상태·heartbeat를 기록한다.",
+        "owner는 PID와 process epoch를 결합하고 손상 record 하나가 전체 recovery를 중단시키지 않게 한다.",
+        "기존 job_submit read-only 계약을 유지한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "cancel-vs-start와 update-vs-cancel 경합에서 취소가 사라지지 않는다.",
+          "worker exception으로 영구 running이 남지 않는다.",
+          "PID 재사용·손상 job file 복구 경계를 확인한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T08",
+      "title": "실제 부작용이 있는 read 경로 분리",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/feature_registry.py",
+        "src/cascadeur_complete/service.py",
+        "cascadeur_side/cascadeur_complete/runtime.py",
+        "cascadeur_side/cascadeur_complete/handlers/animation.py"
+      ],
+      "symbols": [
+        "animation.transform_get(refresh=True)",
+        "refresh_interpolation",
+        "feature execution classification",
+        "classify_effect(operation_name, normalized_arguments)"
+      ],
+      "depends_on": [
+        "T02",
+        "T05"
+      ],
+      "patch": [
+        "refresh_interpolation을 호출하는 transform_get은 순수 read와 분리하고 mutation/evaluation lane에 journal한다.",
+        "unknown 중 허용되는 reconciliation은 receipt/status 등 부작용 없는 허용목록만 사용한다.",
+        "실제 refresh가 필요한 품질 sample은 앞 요청 종료·idle 확인 후 별도 보호 단계로 실행한다.",
+        "argument-aware classify_effect를 execute/batch/job_submit/runner가 공유하여 이름 기반 read-only 우회를 없앤다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "pending mutation 중 refresh=True read가 dispatch되지 않는다.",
+          "순수 receipt 조회는 scene/frame/keys를 바꾸지 않는다.",
+          "read-only batch를 통한 refresh 우회가 없다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "refresh 후 rig 평가가 안정되는 조건"
+      ]
+    },
+    {
+      "id": "T09",
+      "title": "캐릭터 소유권과 semantic RigProfile",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/cleanup_workflow.py",
+        "src/cascadeur_complete/motion_cleanup.py",
+        "cascadeur_side/cascadeur_complete/handlers/rigging.py",
+        "cascadeur_side/cascadeur_complete/handlers/mesh.py"
+      ],
+      "symbols": [
+        "CleanupWorkflow._points",
+        "_arm_points",
+        "_finger_boxes",
+        "by_name",
+        "FootRig",
+        "HandGeometry",
+        "rig_state"
+      ],
+      "depends_on": [
+        "T03"
+      ],
+      "patch": [
+        "전 장면 Point 기본값을 제거하고 명시한 character 소유권/semantic 역할로 scope를 확정한다.",
+        "중복 이름·누락·모호한 mapping은 질문 가능한 구조화 결과로 반환한다.",
+        "neutral pose bone lengths/local axes/계층과 여러 mesh/garment skin을 profile에 포함한다.",
+        "writer는 allowlist만 수정하고 non-target digest를 보호한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "서로 다른 이름을 가진 두 rig와 prop이 있는 scene에서 대상 외 write가 0이다.",
+          "Mixamo/QuickRig 이름 외 매핑도 명시 profile로 처리한다.",
+          "같은 이름만으로 다른 rig controller를 선택하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "실제 rig의 소유 관계·local axes 추출"
+      ]
+    },
+    {
+      "id": "T10",
+      "title": "시간·단위·좌표와 입력 유효성",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py",
+        "src/cascadeur_complete/cleanup_workflow.py",
+        "cascadeur_side/cascadeur_complete/handlers/animation.py"
+      ],
+      "symbols": [
+        "ContactParams",
+        "ArmParams",
+        "WristParams",
+        "_runs",
+        "_smooth",
+        "sample",
+        "new MotionContext"
+      ],
+      "depends_on": [
+        "T09"
+      ],
+      "patch": [
+        "fps를 유리수 또는 정확한 timestamp로 받고 solver의 길이·시간·회전 단위를 고정한다.",
+        "cm/frame·frame 길이 파라미터를 물리 단위 및 초 기반 window로 바꾼다.",
+        "up-axis/ground tangent basis/local-world 변환을 명시한다.",
+        "empty/single frame/missing ID/NaN/Inf/zero quaternion를 오류나 정의된 no-change로 처리하고 누락 값을 0으로 채우지 않는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "같은 움직임의 30/60fps와 cm/m 표현에서 판정이 일관된다.",
+          "Y-up/Z-up 변환 후 동일 제약이 유지된다.",
+          "빈/1frame/누락/quaternion0 입력의 결과가 정의되어 있다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T11",
+      "title": "회전 불연속·hemisphere·반대 방향 정렬",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py"
+      ],
+      "symbols": [
+        "_steps_deg",
+        "finger_cleanup",
+        "finger_stats",
+        "_median_rotation",
+        "_align",
+        "_rotation"
+      ],
+      "depends_on": [
+        "T10"
+      ],
+      "patch": [
+        "인접 quaternion의 relative rotation geodesic angle을 쓴다.",
+        "dot 기반 hemisphere 연속화와 manifold log/exp smoothing을 적용하며 sign(w)로 180도 quaternion을 0으로 만들지 않는다.",
+        "Euler 표현이 필요한 경로는 명시한 축·unwrap 변환을 거친다.",
+        "antiparallel 벡터는 deterministic orthogonal axis의 pi 회전을 반환한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "+179→-179도의 차이를 약2도로 판정한다.",
+          "q와 -q 혼재와 w=0에서 회전 결과가 동일하다.",
+          "antiparallel/zero vector/single sample 경계를 처리한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T12",
+      "title": "two-bone IK 도달 가능성과 pole 안정성",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py"
+      ],
+      "symbols": [
+        "two_bone_elbow",
+        "settle_resting_hand"
+      ],
+      "depends_on": [
+        "T09",
+        "T10"
+      ],
+      "patch": [
+        "기본은 unreachable target에 infeasible를 반환한다. 명시적으로 승인한 projection envelope 안에서만 목표 손목 벡터 자체를 도달 가능한 구간으로 투영한다.",
+        "보정된 elbow/wrist, projection distance, bone residual, status를 함께 반환한다.",
+        "일직선/동일 위치/pole 퇴화 때 이전 pole과 rig neutral axis의 deterministic fallback을 사용한다.",
+        "투영이 intent 한도를 넘으면 infeasible로 반환한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "너무 멀거나 너무 가까운 target에서 두 bone 길이를 보존한다.",
+          "collinear pole에서 NaN이나 팔꿈치 반전이 없다.",
+          "제약을 어긴 투영을 정상 통과시키지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T13",
+      "title": "solver 실패와 무변경의 구분",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py",
+        "src/cascadeur_complete/cleanup_workflow.py"
+      ],
+      "symbols": [
+        "solve_contacts",
+        "solve_arm_offsets",
+        "_solve_thumb",
+        "prepare_arm_clearance",
+        "prepare_hand_pose"
+      ],
+      "depends_on": [
+        "T02",
+        "T10"
+      ],
+      "patch": [
+        "solver status/convergence/잔차/유효 candidate 여부를 SolverResult로 반환한다.",
+        "OSQP 또는 thumb optimizer 실패 후 초기 offsets를 성공으로 반환하지 않는다.",
+        "0개 write를 무조건 no_issue로 처리하지 않고 원본 제약 검사를 요구한다.",
+        "부분 개선 candidate는 final_quality pass와 구분하여 제한된 다음 correction의 입력으로만 사용한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "강제 infeasible/iteration limit/nonfinite output에서 prepare token을 발급하지 않는다.",
+          "원본이 제약을 만족하는 경우만 no_change가 된다.",
+          "optimizer 실패가 통계상 개선으로 숨겨지지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T14",
+      "title": "지면·접촉·발 방향을 포함한 foot solver",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py",
+        "src/cascadeur_complete/cleanup_workflow.py"
+      ],
+      "symbols": [
+        "floors",
+        "contact_weights",
+        "skate_per_frame",
+        "solve_contacts",
+        "analyze_feet",
+        "prepare_feet"
+      ],
+      "depends_on": [
+        "T09",
+        "T10",
+        "T12",
+        "T13"
+      ],
+      "patch": [
+        "원본에서 고정한 contact interval/confidence와 plane/mesh/moving support를 사용한다.",
+        "per-foot global3percentile는 지면의 진단 참고값으로만 남긴다. 자동 prepare의 support는 명시된 plane/읽은 scene geometry여야 한다.",
+        "heel/toe 롤링·발 방향·높이/penetration·support-relative 속도를 포함하고 anatomical reach를 사용한다.",
+        "허용되지 않은 발들기로 skating 지표만 줄이는 해를 거부한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "정지 접촉/heel-toe roll/계단 또는 경사/움직이는 support에서 정의한 제약이 측정된다.",
+          "발을 들어 contact를 사라지게 하는 candidate는 pass하지 않는다.",
+          "낮은 confidence·지원하지 않는 지면은 자동 성공이 아니다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T15",
+      "title": "원본 의도와 root/step 정책",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py",
+        "src/cascadeur_complete/cleanup_workflow.py"
+      ],
+      "symbols": [
+        "apply_offsets",
+        "step_pass",
+        "prepare_feet",
+        "new IntentConstraints"
+      ],
+      "depends_on": [
+        "T14"
+      ],
+      "patch": [
+        "cleanup 기본값은 preserve로 하고 step reconstruction은 명시적 opt-in이다.",
+        "누적 root offset과 double-support cancellation을 경로/endpoint/stride/timing 한도에 제한한다.",
+        "original contacts/keypose/beat/prop anchor를 candidate 재분류로 변경하지 않는다.",
+        "움직임 보존과 물리 제약이 양립 불가능하면 이유와 위반량을 반환한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "의도한 sliding·root endpoint·핵심 박자가 허용 없이 바뀌지 않는다.",
+          "다른 캐릭터의 Point에 offset을 적용하지 않는다.",
+          "physics 개선을 위해 허용한 범위만 root가 변한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T16",
+      "title": "skin binding과 복수 mesh 유효성",
+      "priority": "P1",
+      "files": [
+        "cascadeur_side/cascadeur_complete/handlers/mesh.py",
+        "src/cascadeur_complete/motion_cleanup.py",
+        "src/cascadeur_complete/cleanup_workflow.py"
+      ],
+      "symbols": [
+        "mesh dominant/weights payload",
+        "MeshSurface.__init__",
+        "hand_body_clearance",
+        "_arm_mesh"
+      ],
+      "depends_on": [
+        "T09",
+        "T10"
+      ],
+      "patch": [
+        "dominant=-1을 Python 음수 index로 joint에 매핑하지 않는다.",
+        "unbound vertices를 명시하고 weight index/합/행렬/finite를 검사한다.",
+        "full skin weights를 전달·검사한다. 정확 변형에는 검증된 bind transforms/evaluator도 필요하며 없으면 approximate candidate로 표시하고 actual skinned readback 전 required mesh quality pass를 금지한다.",
+        "옷/몸통 등 복수 mesh와 충돌 제외영역을 profile로 지정한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "unweighted vertex가 마지막 joint로 귀속되지 않는다.",
+          "두 bone 혼합 skin과 여러 mesh가 올바른 candidate geometry를 만든다.",
+          "손상 index/weights는 오류로 반환한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "SDK의 실제 skin weights와 evaluated mesh 읽기"
+      ]
+    },
+    {
+      "id": "T17",
+      "title": "triangle collision과 결합된 팔 보정",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py"
+      ],
+      "symbols": [
+        "MeshSurface._signed",
+        "depth",
+        "constraints",
+        "solve_arm_offsets",
+        "CapsuleSurface"
+      ],
+      "depends_on": [
+        "T12",
+        "T13",
+        "T16"
+      ],
+      "patch": [
+        "nearest-vertex normal 대신 triangle closest-point와 broadphase를 사용한다.",
+        "closed oriented mesh에만 signed inside 판정을 적용하고 open/double surface는 validity를 보고한다.",
+        "distance>reach를 자동 outside로 처리하지 않는다.",
+        "어깨 누락·팔-팔 충돌을 포함하며 동시에 움직이는 팔의 geometry를 candidate마다 갱신한다.",
+        "intended contact/exclusion과 충돌 validity·penetration·clearance를 별도로 기록한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "triangle 중앙 깊은 관통, 먼 nearest vertex, open mesh, 양팔 접근의 재현 사례를 처리한다.",
+          "의도한 신체/prop 접촉은 허용된 영역에서 유지된다.",
+          "알 수 없는 부호를 collision-free로 판정하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T18",
+      "title": "손가락·손목·소품 접촉 보존",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py",
+        "src/cascadeur_complete/cleanup_workflow.py"
+      ],
+      "symbols": [
+        "pose_hand",
+        "_solve_thumb",
+        "settle_resting_hand",
+        "accent_wrist",
+        "prepare_finger_fan",
+        "prepare_hand_rest",
+        "prepare_wrist_accent"
+      ],
+      "depends_on": [
+        "T11",
+        "T12",
+        "T13",
+        "T16",
+        "T17"
+      ],
+      "patch": [
+        "cleanup과 style/pose reconstruction을 분리하고 후자는 명시 승인 scope에만 포함한다.",
+        "finger별 원래 제스처·상대 closure·local axis를 보존한다.",
+        "손-몸/손-소품 anchor를 시간 구간·좌표계·허용 오차로 고정한다.",
+        "near-hip 위치만으로 resting intent를 추정하지 않고 scaled rig geometry를 사용한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "가리키기·부분 주먹·소품 쥐기·hip 근처 손동작이 일괄 주먹으로 바뀌지 않는다.",
+          "손목 accent/팬/휴식 보정은 preserve recipe에 자동 포함되지 않는다.",
+          "thumb failure와 접촉 제약 미달을 보고한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T19",
+      "title": "보간을 반영한 key fitting과 실제 readback",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py",
+        "src/cascadeur_complete/cleanup_workflow.py",
+        "cascadeur_side/cascadeur_complete/handlers/animation.py",
+        "src/cascadeur_complete/host_postconditions.py"
+      ],
+      "symbols": [
+        "linear_interpolation",
+        "animation.key_reduce",
+        "position_keys_set",
+        "rotation_keys_set",
+        "_check_settled_writes",
+        "_verify_settled_rotations"
+      ],
+      "depends_on": [
+        "T04",
+        "T08",
+        "T13",
+        "T21",
+        "T11"
+      ],
+      "patch": [
+        "고정 every_n3→BEZIER를 기본 품질 경로에서 제거한다.",
+        "contact/event/intent keys를 보존하고 error-controlled reduction을 한다.",
+        "확인된 실제 interpolation/rig evaluation operator 또는 dense fixed sampling을 사용한다.",
+        "10cm 관용과 rig_solved 무조건 제외를 제거하고 checked/skipped/error를 명시한다.",
+        "실제 적용 후 재샘플하여 candidate와 원본 보호제약을 동시에 확인한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "키에서는 맞지만 frame 사이 overshoot하는 곡선을 검출한다.",
+          "rig가 덮어쓴 위치·회전과 누락된 readback을 pass하지 않는다.",
+          "candidate 예측과 actual output을 혼동하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "설치 버전 BEZIER/tangent/AutoPosing 평가·settled readback"
+      ]
+    },
+    {
+      "id": "T20",
+      "title": "긴 clip의 chunk·메모리·write 경계",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/cleanup_workflow.py",
+        "src/cascadeur_complete/motion_cleanup.py",
+        "cascadeur_side/cascadeur_complete/handlers/mesh.py",
+        "cascadeur_side/cascadeur_complete/handlers/animation.py"
+      ],
+      "symbols": [
+        "sample",
+        "_arm_mesh",
+        "prepare_*",
+        "key writer payload construction"
+      ],
+      "depends_on": [
+        "T04",
+        "T10",
+        "T14",
+        "T17"
+      ],
+      "patch": [
+        "2000frame 단일 mesh call과60000write 경계를 negotiated limits 안에서 나눈다.",
+        "immutable artifact/memmap와 bounded memory를 사용하며 tmp 이름을 job/stage별로 고유하게 만든다.",
+        "transport/geometry window는 나누되 전역 key 변수·D1/D2·contact anchor를 공유한 sparse 문제 하나로 푼다. 독립 window solve/halo blending을 사용하지 않으며 경계도 같은 global derivative 항과 metric에 포함한다.",
+        "각 chunk read/write dependency scope와 전역 constraint source를 고정하고, partial write continuation은 직전 successor binding에 결합한다.",
+        "guard 전체 scope를 확인할 수 없는 예산·SDK 조합에서는 silent truncation 대신 지원 한계를 반환한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "2000보다 긴 입력이 전체 길이를 유지하며 chunk boundary에서 step/rotation discontinuity가 없다.",
+          "한 chunk 실패 후 다음 chunk를 무조건 진행하지 않는다.",
+          "temp 충돌과 write limit 초과·메모리 한도 경계를 확인한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "실제 adapter payload/time budget와 긴 clip의 bounded guard 가능 범위"
+      ]
+    },
+    {
+      "id": "T21",
+      "title": "원본·실제 결과·최종 파일 품질 판정",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/motion_cleanup.py",
+        "src/cascadeur_complete/cleanup_workflow.py",
+        "src/cascadeur_complete/host_postconditions.py",
+        "new motion quality models/module"
+      ],
+      "symbols": [
+        "new QualityPolicy",
+        "new QualityReport",
+        "survey",
+        "skate_summary",
+        "depth_summary",
+        "wrist_summary"
+      ],
+      "depends_on": [
+        "T09",
+        "T10",
+        "T13"
+      ],
+      "patch": [
+        "metric별 단위·측정집합·validity·threshold·원본 baseline·보호 한도를 고정한다.",
+        "support-relative slide/높이/penetration·joint geodesic rate/accel·bone/IK residual·root·keypose/prop error를 분리한다.",
+        "평균값만으로 국소 실패를 숨기지 않고 max/분위수/문제 interval/coverage를 보고한다.",
+        "원본 고정 contact와 의미제약을 기준으로 검사하고 결과에서 유리한 frame 재선택을 금지한다.",
+        "threshold는 명시 recipe에 결합하고 임의로 완화하여 pass하지 않는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "contact frame 삭제·누락 readback·NaN metric·부분관측을 pass하지 않는다.",
+          "원본 대비 smooth하지만 의도가 훼손된 candidate를 거부한다.",
+          "정의되지 않은 metric은 not_applicable 또는 unverified와 이유를 남긴다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "profile별 실제 scale/noise/관측 해상도 calibration"
+      ]
+    },
+    {
+      "id": "T22",
+      "title": "대상 rig별 retarget·generation·unbaking 계약",
+      "priority": "P1",
+      "files": [
+        "cascadeur_side/cascadeur_complete/handlers/generation.py",
+        "cascadeur_side/cascadeur_complete/handlers/rigging.py",
+        "src/cascadeur_complete/adapter_bindings.py",
+        "src/cascadeur_complete/feature_registry.py",
+        "src/cascadeur_complete/retargeting.py (new)"
+      ],
+      "symbols": [
+        "_generation_state",
+        "_call_generation_action",
+        "retargeting",
+        "root_motion",
+        "unbaking",
+        "rig_state",
+        "retarget_pose",
+        "controller_targets",
+        "world_to_local"
+      ],
+      "depends_on": [
+        "T09",
+        "T21",
+        "T11",
+        "T12",
+        "T19"
+      ],
+      "patch": [
+        "scene 전체 count 대신 source/target ownership와 각 layer의 준비 상태를 검사한다.",
+        "semantic hierarchy·neutral pose·root/slide/timing/target pose 계약을 입력에 고정한다.",
+        "임의 text-to-motion API를 만들지 않고 실제 version profile action/설정만 노출한다.",
+        "revision 변화 대신 실제 목표 결과와 non-target 불변성을 검사하고 유효 no_change를 허용한다.",
+        "MotionStageSpec(mode=retarget)의 route=native|host를 명시하며 승인 없는 route fallback은 하지 않는다.",
+        "host route는 retargeting.py에서 rest-basis rotation mapping·target length/FK/IK·planned parent 기반 local 변환을 구현하고 검증된 controller adapter로 같은 guarded write/readback에 연결한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "무관한 RigInfo나 다른 layer keys가 대상 ready를 만들지 않는다.",
+          "지원하지 않는 native 설정을 적용했다고 반환하지 않는다.",
+          "source/target scope 바뀜과 no-change retarget을 구분한다.",
+          "source/target bone length와 nontrivial parent rotation 차이에서 target-space 목표 및 planned parent local/global 왕복을 확인한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "설치 build의 native action/설정/readiness와 target-space 평가"
+      ]
+    },
+    {
+      "id": "T23",
+      "title": "AutoPhysics 상태 전이와 결과 관찰",
+      "priority": "P0",
+      "files": [
+        "cascadeur_side/cascadeur_complete/handlers/physics.py",
+        "src/cascadeur_complete/host_postconditions.py",
+        "src/cascadeur_complete/adapter_bindings.py"
+      ],
+      "symbols": [
+        "auto_enable",
+        "auto_physics_snap",
+        "_complete_auto_physics_snap",
+        "physics state readers"
+      ],
+      "depends_on": [
+        "T05",
+        "T08",
+        "T09",
+        "T21"
+      ],
+      "patch": [
+        "상태 불명 toggle을 ensure-on으로 취급하지 않는다.",
+        "읽을 수 있는 상태와 확인된 setter/전이만 무인 recipe에서 사용한다.",
+        "snap 확인 UI를 완료 receipt에 연결하고 모션 데이터가 실제 제약을 만족하는지 검사한다.",
+        "물리적 불가능·설정 미관측·완료 불명은 각각 실패 원인을 반환한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "재시도·중복 요청으로 enabled 상태가 반전되지 않는다.",
+          "playhead/selection revision만 바뀐 경우 snap quality pass가 아니다.",
+          "native red/impossible 상태가 있으면 품질 성공을 반환하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "AutoPhysics 실제 state/setter·완료 관측·rig 물리 설정"
+      ]
+    },
+    {
+      "id": "T24",
+      "title": "범위가 제한된 workflow 계획·승인 계약",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/models.py",
+        "src/cascadeur_complete/server.py",
+        "src/cascadeur_complete/service.py",
+        "src/cascadeur_complete/safety.py",
+        "new workflow plan module"
+      ],
+      "symbols": [
+        "recipe_plan",
+        "recipe_authorize",
+        "recipe_start",
+        "recipe_status",
+        "recipe_cancel",
+        "recipe_resume",
+        "recipe_artifacts",
+        "WorkflowPlan",
+        "plan digest/signature"
+      ],
+      "depends_on": [
+        "T02",
+        "T03",
+        "T09",
+        "T21"
+      ],
+      "patch": [
+        "입력/scene/캐릭터/프레임/설정/intent/quality/export/operation/budget가 구체화된 plan을 만든다.",
+        "raw arbitrary action 권한을 주지 않고 고정 stage와 allowlist를 서명에 결합한다.",
+        "기존 confirmation token을 step마다 정확한 arguments digest에 바인딩하고 replay를 막는다.",
+        "승인 범위 안의 bounded parameter correction은 자동 진행하고 범위를 넘으면 needs_input/approval로 종료·대기한다.",
+        "RecipeSpec.intent는 공용 IntentConstraints를 참조한다. semantic locks=IntentConstraints, thresholds=QualityPolicy, variants=StepPermit, limits=RunBudgets로 단일 소유한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "plan/argument/target/profile 변조와 token replay가 거부된다.",
+          "same authorized recipe는 단계마다 불필요한 사용자 확인 없이 진행한다.",
+          "fresh plan과 stale scene binding을 혼합할 수 없다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T25",
+      "title": "입력부터 최종 품질까지 finite runner",
+      "priority": "P1",
+      "files": [
+        "new workflow runner module",
+        "src/cascadeur_complete/cleanup_workflow.py",
+        "src/cascadeur_complete/service.py"
+      ],
+      "symbols": [
+        "RecipeRunner",
+        "stage executors",
+        "bounded correction loop"
+      ],
+      "depends_on": [
+        "T07",
+        "T13",
+        "T19",
+        "T20",
+        "T22",
+        "T23",
+        "T24",
+        "T15",
+        "T18"
+      ],
+      "patch": [
+        "preflight→acquire→rig/retarget/generate→analyze→solve→prepare/commit→actual readback→quality→export를 recipe DAG로 실행한다.",
+        "원본 branch를 보존하고 app session별 mutation lane 1개를 유지한다.",
+        "immutable 같은 source의 host solve만 병렬화한다.",
+        "candidate 비교는 hard constraints 우선·고정 score/tie break로 하고 실패 때 허용된 보정만 유한 횟수 수행한다.",
+        "시간/iteration/correction/memory/disk budget 종료를 정확한 결과로 기록한다.",
+        "승인된 초기 recipe에 contact detection 정책·key insertion/bake·finite variants를 포함할 수 있다. 범위 내부 단계마다 별도 승인을 강제하지 않는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "실패 stage 뒤 dependent mutation/export가 실행되지 않는다.",
+          "quality fail을 반복해서 무조건 성공으로 바꾸지 않는다.",
+          "기준 source가 다른 candidate 결과가 섞이지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T26",
+      "title": "재시작·취소·checkpoint에서 정확히 이어가기",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/jobs.py",
+        "new workflow runner module",
+        "src/cascadeur_complete/change_flow.py"
+      ],
+      "symbols": [
+        "checkpoint writer",
+        "resume/reconcile",
+        "cancel_requested handling"
+      ],
+      "depends_on": [
+        "T05",
+        "T06",
+        "T07",
+        "T24",
+        "T25"
+      ],
+      "patch": [
+        "checkpoint에 plan/code/profile/source/artifact/receipt hashes와 state_version을 기록한다.",
+        "resume은 검증된 terminal receipt와 유효한 owned lineage에서만 이어간다.",
+        "진행 중 native 요청은 cancel intent와 종료 ack를 구분하고 결과 불명은 재실행하지 않는다.",
+        "취소 후 publish를 막되 이미 terminal publish한 파일을 삭제하지 않는다.",
+        "이미 실행한 비멱등 stage를 새 ID로 재개하지 않는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "key write 후 host crash/bridge crash/late response/취소 경합에서 중복 수정·잘못된 cleanup이 없다.",
+          "checkpoint 변조·code/profile 변경 후 재개는 명시적 replan을 요구한다.",
+          "lease 만료만으로 unknown native 요청을 재발행하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T27",
+      "title": "명시적 FBX profile·native 설정 적용",
+      "priority": "P1",
+      "files": [
+        "cascadeur_side/cascadeur_complete/runtime.py",
+        "cascadeur_side/cascadeur_complete/handlers/io.py",
+        "src/cascadeur_complete/ui_file_flow.py",
+        "src/cascadeur_complete/host_postconditions.py"
+      ],
+      "symbols": [
+        "io.import_fbx",
+        "io.export_fbx",
+        "_file_loader",
+        "ExportProfile"
+      ],
+      "depends_on": [
+        "T09",
+        "T19",
+        "T24"
+      ],
+      "patch": [
+        "파일 take/fps/range/axis/units/skeleton/mesh/root/bake/euler 정책을 profile에 고정한다.",
+        "설치된 native setting getter/setter 및 selected export route를 version profile로 확인한다.",
+        "전체 scene export 대신 대상 계약을 지원하는 경로를 사용한다.",
+        "같은 디렉터리의 job 고유 staging 경로로 export하고 최종 경로를 직접 overwrite하지 않는다.",
+        "이전에 열었던 UI 설정에 의존하지 않도록 실제 applied settings를 기록한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "다른 캐릭터·다른 take·틀린 range/축/단위가 검증을 통과하지 않는다.",
+          "설정 미지원은 조용한 default export가 아니라 unsupported다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "native export API/settings와 실제 파일의 일치"
+      ]
+    },
+    {
+      "id": "T28",
+      "title": "FBX 구조·시간·귀속 검증기",
+      "priority": "P1",
+      "files": [
+        "skills/cascadeur-mocap-cleanup/scripts/fbx_check.py",
+        "new host importable FBX validator if factored"
+      ],
+      "symbols": [
+        "read",
+        "find",
+        "main",
+        "KTIME",
+        "new validate_fbx_contract"
+      ],
+      "depends_on": [
+        "T27"
+      ],
+      "patch": [
+        "기존 CLI를 유지하면서 validator를 host에서 import 가능하도록 책임을 정리한다.",
+        "magic/version/offset/count/array bounds/decompression budgets를 검사하고 empty curve를 안전히 다룬다.",
+        "지원하는 version/TCDefinition에 따른 timebase를 적용하고 unknown 조합은 이유를 반환한다.",
+        "connection graph에서 지정 stack→layer→curve node→target skeleton 귀속을 확인한다.",
+        "일괄 keys_per_curve==N 대신 sparse/baked mode별 시간·증가성·endpoint·finiteness·hierarchy·target contract를 검사한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "legacy46186158000과 opt-in141120000 timebase에서 같은 clip duration을 얻는다.",
+          "빈 curve/잘린 binary/잘못된 offsets/과대 압축 배열에서 bounded failure다.",
+          "애니메이션이 다른 객체/take에만 있는 파일은 통과하지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T29",
+      "title": "목표 소비자에서 최종 모션 비교",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/external.py",
+        "src/cascadeur_complete/host_postconditions.py"
+      ],
+      "symbols": [
+        "verify_blender_fbx",
+        "_SCRIPT",
+        "_check_blender_import"
+      ],
+      "depends_on": [
+        "T21",
+        "T27",
+        "T28"
+      ],
+      "patch": [
+        "subprocess returncode와 schema/report nonce를 검사하고 marker만으로 성공하지 않는다.",
+        "선택한 목표 소비자 하나에서 지정 take·fps·축/단위·skeleton/root와 평가된 joint transforms를 비교한다.",
+        "원래 timeline의 필수 frame과 dense 품질 범위를 재평가하여 export 이전 결과와 오차를 측정한다.",
+        "target plugin/version 부재는 target_quality unverified로 남기고 다른 타깃 검사를 자동으로 추가하지 않는다.",
+        "validate_export_roundtrip을 통해 원본 intent/contact/support drift와 mesh 포함시 실제 imported skinned collision도 검사한다. ExportExpectation에는 원본 보호제약과 실제 postcleanup capture를 각각 보존한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "오류 종료 뒤 남은 marker, action 이름만 있는 빈 animation, 잘못된 root scale을 거부한다.",
+          "export curve/take 시간축 변환으로 생긴 motion error를 검출한다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "해당 Blender 버전/FBX importer 실제 평가"
+      ]
+    },
+    {
+      "id": "T30",
+      "title": "검증 후 파일 공개와 crash 복구",
+      "priority": "P0",
+      "files": [
+        "src/cascadeur_complete/host_postconditions.py",
+        "src/cascadeur_complete/ui_file_flow.py",
+        "src/cascadeur_complete/atomic_queue.py",
+        "new export publisher module"
+      ],
+      "symbols": [
+        "_wait_for_output_file",
+        "new publish_validated_output",
+        "publish journal"
+      ],
+      "depends_on": [
+        "T05",
+        "T26",
+        "T28",
+        "T29"
+      ],
+      "patch": [
+        "stable size/mtime는 writer 안정화 힌트로만 사용하고 의미 검증 후에 publish한다.",
+        "기본은 원자적 no-clobber이며 existing output을 보존한다. 기존 allow_overwrite bool을 새 교체권으로 승격하지 않는다.",
+        "replace_path는 exact path/expiry/overwrite_semantics=replace_any_current_content의 명시 승인에 한정한다. 일반 rename에 hash-CAS 보장이 있다고 주장하지 않으며 조건부 hash 교체가 요구되나 primitive가 없으면 unsupported다.",
+        "검증된 sealed artifact와 final은 별 inode다. 같은 filesystem의 publish temporary로 byte-copy하고 hash를 확인한 다음 OS별 atomic/no-clobber 공개를 수행한다.",
+        "intent→atomic publish→published receipt 순서의 journal과 artifact hash로 중간 crash를 재조정한다.",
+        "실패 시 원래 output을 보존하고 owned staging만 보관/정리한다. scene rollback을 파일 복구로 취급하지 않는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "validation fail/취소/no-clobber 경쟁/공개 실패에서 기존 output bytes가 유지된다. explicit replace_any_current_content는 별 승인 의미대로만 동작한다.",
+          "publish 직후 receipt 전 crash에서 동일 hash를 확인하고 중복 공개하지 않는다.",
+          "교체·no-clobber의 OS contract가 맞게 분리된다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": [
+        "실제 Windows/대상 filesystem atomic publish·locking 동작"
+      ]
+    },
+    {
+      "id": "T31",
+      "title": "실제 코드·fixture·버전에 결합된 증거",
+      "priority": "P1",
+      "files": [
+        "src/cascadeur_complete/product_catalog.py",
+        "src/cascadeur_complete/verification.py",
+        "src/cascadeur_complete/feature_registry.py",
+        "src/cascadeur_complete/adapter_bindings.py"
+      ],
+      "symbols": [
+        "binding_material",
+        "binding_hashes",
+        "LiveEvidenceStore._binding",
+        "_record_is_current",
+        "record",
+        "VersionProfile"
+      ],
+      "depends_on": [
+        "T02",
+        "T21",
+        "T22",
+        "T23",
+        "T29"
+      ],
+      "patch": [
+        "feature별 실제 구현/관련 shared logic/test/fixture bytes와 manifest를 hash한다.",
+        "installed build/adapter settings/quality/export profile·환경을 evidence에 결합한다.",
+        "metadata ID만 같고 코드/fixture 내용이 바뀐 이전 proof를 current로 인정하지 않는다.",
+        "implemented/runtime_available/execution_observed/quality_verified/export_roundtrip_verified를 구분한다.",
+        "관련 없는 기능 변경으로 전체 proof를 자동 재검증하게 하지 않는다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "handler bytes·solver dependency·fixture bytes 변경 시 해당 proof만 무효화된다.",
+          "구 record와 unavailable runtime은 새 quality proof로 승격되지 않는다.",
+          "URL/test 이름 동일성만으로 proof가 유지되지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    },
+    {
+      "id": "T32",
+      "title": "실제 지원 범위와 사용자 workflow 문서",
+      "priority": "P2",
+      "files": [
+        "README.md",
+        "docs/MOCAP_CLEANUP_WORKFLOW.md",
+        "docs/SUPPORT_MATRIX.md",
+        "docs/SUPPORT_STATUS.md",
+        "src/cascadeur_complete/server.py"
+      ],
+      "symbols": [
+        "capabilities_resource",
+        "feature_describe",
+        "workflow result presentation",
+        "cleanup instructions"
+      ],
+      "depends_on": [
+        "T01",
+        "T19",
+        "T24",
+        "T25",
+        "T26",
+        "T30",
+        "T31"
+      ],
+      "patch": [
+        "실제 recipe 예제와 required inputs/finite stop/result states를 문서화한다.",
+        "고정 every_n3/BEZIER·all points·10cm tolerance·자동 style 변경 안내를 새 계약으로 교체한다.",
+        "지원하지 않는 rig/version/settings와 runtime 미확인을 정확히 표시한다.",
+        "계획된 테스트를 통과 기록으로 쓰지 않으며 실행된 특정 fixture/버전/프로필 근거만 노출한다."
+      ],
+      "minimum_checks": {
+        "level": "L1/L2; shared interface changes only may require L3",
+        "cases": [
+          "도구명·입력·상태 enum이 구현 schema와 일치한다.",
+          "지원 숫자와 complete 주장이 실제 evidence 범위를 넘지 않는다."
+        ],
+        "status": "planned_not_run"
+      },
+      "runtime_evidence_required": []
+    }
+  ]
+}
