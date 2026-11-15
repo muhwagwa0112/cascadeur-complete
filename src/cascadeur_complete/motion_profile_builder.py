@@ -1,7 +1,7 @@
 """Turn authenticated native observations into reviewable motion input drafts.
 
 Draft references are local lookup handles, never mutation capabilities. Missing
-SDK metadata remains missing; names are not interpreted as rig authority.
+native rig metadata stays missing; declared conversions are separate policy.
 """
 from __future__ import annotations
 
@@ -9,8 +9,79 @@ from copy import deepcopy
 from dataclasses import asdict
 import secrets
 
+import numpy as np
+from pydantic import Field,StrictFloat,StrictInt,model_validator
+
 from .capture import canonical_data,canonical_digest
 from .motion_context import MotionModel,MotionInputError,MotionContext,RigProfile,IntentConstraints,SupportTrack
+
+
+_Vector3=tuple[StrictFloat,StrictFloat,StrictFloat]
+_CONTEXT_FIELDS=("frames","time_s","time_source","fps_num","fps_den","metres_per_scene_unit",
+                 "scene_to_solver_basis","metadata_provenance")
+
+
+class ExplicitConversionPolicy(MotionModel):
+    """Declared conversion parameters only; no frame, rig or runtime evidence."""
+    fps_num: StrictInt | None = Field(default=None,gt=0)
+    fps_den: StrictInt | None = Field(default=None,gt=0)
+    metres_per_scene_unit: StrictFloat | None = Field(default=None,gt=0)
+    scene_to_solver_basis: tuple[_Vector3,_Vector3,_Vector3] | None = None
+
+    @model_validator(mode="after")
+    def explicit_parameters(self):
+        if (self.fps_num is None)!=(self.fps_den is None):
+            raise ValueError("conversion policy FPS requires an explicit numerator and denominator")
+        if all(getattr(self,name) is None for name in ("fps_num","fps_den","metres_per_scene_unit","scene_to_solver_basis")):
+            raise ValueError("conversion policy must declare at least one missing conversion parameter")
+        return self
+
+
+def _context_missing(context):
+    if not isinstance(context,dict):
+        raise MotionInputError("INCOMPLETE_CAPTURE","observed context must be an object")
+    return ["context."+name for name in _CONTEXT_FIELDS
+            if name not in context or context[name] is None or name=="metadata_provenance" and not context[name]]
+
+
+def _declared_context(observed,policy):
+    """Fill missing conversions without replacing observations or their units."""
+    context=deepcopy(observed)
+    declaration=policy.model_dump(mode="json",exclude_none=True)
+    filled=[]
+    for name,value in declaration.items():
+        if name in context and context[name] is not None:
+            if canonical_data(context[name])!=value:
+                raise MotionInputError("OBSERVED_CONTEXT_CONFLICT",f"conversion policy cannot replace observed {name}")
+        else:
+            context[name]=value
+            filled.append(name)
+    derived=[]
+    # Only rational-FPS timing may be derived. A missing explicitly sampled
+    # time grid cannot be reconstructed from FPS and remains a blocker.
+    numerator,denominator=context.get("fps_num"),context.get("fps_den")
+    frames=np.asarray(context.get("frames",[]))
+    if (type(numerator) is int and type(denominator) is int and min(numerator,denominator)>0
+            and frames.ndim==1 and len(frames) and frames.dtype.kind in "iu"
+            and context.get("time_source") in (None,"fps")):
+        if context.get("time_source") is None:
+            context["time_source"]="fps"
+            derived.append("time_source")
+        if context.get("time_s") is None:
+            context["time_s"]=((frames-frames[0])*denominator/numerator).tolist()
+            derived.append("time_s")
+    provenance={"authority":"explicit_declared_conversion_policy",
+        "parameters":declaration,"filled_fields":sorted(filled),"derived_fields":sorted(derived),
+        "observed_context_fields":sorted(observed),"native_physical_metadata_verified":False}
+    metadata=context.get("metadata_provenance")
+    if metadata is not None and not isinstance(metadata,dict):
+        raise MotionInputError("INVALID_POLICY","observed context metadata provenance must be an object")
+    metadata=deepcopy(metadata or {})
+    if "declared_conversion_policy" in metadata:
+        raise MotionInputError("INVALID_POLICY","native context already contains a declared conversion policy")
+    metadata["declared_conversion_policy"]=provenance
+    context["metadata_provenance"]=metadata
+    return context,provenance
 
 
 class MotionInputDraft(MotionModel):
@@ -79,10 +150,7 @@ class MotionInputResolver:
             if not values.get(field) or not observation["provenance"].get(field):
                 missing.append(field)
         context_values=values.get("context",{})
-        for field in ("time_s","time_source","fps_num","fps_den","metres_per_scene_unit",
-                      "scene_to_solver_basis","metadata_provenance"):
-            if field not in context_values:
-                missing.append("context."+field)
+        missing.extend(_context_missing(context_values))
         for row in values.get("objects",()):
             if row.get("character_id") is None:
                 missing.append("character_ownership:"+str(row.get("id")))
@@ -109,6 +177,13 @@ class MotionInputResolver:
         return draft
 
     def resolve_motion_inputs(self,draft_ref,overrides,intent_policy):
+        """Resolve roles and missing conversion_policy against the same source.
+
+        conversion_policy accepts only fps_num/fps_den, metres_per_scene_unit
+        and scene_to_solver_basis. Rest-local matrices stay in observed native
+        scene coordinates/units; this policy describes their later conversion.
+        Native ownership, root, rest and joint observations cannot be supplied.
+        """
         draft=self._drafts.get(draft_ref)
         if draft is None:
             raise MotionInputError("STALE_MOTION_INPUT_DRAFT","unknown or expired draft")
@@ -117,13 +192,24 @@ class MotionInputResolver:
                 or observation["rig_structure_fingerprint"]!=draft.rig_structure_fingerprint
                 or canonical_digest(observation["values"])!=canonical_digest(draft.values)):
             raise MotionInputError("STALE_MOTION_INPUT_DRAFT","source or input metadata changed after inspection")
-        if set(overrides)-{"roles","reusable_rig_structure_fingerprint"}:
-            raise MotionInputError("INVALID_POLICY","only semantic role choices may override native inputs")
+        if not isinstance(overrides,dict) or set(overrides)-{"roles","reusable_rig_structure_fingerprint","conversion_policy"}:
+            raise MotionInputError("INVALID_POLICY","only semantic roles and an explicit missing conversion policy may override inputs")
         if overrides.get("reusable_rig_structure_fingerprint",draft.rig_structure_fingerprint)!=draft.rig_structure_fingerprint:
             raise MotionInputError("STALE_RIG_PROFILE","reusable profile does not match observed rig structure")
-        if draft.missing_fields:
-            raise MotionInputError("MISSING_MOTION_INPUTS",", ".join(draft.missing_fields))
         values=draft.values
+        context_values=deepcopy(values.get("context",{}))
+        provenance=deepcopy(draft.provenance)
+        missing=list(draft.missing_fields)
+        if "conversion_policy" in overrides:
+            policy=ExplicitConversionPolicy.model_validate(overrides["conversion_policy"])
+            context_values,declaration=_declared_context(context_values,policy)
+            provenance["conversion_policy"]=declaration
+            # A policy can fill conversion fields, never the observed frame
+            # source or a missing native rig/ownership/rest/root/joint field.
+            missing=[field for field in missing if not field.startswith("context.")]
+            missing.extend(_context_missing(context_values))
+        if missing:
+            raise MotionInputError("MISSING_MOTION_INPUTS",", ".join(missing))
         roles={}
         supplied=overrides.get("roles",{})
         if set(supplied)-set(values["role_candidates"]):
@@ -146,7 +232,7 @@ class MotionInputResolver:
         for object_id in selected:
             if any(key not in by_id[object_id] for key in required):
                 raise MotionInputError("MISSING_MOTION_INPUTS",f"unobserved rest/hierarchy/joint metadata: {object_id}")
-        context=MotionContext.from_dict(values["context"])
+        context=MotionContext.from_dict(context_values)
         if (int(context.frames[0]),int(context.frames[-1]))!=tuple(draft.selection["frame_range"]):
             raise MotionInputError("INCOMPLETE_CAPTURE","native context does not cover requested interval")
         profile=RigProfile(profile_id="observed:"+draft.rig_structure_fingerprint,
@@ -155,7 +241,11 @@ class MotionInputResolver:
             derived_ids=frozenset(key for key,row in by_id.items() if row.get("derived") is True),
             dependency_ids=frozenset(by_id)-selected,
             parent_ids={key:row["parent_id"] for key,row in by_id.items() if "parent_id" in row},
-            rest_local_transforms={key:by_id[key]["rest_local_transform"] for key in selected},
+            # Native inverse-bind local matrices are in scene units/basis.
+            # Preserve observed dependency ancestors for global rest composition;
+            # export applies context exactly once after composing the chain.
+            rest_local_transforms={key:row["rest_local_transform"] for key,row in by_id.items()
+                                   if "rest_local_transform" in row},
             joint_axes={role:by_id[key]["joint_axes"] for role,key in roles.items()},
             joint_limits_rad={role:by_id[key]["joint_limits_rad"] for role,key in roles.items()},
             bone_lengths_m=values.get("bone_lengths_m",{}),mesh_ids=tuple(values.get("mesh_ids",())),
@@ -174,5 +264,5 @@ class MotionInputResolver:
         return ResolvedMotionInputs(draft_ref=draft_ref,profile=canonical_data(asdict(profile)),
             context=context.as_dict(),intent=intent.model_dump(mode="json"),
             supports=canonical_data({key:asdict(track) for key,track in supports.items()}),
-            provenance=draft.provenance,source_fingerprint=draft.source_fingerprint,
+            provenance=provenance,source_fingerprint=draft.source_fingerprint,
             rig_structure_fingerprint=draft.rig_structure_fingerprint,observation_digest=digest)

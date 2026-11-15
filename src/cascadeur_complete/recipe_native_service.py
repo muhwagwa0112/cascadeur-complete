@@ -11,7 +11,7 @@ from pathlib import Path
 from .models import Operation, SourceBinding
 from .recipe_models import digest
 from .recipe_store import RecipeConflict, file_sha256
-from .stage_contracts import BootstrapGrant, CheckpointObservation, DerivedTargetMapping, FileManifest, StageEffect
+from .stage_contracts import BootstrapGrant, CheckpointObservation, DerivedTargetMapping, FileManifest, RecipeTargetObservation, StageEffect
 
 
 def _file_bootstrap_supported(capabilities, kind, mode):
@@ -35,6 +35,57 @@ def _assert_file_source(source, manifest, arguments):
 
 
 class RecipeNativeServiceMixin:
+    def recipe_observe_target(self, spec, source):
+        """Authenticate exact target ownership without rewriting source scope.
+
+        Role choices, constraints and physical context remain declarations. The
+        private native observer verifies supported structural facts and refuses
+        unsupported supplied metadata; a caller's observation or flag cannot
+        replace its process-local verification record.
+        """
+        import numpy as np
+        from .capture import enforce_motion_budget, estimate_motion_resources
+        from .motion_context import MotionContext
+
+        source = SourceBinding.model_validate(source)
+        count = spec.clip.last_frame - spec.clip.first_frame + 1
+        estimate = estimate_motion_resources(count, {key: count for key in spec.character.object_ids},
+            retained_capture_bytes=count * len(spec.character.object_ids) * 2048)
+        enforce_motion_budget(estimate, {"max_memory_bytes": spec.budgets.memory_bytes})
+        frames = np.arange(spec.clip.first_frame, spec.clip.last_frame + 1, dtype=np.int64)
+        context = MotionContext(frames, spec.clip.time_origin_s + (frames - frames[0]) * spec.clip.fps_den / spec.clip.fps_num,
+            "explicit" if spec.clip.time_origin_s != 0 else "fps", spec.clip.fps_num, spec.clip.fps_den,
+            spec.clip.metres_per_scene_unit, np.asarray(spec.clip.scene_to_solver_basis),
+            {"recipe_clip_digest": digest(spec.clip)}).as_dict()
+        character = spec.character.model_dump(mode="json", include={
+            "character_id", "root_id", "object_ids", "layer_ids", "role_ids", "rig_profile", "rig_profile_digest",
+            "required_mesh_ids", "optional_mesh_ids"})
+        request = {"source_binding": source.model_dump(mode="json"), "character": character, "context": context}
+        result = self.client.execute("motion_inputs", [Operation(name="system.observe_recipe_target", arguments=request)])
+        if not result.ok:
+            raise RecipeConflict("RECIPE_TARGET_OBSERVATION_UNAVAILABLE: " + str(result.error_message))
+        observation = RecipeTargetObservation.model_validate(result.result)
+        expected = {"request_digest": digest(request), "source_binding_digest": digest(request["source_binding"]),
+            "profile_digest": character["rig_profile_digest"], "target_digest": digest(character),
+            "context_digest": digest(context), "runtime_epoch": source.binding.runtime_epoch,
+            "adapter_fingerprint": source.adapter_fingerprint}
+        if (any(getattr(observation, key) != value for key, value in expected.items())
+                or digest(character["rig_profile"]) != observation.profile_digest
+                or set(observation.object_ids) != set(character["object_ids"])
+                or set(observation.layer_ids) != set(character["layer_ids"])
+                or not set(observation.object_ids) <= set(source.scope.get("object_ids", []))
+                or any(owner != character["character_id"] for owner in observation.ownership.values())):
+            raise RecipeConflict("RECIPE_TARGET_OBSERVATION_MISMATCH")
+        value = observation.model_dump(mode="json")
+        observation_digest = digest(value)
+        verified = self.client.execute("motion_inputs", [Operation(name="system.verify_observation", arguments={
+            "kind": "recipe_target", "observation": value, "digest": observation_digest})])
+        if (not verified.ok or not isinstance(verified.result, dict)
+                or verified.result.get("observation_digest") != observation_digest
+                or verified.result.get("request_digest") != expected["request_digest"]):
+            raise RecipeConflict("RECIPE_TARGET_PROVENANCE_UNVERIFIED")
+        return observation
+
     def recipe_bind_input(self, spec):
         """Bind a file plan to a real current scene and runtime-read file bytes.
 
@@ -90,20 +141,27 @@ class RecipeNativeServiceMixin:
         if source is not None:
             source = SourceBinding.model_validate(source)
             checked = self.validate_source(source)
-            if (not checked.ok or not source.complete or source.binding.scene_instance_id != live.get("scene_id")
-                    or source.binding.runtime_epoch != live.get("runtime_epoch")):
+            source_valid = (checked.ok and source.complete and source.binding.scene_instance_id == live.get("scene_id")
+                            and source.binding.runtime_epoch == live.get("runtime_epoch"))
+            if not source_valid:
                 reasons.append({"code": "SCENE_CHANGED", "detail": checked.error_message})
             if mode == "initial" and source.binding != spec.input.binding:
                 reasons.append({"code": "INITIAL_SOURCE_MISMATCH"})
             if spec.character.derived_target is None and (mode == "continuation" or spec.input.kind == "active_scene"):
                 profile, ownership = source.scope.get("profile", {}), source.scope.get("ownership", {})
-                if (digest(profile) != spec.character.rig_profile_digest
+                if profile or ownership:
+                    if (digest(profile) != spec.character.rig_profile_digest
                         or profile.get("character_id") != spec.character.character_id
                         or profile.get("role_ids") != spec.character.role_ids
                         or any(ownership.get(key) != spec.character.character_id for key in spec.character.object_ids)
                         or not set(spec.character.layer_ids) <= set(source.scope.get("layer_ids", []))):
-                    reasons.append({"code": "RIG_MAPPING_AMBIGUOUS",
-                        "detail": "The live source reader has not attested the exact rig profile, semantic mapping and ownership"})
+                        reasons.append({"code": "RIG_MAPPING_AMBIGUOUS",
+                            "detail": "The authenticated source profile or ownership contradicts the declared exact target"})
+                elif source_valid:
+                    try:
+                        self.recipe_observe_target(spec, source)
+                    except (ValueError, TypeError, KeyError, OSError) as exc:
+                        reasons.append({"code": "RIG_MAPPING_AMBIGUOUS", "detail": str(exc)})
         elif spec.input.kind == "active_scene":
             reasons.append({"code": "SOURCE_BINDING_REQUIRED"})
         verified = set(capabilities.get("operations", []))

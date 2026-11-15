@@ -9101,7 +9101,7 @@
       }
     },
     "resolve_motion_inputs": {
-      "description": "Resolve semantic role choices against the unchanged native input draft.",
+      "description": "Resolve roles and missing explicit conversion_policy (FPS, scale, basis).\n\nNative observations stay unchanged; declarations do not certify physical\nmetadata or supply missing ownership, rest, root or joint evidence.",
       "input_schema": {
         "properties": {
           "draft_ref": {

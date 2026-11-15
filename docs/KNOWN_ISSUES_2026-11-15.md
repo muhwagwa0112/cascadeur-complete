@@ -64,7 +64,28 @@ r4의 16개 항목을 대상으로 source/완료/receipt, 입력 수집, recipe 
 
 필요한 좁은 host 확인만 실행했다. 위 실제 bootstrap/checkpoint 산출물 두 개의 strict parsing과 임시 저장소의 blocked resume/late terminal/cancel/known-postcondition-failure 재현은 exit 0이었다. cleanup은 실제 sparse LINEAR/STEP fitting의 기존 `[0,2,4]` key grid와 canonical source 요청·stale capture/scene 변경 거부를 제한된 service doubles로 확인했다(exit 0). 이 host 재현은 인증된 queue나 전체 실앱 recipe의 성공 증거가 아니다. broad suite/build/CI는 실행하지 않았다.
 
-현재 runtime source가 정확한 profile·semantic mapping·ownership을 함께 발급하지 않아 active scene recipe는 `RIG_MAPPING_AMBIGUOUS`에서 차단된다. 파일 입력은 bootstrap 승인이 가능하지만 현재 adapter의 후속 continuation은 같은 검증에서 차단된다. 임의 profile이나 boolean으로 이를 통과시키지 않았다. 전체 `recipe_authorize → recipe_start → quality → publish`는 여전히 미완료다.
+당시 runtime source에는 profile·ownership 발급 경로가 없어 active scene과 파일 bootstrap 후 continuation이 `RIG_MAPPING_AMBIGUOUS`에서 차단됐다. 아래 후속 구현에서 별도 runtime target 관측을 연결했다. 전체 `recipe_authorize → recipe_start → quality → publish`는 여전히 미완료다.
+
+### runtime target 발급과 명시적 conversion policy 연결 — 11월 16일 후속
+
+원격 개선안 branch를 다시 fetch했으며 최신 문서는 여전히 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`다. r4의 16개 연결과 실제 SDK 증거 범위를 다루는 전체 목표를 유지한다. 이번 변경은 그중 target/profile 경계와 모션 입력·rest 좌표 연결을 구현한 것이며 전체 목표 완료가 아니다.
+
+- `system.observe_recipe_target`을 양쪽 읽기 전용 정책과 실제 native dispatcher에 연결했다. 이미 발급된 현재 source와 target/profile/context의 정확한 digest를 묶고, native RigInfo ownership 또는 현재 프로세스에서 자격 확인된 독립 객체 identity를 읽는다. 실제 layer 소속·Basic 부모·공급된 native inverse-bind rest·mesh 존재/소유권을 확인한다. 임의 identity rest나 현재 pose를 bind evidence로 대체하지 않는다.
+- 관측은 bounded private registry에 보존한다. private verifier는 현재 활성 scene/source와 전체 native projection을 다시 읽는다. caller hash, `complete`, capability flag만으로 발급할 수 없다. profile의 역할명·관절 제약·물리 변환은 명시적 선언이며 native semantic/physical 증명이나 writer 권한으로 승격하지 않는다. 기존 source의 비어 있지 않은 profile/ownership이 충돌하면 새 관측으로 덮어쓰지 않는다.
+- recipe의 plan/authorize/start/continuation 공통 preflight에 이 경로를 연결했다. clip context 할당 전 메모리 예산을 확인한다. source 자체의 scope와 mutation/receipt/authorization 규칙은 보존한다.
+- `resolve_motion_inputs`는 `overrides.conversion_policy`의 FPS numerator/denominator 쌍·길이 scale·proper basis로 누락된 변환만 채운다. 관측값 충돌·stale draft와 누락 ownership/root/rest/joints는 계속 거부한다. provenance는 `native_physical_metadata_verified=False`다. 관측 frame에 FPS timing을 명시했을 때만 time grid를 유도하며 명시적 sample time 누락을 FPS로 대체하지 않는다.
+- builder가 이미 관측한 dependency 조상의 native local rest까지 보존한다. styling은 native local 4×4 rest 회전을 `B R Bᵀ`로 한 번 변환한다. 좌표 미표기 legacy quaternion과 global rotation batch는 명확히 unsupported다. anatomical axis는 기존 canonical rest-relative 계약을 유지하며 native axis 증명으로 해석하지 않는다.
+- native motion-capture verifier가 기존 private `verify_capture`를 호출하도록 고쳤다. 정확한 현재 batch 확인과 함께 실제 `evaluation_receipt_digest`를 반환하므로 host의 기존 평가 receipt 요구를 약화하지 않는다.
+
+최종 bridge fingerprint는 `3ff8c7df77ac3e06b26dec11504facce071c970c9780ca7006d2f3c5ba008dfb`, runtime epoch는 `864bf15b-f40a-4a0c-b6a3-17fc145b07bc`다. 설치된 Cascadeur Pro `2026.2.3.0.16863`의 새 프로세스 PID 37144에서 좁은 independent adapter를 다시 자격 확인했다. 실제 쓰기/readback과 새 파일 저장·복제·후속 checkpoint 증거 SHA-256은 `b10f2144a5048452fc75987bc13b8699aa5750d387418425a546d2b121306d33`이다. complete-scene/interpolation/export adapter를 이 프로세스에 등록한 결과는 아니다.
+
+실제 host `recipe_observe_target` → 인증 queue → native reader → strict host DTO → private verifier가 통과했다. observer 요청 `6845c918-37e0-449c-a00b-1d5fe0000fd2`와 verifier 요청 `7b0fc8bd-6e57-4ef9-bc5c-d823d93ec0a6`은 모두 `effect_class=none`, terminal `succeeded`다. queue drain을 깨우는 데 공식 localhost script server를 사용했으며 native 응답은 double로 대체하지 않았다. 대상은 별도 임시 단일 객체·frame 0이며 48 FPS/cm 변환은 진단용 명시 선언이다. native 물리 메타데이터나 전체 recipe 실행 증거가 아니다.
+
+같은 최종 bridge에서 위조 관측과 native bind 없는 임의 identity rest를 거부했다. 임시 객체에 guarded native 위치 `[0.25,0.5,-0.75]`를 쓴 뒤 readback을 관찰했고, 이전 target의 재검증은 `SCENE_CHANGED`로 거부했다. 이 쓰기는 진단 callback의 guarded SDK 경로이며 위 두 인증 queue 읽기 요청과 구분한다. 확인용 탭을 닫고 원래 빈 scene을 복원했다. local artifact 폴더는 `artifacts/native-r4/isolated-runtime/snapshots/recipe-target-wire-ab417643-ff6c-4afb-a54b-0b881380b93e`이며 `host-observed.json` SHA-256은 `cd58274e6cf22066be77240bd9cce06cdaa1c7c31da4285c8e57d368dc3fbc9b`, `native-boundary.json`은 `d7f91d5322a2e82cf0676540e7c616de5c58f262985be9e08d79f21530be9b25`다. ignored 진단 산출물이며 인증키/queue/state 파일은 Git에 포함하지 않는다.
+
+필요한 host 경계 재현에서 conversion 충돌·누락·stale 거부, target digest/ownership/private issuance 거부와 예산 선차단을 확인했다. 비항등 basis의 styling 직접 수치 재현은 목표 회전 오차 `5.59e-17 rad`와 native 역변환 일치를 보였다. 이는 solver 수치 확인이며 실제 rotation write/quality pass가 아니다. public tool 설명의 golden 항목도 의도한 설명에 맞춘다. broad suite/build/CI는 실행하지 않았다.
+
+남은 문제는 일반 character의 writer qualification, native root/joint/axis/물리 메타데이터, Cascy 첫 저장의 정확한 수치 차이, 실제 실패 후 조건부 복구, 원본 intent에 결합한 consumer quality·최종 게시다. 새 target 발급의 실앱 확인은 독립 객체에 한정되며 Cascy의 supplied rest/mesh target 발급과 full recipe 성공은 아직 확인하지 않았다. 앱 재시작 중 한 번 발생한 `Error syncing with master instance`는 오류 창 종료 후 정상 실행했으며 원인을 확정하거나 제품 수정으로 해결했다고 주장하지 않는다.
 
 ## P0: 남아 있는 실행 제한
 

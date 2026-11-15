@@ -24,7 +24,7 @@ from .handler_registry import dispatch as dispatch_registered
 PROTOCOL_VERSION = "3.0"
 READ_ONLY_OPERATIONS = {
     "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
-    "system.observe_motion_inputs", "system.observe_key_layout", "system.observe_motion_capture",
+    "system.observe_motion_inputs", "system.observe_key_layout", "system.observe_motion_capture", "system.observe_recipe_target",
     "system.status",
     "system.logs",
     "system.view_mode_get",
@@ -1024,6 +1024,9 @@ def _run_operation_legacy(scene, operation, request):
     if name == "system.observe_motion_inputs":
         from .native_adapters import observe_motion_inputs
         return observe_motion_inputs(scene, args), []
+    if name == "system.observe_recipe_target":
+        from .native_adapters import observe_recipe_target
+        return observe_recipe_target(scene, args), []
     if name == "system.observe_key_layout":
         from .native_adapters import observe_key_layout
         return observe_key_layout(scene, args), []

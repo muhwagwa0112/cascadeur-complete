@@ -64,7 +64,11 @@ def inspect_motion_inputs(character_ref: str, frame_range: list[int], support_re
 
 @mcp.tool()
 def resolve_motion_inputs(draft_ref: str, overrides: dict[str, Any], intent_policy: dict[str, Any]) -> dict[str, Any]:
-    """Resolve semantic role choices against the unchanged native input draft."""
+    """Resolve roles and missing explicit conversion_policy (FPS, scale, basis).
+
+    Native observations stay unchanged; declarations do not certify physical
+    metadata or supply missing ownership, rest, root or joint evidence.
+    """
     try:
         return service().resolve_motion_inputs(draft_ref, overrides, intent_policy).model_dump(mode="json")
     except (ValueError, TypeError) as exc:

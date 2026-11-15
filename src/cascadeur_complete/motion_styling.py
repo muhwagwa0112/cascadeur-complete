@@ -31,9 +31,63 @@ def pulse_envelope_seconds(time_s, pulses_s, *, attack_s=.04, release_s=.08):
     return out
 
 
+def _local_rest_rotation(rig, key, role, context):
+    """Read native local rest and express its rotation in the solver basis.
+
+    RigProfile's matrix contract matches native_bind_rest and the export
+    expectation builder: native scene-local 4x4, native translation units.
+    Rotation styling does not use translation or infer a physical length.
+    Bare legacy quaternion dictionaries have no coordinate contract. The
+    explicit native-local legacy form remains readable, without claiming that
+    the declaration itself establishes native bind provenance.
+    """
+    rotations = []
+    for lookup in (key, role):
+        if lookup not in rig.rest_local_transforms:
+            continue
+        value = rig.rest_local_transforms[lookup]
+        if isinstance(value, dict):
+            if (value.get('space') != 'local' or value.get('coordinate_space') != 'cascadeur_scene'
+                    or 'rotation_wxyz' not in value):
+                raise MotionInputError('RIG_REST_COORDINATE_CONVENTION_UNVERIFIED',
+                                       'legacy rest quaternion needs explicit native local coordinates: ' + role)
+            try:
+                q = np.asarray(value['rotation_wxyz'], dtype=float)
+                if (q.shape != (4,) or not np.isfinite(q).all()
+                        or not np.isclose(np.linalg.norm(q), 1., rtol=0, atol=1e-5)):
+                    raise ValueError('nonunit/nonfinite quaternion')
+                native_rotation = Rotation.from_quat(q[[1, 2, 3, 0]]).as_matrix()
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise MotionInputError('RIG_REST_INVALID', 'invalid native local rest quaternion: ' + role) from exc
+        else:
+            try:
+                matrix = np.asarray(value, dtype=float)
+                if (matrix.shape != (4, 4) or not np.isfinite(matrix).all()
+                        or not np.allclose(matrix[3], (0, 0, 0, 1), rtol=0, atol=1e-5)):
+                    raise ValueError('nonfinite/nonaffine matrix')
+                native_rotation = matrix[:3, :3]
+                if (not np.allclose(native_rotation.T @ native_rotation, np.eye(3), rtol=0, atol=1e-5)
+                        or not np.isclose(np.linalg.det(native_rotation), 1., rtol=0, atol=1e-5)):
+                    raise ValueError('nonrigid/reflected rest matrix')
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise MotionInputError('RIG_REST_INVALID', 'invalid native local rest matrix: ' + role) from exc
+        rotations.append(native_rotation)
+    if not rotations:
+        raise MotionInputError('RIG_REST_LOCAL_UNOBSERVED', 'missing observed local rest: ' + role)
+    if any(not np.allclose(rotations[0], rotation, rtol=0, atol=1e-8) for rotation in rotations[1:]):
+        raise MotionInputError('RIG_REST_ALIAS_DISAGREEMENT', 'role and object rest rotations disagree: ' + role)
+    # SampleBatch local quaternions already use this solver basis. Conjugate
+    # native rest once; never conjugate the already canonical captured poses.
+    return Rotation.from_matrix(context.rotations_to_solver(rotations[0]))
+
+
 def style_rotation_targets(batch,rig,intent,kind,parameters):
     if intent.action!="styling":
         return SolverResult("failed",["INTENT_LOCK_VIOLATION"])
+    # The real caller captures local rotations and writes local rotation keys.
+    # Global-pose styling needs an independently captured parent-motion contract.
+    if batch.space != 'local':
+        return SolverResult('unsupported', ['STYLING_LOCAL_ROTATION_REQUIRED'])
     selected=parameters.get("joint_ids") or [key for role,key in rig.role_ids.items()
                 if ("finger" in role.lower() if kind in ("hand_pose","finger_fan") else role.lower().endswith("wrist"))]
     if not selected:
@@ -44,11 +98,10 @@ def style_rotation_targets(batch,rig,intent,kind,parameters):
     for key in selected:
         role=inverse[key]
         q=hemisphere_continuous(batch.rotation_wxyz[key]); original=Rotation.from_quat(q[:,[1,2,3,0]])
-        rest=rig.rest_local_transforms.get(key,rig.rest_local_transforms.get(role,{}))
-        rest_q=rest.get("rotation_wxyz") if isinstance(rest,dict) else None
-        if rest_q is None:
-            return SolverResult("unsupported",["RIG_ADAPTER_UNVERIFIED"],report={"missing_rest_rotation":role})
-        reference=Rotation.from_quat(np.asarray(rest_q)[[1,2,3,0]])
+        try:
+            reference = _local_rest_rotation(rig, key, role, batch.context)
+        except MotionInputError as exc:
+            return SolverResult('unsupported', [exc.code], report={'role': role, 'detail': str(exc)})
         delta=(reference.inv()*original).as_rotvec()
         axis=rig.joint_axes.get(role)
         if isinstance(axis,dict):
@@ -56,6 +109,8 @@ def style_rotation_targets(batch,rig,intent,kind,parameters):
         axis=np.asarray(axis,dtype=float)
         if axis.shape!=(3,) or not np.isfinite(axis).all() or np.linalg.norm(axis)<1e-12:
             return SolverResult("unsupported",["RIG_ADAPTER_UNVERIFIED"],report={"missing_axis":role})
+        # Anatomical flexion/splay axes retain their existing contract: vectors
+        # in the solver-coordinate, rest-relative frame of reference^-1*pose.
         axis=axis/np.linalg.norm(axis)
         twist=delta@axis
         if kind=="wrist_soften":

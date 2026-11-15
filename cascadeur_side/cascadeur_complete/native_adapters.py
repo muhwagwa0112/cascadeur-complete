@@ -427,10 +427,11 @@ def verify_observation(observation, digest, kind):
     if digest != guards.digest(observation) or _OBSERVATIONS.get((kind, digest)) != observation:
         raise ValueError("RIG_ADAPTER_UNVERIFIED: observation not issued by this runtime")
     if kind == "motion_capture":
-        from .native_motion_capture import lookup_capture
-        if lookup_capture(digest) is None:
-            raise ValueError("RIG_ADAPTER_UNVERIFIED: evaluated capture no longer matches the native scene")
-        return {"capture_digest": digest}
+        from .native_motion_capture import verify_capture
+        return verify_capture(observation, digest)
+    if kind == "recipe_target":
+        from .native_recipe_target import verify_recipe_target
+        return verify_recipe_target(observation, digest)
     return {"key_layout_digest" if kind == "key_layout" else "observation_digest": digest}
 
 
@@ -442,6 +443,13 @@ def observe_motion_inputs(scene, arguments):
     key = guards.digest(value)
     # A wire object can only authenticate bytes actually read in this epoch.
     _OBSERVATIONS[("motion_inputs", key)] = json.loads(json.dumps(value, allow_nan=False))
+    return value
+
+
+def observe_recipe_target(scene, arguments):
+    from .native_recipe_target import observe_recipe_target as read_target
+    value = read_target(scene, arguments)
+    _OBSERVATIONS[("recipe_target", guards.digest(value))] = json.loads(json.dumps(value, allow_nan=False))
     return value
 
 

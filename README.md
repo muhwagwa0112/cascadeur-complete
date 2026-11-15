@@ -173,8 +173,12 @@ qualified only for the explicitly observed independent Transform profile;
 general character export and end-to-end quality/publication remain gated.
 
 Motion input discovery reads ordered skin inverse-bind assets as native rest
-evidence where joint mapping and parent closure are complete. Missing physical
-FPS, units, semantic roles and joint constraints still block profile resolution.
+evidence where joint mapping and parent closure are complete. An explicit
+`overrides.conversion_policy` may fill missing rational FPS, length scale and
+proper coordinate basis without replacing observations or certifying native
+physical metadata. Missing ownership, root, rest and joint evidence still blocks
+profile resolution. Observed ancestor rest matrices retain native coordinates;
+rotation styling converts native local rest into the solver basis once.
 Recovery reconciles the original request without replay; native restore requires
 its exact successor scope and an authenticated, bounded original failure.
 Bootstrap and restore open a fresh owned file copy through the complete project
@@ -184,6 +188,12 @@ Recipe capture retains its runtime-issued source and evaluation evidence. Cleanu
 candidates obtain a new exact write scope from the native reader; host sample
 digests are not substituted for the native dependency projection. Resume can
 continue checkpoint verification from the original terminal receipt.
+Recipe preflight can obtain a separate runtime-issued target observation when
+the exact source has no embedded profile/ownership. It rechecks the current
+source, actual ownership, declared layer membership, parents and supplied native
+bind rest; role names and constraints remain explicit declarations. A private
+verifier re-reads that target before accepting it. This observation grants no
+write capability and does not establish complete recipe support.
 
 See [the r4 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
 the limits of checks performed, and the next implementation steps.

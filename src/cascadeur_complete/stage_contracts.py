@@ -34,6 +34,35 @@ class FileManifest(StageModel):
         return self
 
 
+class RecipeTargetObservation(StageModel):
+    """Private runtime evidence for a declared target, never a source grant."""
+    schema_version: Literal[1] = 1
+    kind: Literal["recipe_target"]
+    request_digest: Sha256
+    source_binding_digest: Sha256
+    profile_digest: Sha256
+    target_digest: Sha256
+    context_digest: Sha256
+    runtime_epoch: Identifier
+    adapter_fingerprint: Sha256
+    native_build: Identifier
+    native_projection_digest: Sha256
+    ownership: dict[str, Identifier]
+    object_ids: tuple[Identifier, ...]
+    layer_ids: tuple[Identifier, ...]
+    structural_evidence: dict[str, JsonValue]
+    provenance: dict[str, JsonValue]
+    evidence_ref: Identifier
+
+    @model_validator(mode="after")
+    def exact_observed_target(self):
+        if (not self.object_ids or len(set(self.object_ids)) != len(self.object_ids)
+                or len(set(self.layer_ids)) != len(self.layer_ids)
+                or set(self.ownership) != set(self.object_ids) or not self.provenance):
+            raise ValueError("Recipe target observation needs exact unique IDs and ownership provenance")
+        return self
+
+
 class DerivedTargetRef(StageModel):
     producer_step_id: Identifier
     selector_kind: Literal["role_path"] = "role_path"
