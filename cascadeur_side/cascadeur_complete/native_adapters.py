@@ -223,6 +223,7 @@ def checkpoint(scene, arguments, request, adapter):
     source = request.get("source_binding")
     manager = csc.app.get_application().get_scene_manager()
     target = scene
+    load_observation = None
     if name == "safety.bootstrap":
         # Never save the original document just to obtain a clone. A persisted
         # source is usable only after native reload proves its complete content
@@ -231,12 +232,16 @@ def checkpoint(scene, arguments, request, adapter):
         if (not file_input and not original_path) or not path.is_file():
             raise ValueError("CHECKPOINT_UNAVAILABLE: save the initial document before bootstrap")
         guards.before_write()
-        target = manager.create_application_scene()
+        from .native_project_io import load_project_copy
         with _locked_input(path) as manifest:
             if file_input and (manifest["sha256"] != arguments.get("input_sha256")
                     or manifest["length"] != arguments.get("input_length")):
                 raise ValueError("INPUT_DIGEST_MISMATCH: locked bootstrap bytes changed")
-            csc.app.ProjectLoader.load_from(str(path), target.domain_scene())
+            # ProjectLoader only loads domain data and silently resets scene
+            # FPS/units. Load a fresh owned file through the complete project
+            # API, retaining source bytes and all preexisting tabs.
+            target, load_observation = load_project_copy(path, working,
+                expected_sha256=manifest["sha256"], expected_length=manifest["length"])
             expected_target = reader(target)
             if not file_input and expected_target != original:
                 raise ValueError("CHECKPOINT_UNAVAILABLE: persisted source differs from live source")
@@ -269,6 +274,7 @@ def checkpoint(scene, arguments, request, adapter):
     scope = adapter.required_scope(target, source["scope"])
     successor = guards._capture_with_adapter(target, scope, source["inputs_digest"], None, None, adapter)
     observation = {"schema_version": 1, "completion": "native_observed", "checkpoint": checkpoint_file,
+        "project_load": load_observation,
         "working_file": working_file, "source_before": source, "source_after": successor,
         "parent_scene_instance_id": before["scene_instance_id"], "working_scene_instance_id": identity["scene_instance_id"],
         "document_lineage_id": identity["document_lineage_id"], "authored_digest": successor["binding"]["content_revision"],

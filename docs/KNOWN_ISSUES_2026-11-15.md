@@ -57,6 +57,18 @@ r4의 16개 항목을 대상으로 source/완료/receipt, 입력 수집, recipe 
 
 ## P0: 남아 있는 실행 제한
 
+### 전체 project 로딩에서 발견한 설정 손실
+
+설치 SDK는 `ProjectLoader.load_from`을 domain 데이터만 읽는 minimal load로 설명하고, 추가 데이터를 포함하려면 `DataSourceManager.load_scene`을 사용하라고 명시한다. 기존 bootstrap/restore는 minimal API를 사용했다.
+
+사용자 원본 대신 기존 독립 객체 파일에서 만든 별도 입력의 `scene/scene_settings.json`에 FPS 48과 UnitLength `m`를 명시했다. 실제 앱에서 minimal load 후 저장한 파일은 FPS 30/`cm`로 바뀌었고 `gravity_per_frame()`은 `1.0888888835906982`였다. complete load는 실제 True 반환, 새 소유 placeholder 재사용 및 완료 메시지를 관찰했고 저장 후에도 FPS 48/`m`를 보존했다. 이때 `gravity_per_frame()`은 `0.4253472089767456`이었다. 진단 증거 `artifacts/native-r4/full-project-io-0e3e13c7-3d62-4b7f-bc98-33e86308b857/observed.json`, SHA-256 `cf2fc13ecc27ffc0eec2c0b5070c05f4f21223b44ba30f31fe0056b7115164e3`. 확인용 탭만 닫고 이전 빈 탭을 복원했다.
+
+bootstrap/restore는 이제 잠근 입력 bytes를 새로운 소유 working path에 복사하고 전체 project API로 열도록 연결한다. 기존 탭·원본 입력을 열기 대상으로 쓰지 않으며, 예상하지 못한 탭 전환·완료 부재는 unknown으로 남긴다. 복원 후 전체 projection exact equality도 그대로 요구한다. 이 변경만으로 Cascy의 1 ULP 재로드 차이가 해결됐다고 주장하지 않는다.
+
+새 앱 프로세스에서 repository의 최종 helper를 직접 실행했다. runtime fingerprint `e394531202d3cc6c2a4452650d4d47661944404486b411e19246f0c7accf448f`, epoch `c09edd0b-5db8-437d-b139-e858afef2d72`에서 `DataSourceManager.load_scene`의 동기 True 반환과 대상 `csc.domain.Scene`의 정확한 완료 이벤트를 확인했다. 새 파일 저장 후 archive의 FPS 48/UnitLength `m`/Gravity 980이 유지됐으며 원본 SHA와 기존 탭을 보존했다. 진단 탭은 닫고 이전 빈 탭으로 돌아왔다. 증거 `artifacts/native-r4/isolated-runtime/snapshots/project-copy-check-e9cde440-aacd-4e20-a760-5d3cd9105e19/observed.json`, SHA-256 `978de80cb88662a188152f725cd8b4a6d81f0a336c2cbfbc92803884d751681f`. 이는 helper의 실제 복사→load→save 확인이며 변경된 bootstrap/restore 전체 authorization 경로나 Cascy strict restore의 새 qualification을 의미하지 않는다. 이전 프로세스의 adapter 자격은 승계하지 않았다.
+
+파일 안의 FPS/UnitLength를 읽을 수 있다는 사실은 현재 편집 중인 장면의 live getter를 확보했다는 뜻이 아니다. SettingsHandler의 조회 후보들은 0/빈 문자열을 반환했으며 기본값으로 사용하지 않았다. 또한 [공식 Measurements 문서](https://cascadeur.com/help/category/302)는 내부 Cascadeur 단위와 scene system units를 구분하므로 UnitLength 문자열만으로 좌표 scale을 치환하지 않는다. 입력 context의 물리 시간·단위 인증은 계속 제한된다.
+
 ### 후속 연결: 실제 보간·키 쓰기·animated FBX·소비자
 
 원격 r4 branch는 `6a9338cfb5edeff7b6d6cb1c9a619cffd80c57e4`로 다시 확인했다. 아래의 이전 fingerprint별 관찰은 역사적 결과이며, 현재 작업의 후속 관찰과 구분한다.

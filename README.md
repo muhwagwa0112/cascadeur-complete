@@ -177,6 +177,9 @@ evidence where joint mapping and parent closure are complete. Missing physical
 FPS, units, semantic roles and joint constraints still block profile resolution.
 Recovery reconciles the original request without replay; native restore requires
 its exact successor scope and an authenticated, bounded original failure.
+Bootstrap and restore open a fresh owned file copy through the complete project
+loader so persisted scene settings survive; a domain-only load resets FPS/units.
+This preserves saved metadata without certifying live physical input metadata.
 
 See [the r4 known issues memo](docs/KNOWN_ISSUES_2026-11-15.md) for current blockers,
 the limits of checks performed, and the next implementation steps.

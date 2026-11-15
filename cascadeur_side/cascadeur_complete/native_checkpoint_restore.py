@@ -267,28 +267,24 @@ def _permit(request, arguments):
 
 def _restore_native(scene, anchor, working):
     """The same complete native primitive is used by qualification and dispatch."""
-    from .native_adapters import _WORKSPACES, _locked_input, _save_observed
+    from .native_adapters import _WORKSPACES, _save_observed
+    from .native_project_io import load_project_copy
     original_projection, original_path = read_scene(scene), str(scene.get_path_name())
     before = dict(guards.scene_instance(scene))
     manager = csc.app.get_application().get_scene_manager()
     if manager.current_scene() is not scene or working.exists():
         raise ValueError("RECOVERY_CURRENT_SCENE_OR_TARGET_CHANGED")
-    output = os.open(working, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    os.close(output)
-    target = manager.create_application_scene()
     path = Path(anchor["manifest"]["path"])
     try:
-        with _locked_input(path) as observed:
-            if observed["sha256"] != anchor["manifest"]["sha256"] or observed["length"] != anchor["manifest"]["bytes"]:
-                raise ValueError("SNAPSHOT_BYTES_CHANGED")
-            csc.app.ProjectLoader.load_from(str(path), target.domain_scene())
-            if read_scene(target) != anchor["projection"]:
-                raise ValueError("RECOVERY_NATIVE_READBACK_DIFFERS")
-            saved = _save_observed(target, working)
-            actual_path = str(target.get_path_name())
-            if (read_scene(target) != anchor["projection"] or not actual_path
-                    or Path(actual_path).resolve() != working.resolve()):
-                raise ValueError("RECOVERY_NATIVE_SAVE_READBACK_DIFFERS")
+        target, load_observation = load_project_copy(path, working,
+            expected_sha256=anchor["manifest"]["sha256"], expected_length=anchor["manifest"]["bytes"])
+        if read_scene(target) != anchor["projection"]:
+            raise ValueError("RECOVERY_NATIVE_READBACK_DIFFERS")
+        saved = _save_observed(target, working)
+        actual_path = str(target.get_path_name())
+        if (read_scene(target) != anchor["projection"] or not actual_path
+                or Path(actual_path).resolve() != working.resolve()):
+            raise ValueError("RECOVERY_NATIVE_SAVE_READBACK_DIFFERS")
     finally:
         # Creation/loading may activate the new tab. Keep failed attempts for
         # reconciliation, but restore the source tab even when readback fails.
@@ -303,7 +299,7 @@ def _restore_native(scene, anchor, working):
                           "working_scene_instance_id": after["scene_instance_id"]}
     _WORKSPACES[after["scene_instance_id"]] = successor_manifest
     remember_checkpoint(target, successor_manifest, anchor["projection"], run_id=anchor["run_id"])
-    return target, before, after, saved, guards.digest(original_projection)
+    return target, before, after, saved, guards.digest(original_projection), load_observation
 
 
 def qualify_restore(scene, manifest, *, run_id=None):
@@ -328,7 +324,7 @@ def qualify_restore(scene, manifest, *, run_id=None):
                 or _WORKSPACES.get(guards.scene_instance(scene)["scene_instance_id"]) != manifest):
             raise ValueError("RECOVERY_QUALIFICATION_SOURCE_CHANGED")
     guards.before_write(unchanged)
-    target, before, after, saved, failed_digest = _restore_native(scene, anchor, working)
+    target, before, after, saved, failed_digest, load_observation = _restore_native(scene, anchor, working)
     manager = csc.app.get_application().get_scene_manager()
     try:
         manager.set_current_scene(target)
@@ -343,7 +339,8 @@ def qualify_restore(scene, manifest, *, run_id=None):
         "runtime_fingerprint": guards.LOADED_FINGERPRINT, "runtime_epoch": guards.RUNTIME_EPOCH,
         "dispatch_semantics": "synchronous_no_yield", "completion": "native_observed",
         "snapshot_manifest_digest": guards.digest(manifest), "restored_projection_digest": anchor["projection_digest"],
-        "failed_projection_digest": failed_digest, "scene_before": before, "scene_after": after, "working_file": saved}
+        "failed_projection_digest": failed_digest, "scene_before": before, "scene_after": after,
+        "working_file": saved, "project_load": load_observation}
     _COMPLETED[guards.digest(observation)] = _copy(observation)
     guards.finish_write()
     guards.observe_effect("safety.rollback", "completed", scene_before=before, scene_after=after, detail=observation)
@@ -484,7 +481,7 @@ class NativeCheckpointRestoreAdapter:
         guards.before_write(lambda: self._assert_source(scene, source, arguments))
         target = None
         try:
-            target, before, after, saved, failed_digest = _restore_native(scene, anchor, working)
+            target, before, after, saved, failed_digest, load_observation = _restore_native(scene, anchor, working)
             _RESTORED[after["scene_instance_id"]] = guards.digest(arguments)
             scope = self.required_scope(target, source["scope"])
             successor = guards._capture_with_adapter(target, scope, source["inputs_digest"], anchor["projection_digest"], None, self)
@@ -504,7 +501,7 @@ class NativeCheckpointRestoreAdapter:
             "original_receipt_digest": guards.digest(receipt), "permit_digest": guards.digest(permit),
             "snapshot_manifest_digest": guards.digest(anchor["manifest"]),
             "restored_projection_digest": anchor["projection_digest"], "failed_projection_digest": failed_digest,
-            "scene_before": before, "scene_after": after, "working_file": saved,
+            "scene_before": before, "scene_after": after, "working_file": saved, "project_load": load_observation,
             "source_before_digest": guards.digest(source), "source_after_digest": guards.digest(successor)}
         _COMPLETED[guards.digest(observation)] = _copy(observation)
         self._observed = _copy(observation)
