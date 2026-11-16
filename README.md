@@ -104,6 +104,14 @@ R6 adds these concrete entry points:
   archive. These are **partial observations**, not proof of complete producer,
   descendant, consumer or resource closure. They cannot repair old unknowns.
 
+Observing an authenticated terminal through `BridgeClient.reconcile_request`
+also resumes an interrupted prospective archive from its exact retained prefix.
+This uses existing signed records and original receipt bytes, including after a
+host restart; it creates no producer claim and replays no native operation.
+Archive tampering or I/O failure appears as `PRODUCER_ARCHIVE_UNAVAILABLE` in
+the returned warnings while the independently authenticated native outcome stays
+unchanged. Receipt authentication failures still reject the observation.
+
 The source and frozen installer replace code in place while preserving the
 physical runtime/state/snapshots/logs directories and authenticated state. Code
 rollback and the transaction's own ownership/DACL changes are bounded separately.

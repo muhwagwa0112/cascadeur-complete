@@ -332,8 +332,20 @@ class BridgeClient:
             raise ValueError("Unknown request")
         receipt = self.queue.ledger.read_receipt(request_id)
         if receipt is not None and receipt.phase == "terminal" and receipt.terminal_result is not None:
-            return ResultEnvelope.model_validate(receipt.terminal_result).model_copy(update={
+            result = ResultEnvelope.model_validate(receipt.terminal_result).model_copy(update={
                 "request_id": request_id, "session_id": request["session_id"], "nonce": request["nonce"]})
+            # The native terminal is durable before its auxiliary producer archive.
+            # Resume only those already-authenticated bytes after a host restart;
+            # never claim a producer or dispatch the original operation again.
+            from .producer_observation import reconcile_terminal_if_prospective
+            try:
+                reconcile_terminal_if_prospective(self.paths.root, request_id)
+            except (OSError, ValueError, RuntimeError) as exc:
+                # Archive failure cannot change the independently authenticated
+                # native outcome, but must remain visible to the caller.
+                result = result.model_copy(update={"warnings": [*result.warnings,
+                    f"PRODUCER_ARCHIVE_UNAVAILABLE: {type(exc).__name__}: {exc}"]})
+            return result
         response = self.queue.read_response(request_id, consume=False)
         if response is not None:
             return response

@@ -104,6 +104,66 @@ def test_signed_but_mismatched_terminal_payload_is_rejected(bridge):
         BridgeClient(paths).reconcile_request(request.request_id)
 
 
+def test_terminal_reconciliation_preserves_native_outcome_on_archive_failure(tmp_path, monkeypatch):
+    from cascadeur_complete import producer_observation as producer
+    from cascadeur_complete.request_ledger import canonical_digest
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("terminal observation dispatched native work")
+
+    client = BridgeClient(RuntimePaths.discover(tmp_path), trigger=forbidden)
+    calls = []
+    archive_error = None
+
+    def reconcile(root, request_id):
+        calls.append((root, request_id))
+        if archive_error is not None:
+            raise archive_error
+        return {"kind": "terminal_archive"}
+
+    monkeypatch.setattr(producer, "reconcile_terminal_if_prospective", reconcile)
+    monkeypatch.setattr(client.queue, "submit", forbidden)
+    for outcome, ok in (("succeeded", True), ("outcome_unknown", False)):
+        request = BridgeRequest(request_id=str(uuid.uuid4()), feature_id="retained-terminal",
+            operations=[Operation(name="scene.list")], session_id="original-session",
+            nonce="original-nonce", host_instance_id="original-host", runtime_epoch="original-epoch",
+            created_at=time.time(), expires_at=time.time()+60).model_dump(mode="json")
+        request["mac"] = sign_payload(request, client.queue._secret)
+        client.queue.ledger.create(request)
+        terminal = ResultEnvelope(ok=ok, feature_id=request["feature_id"], execution_mode=ExecutionMode.NATIVE,
+            phase="terminal", outcome=outcome, warnings=["original warning"]).model_dump(mode="json")
+        event = dict(request_id=request["request_id"], request_digest=canonical_digest(request),
+            operation_digest=canonical_digest(request["operations"]), session_id=request["session_id"],
+            runtime_epoch=request["runtime_epoch"], host_instance_id=request["host_instance_id"],
+            phase="terminal", outcome=outcome, seq=1, terminal_result=terminal,
+            result_digest=canonical_digest(terminal), mac="")
+        event["mac"] = sign_payload(event, client.queue._secret)
+        path = client.queue.ledger.directory(request["request_id"]) / "runtime_events/0001-terminal.json"
+        atomic_write_json(path, event)
+        original_bytes = path.read_bytes()
+        expected = ResultEnvelope.model_validate(terminal).model_copy(update={
+            "request_id": request["request_id"], "session_id": request["session_id"], "nonce": request["nonce"]})
+        for archive_error in (None, producer.ObservationUnavailable("tampered archive"), OSError("archive unavailable")):
+            observed = client.reconcile_request(request["request_id"])
+            assert calls[-1] == (client.paths.root, request["request_id"])
+            if archive_error is None:
+                assert observed == expected
+            else:
+                assert observed.warnings[:-1] == expected.warnings
+                assert observed.warnings[-1].startswith("PRODUCER_ARCHIVE_UNAVAILABLE:")
+                assert str(archive_error) in observed.warnings[-1]
+                assert observed.model_copy(update={"warnings": expected.warnings}) == expected
+            assert path.read_bytes() == original_bytes
+        # Receipt authentication fails before auxiliary reconciliation is tried.
+        event["terminal_result"]["ok"] = not ok
+        event["mac"] = sign_payload(event, client.queue._secret)
+        atomic_write_json(path, event)
+        call_count = len(calls)
+        with pytest.raises(QueueAuthenticationError, match="digest"):
+            client.reconcile_request(request["request_id"])
+        assert len(calls) == call_count
+
+
 def test_argument_aware_effect_classification():
     assert classify_effect("animation.transform_get", {"refresh": True}) == "evaluation"
     assert classify_effect("animation.transform_get", {"refresh": False}) == "none"

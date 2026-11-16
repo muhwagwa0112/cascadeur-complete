@@ -7,6 +7,16 @@
 
 ## 이번 변경과 관찰 범위
 
+### 후속 보완: terminal 저장 후 중단된 producer archive 재개
+
+native terminal을 durable 저장한 뒤 producer archive를 기록하기 전 또는 prefix 도중 중단되면, 새 host의 원 요청 조회가 archive를 완성하지 못하던 연결 공백을 수정했다. `BridgeClient.reconcile_request`는 먼저 원 request/terminal을 인증한 뒤 기존 prospective host/claim chain에 한해서 `reconcile_terminal_if_prospective`를 호출한다. 같은 writer lock 아래 정확히 일치하는 연속 raw prefix만 이어 쓰며, 이미 index가 있으면 사라진 prefix를 재생성하지 않는다. 기존 record의 MAC·request/digest·관측 epoch, index의 outcome·원 terminal raw hash를 다시 대조한다. 원 operation 재실행·process 재관측·SDK 호출·새 claim/first-effect 생성은 없다. legacy 두 요청에는 소급 기록하지 않는다.
+
+archive 변조나 파일/lock 실패는 반환 envelope의 `PRODUCER_ARCHIVE_UNAVAILABLE` 경고로 드러내되 독립적으로 인증된 원 native outcome과 원 receipt bytes는 바꾸지 않는다. 원 terminal 자체의 인증 실패는 계속 예외로 거절하며 archive 재개도 시도하지 않는다. 조회 기록은 여전히 `observed_partial_v1`, `closure_authority:none`이고 producer closure를 발급하지 않는다.
+
+필요한 두 한정 재현만 실행했다. 실제 Win32 자기 identity와 임시 signed outbox를 사용하는 `tests/test_r6_producer_installer_boundaries.py::test_prospective_process_records_preserve_actual_terminal_bytes`는 **1 passed in 7.24s**였다. archive prefix 중단 후 별도 Python 프로세스에서 재개·중복 조회하고 변조 prefix/index/epoch 거절과 원 unknown/request/receipt bytes 불변을 확인했다. child의 process/SDK/claim/effect entry point는 trap이며 SDK epoch만 fixture다. 공개 hook의 `tests/test_guarded_protocol.py::test_terminal_reconciliation_preserves_native_outcome_on_archive_failure`는 **1 passed in 0.34s**로, 실제 인증 ledger의 succeeded/unknown 결과 보존·명시적 archive 오류 경고·receipt digest 변조 시 hook 이전 거절을 확인했다. 최초 실행은 새 fixture에 필수 created_at/expires_at 누락으로 실패했고 필드를 추가한 뒤 이 단일 항목만 다시 실행했다. helper는 이 hook 확인에서 명시적 double이다. 실제 앱·운영 store·설치·종료·승인은 실행하지 않았다.
+
+설치 stub의 추가 한정 확인에서도 `csc/app/__init__.pyi:29–55`의 `ActionManager.call_action(str)->None`, `csc/tools/__init__.pyi:119–126`의 `AnimationUnbakingTool.get_interpolation_difference()->float`, `177–187`의 `AutoPosingTool.add/update(Session)->None` 선언만으로는 세 exact action의 인자·원 operation에 결합된 완료 callback을 확정할 수 없었다. 선택 선언의 근거 공백이며 SDK 전체 부재나 native 소유를 뜻하지 않는다. unbaking gate와 실앱 qualification의 미완료 상태는 유지한다.
+
 ### 최신 추가: R6 전체 intake와 실제 제품 경로 통합
 
 `origin/docs/cascadeur-motion-plan-r6`에 새 개선안이 있다. 최신 `d31bdf3210f83fea2964a05d185d9bc976ef04ca`의 **73개 파일, 29,843행 전체**를 읽고 R6-01~07 전체를 새 native goal로 설정했다. 기준 구현은 `7f1565a0ffad1595b9824cba25443bc581997fb6`이다. 원문은 `docs/implementation/cascadeur-motion-r6`에 보관했다. 29개 최종 source의 길이/SHA256/Git blob, aggregate patch의 기준→결과를 모두 대조했다. aggregate patch SHA256은 `3fcb36db838969fec171b69cc84a54c7a026b0064e58e4663a034584c8a25453`이다. 제안 자체에 없는 실제 SDK leaf와 연결 결함은 제품 코드에서 보완했다. 원문의 `product_applied:false`는 제안 작성 당시의 값이다.

@@ -53,6 +53,15 @@ def _safe_path(path):
     return path
 
 
+def _present(path):
+    # Missing is optional; access failures and unsafe aliases are not absence.
+    try:
+        _safe_path(path).lstat()
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def _read(path, maximum=_MAX_DOCUMENT):
     path = _safe_path(path)
     with path.open("rb") as stream:
@@ -285,9 +294,9 @@ def assert_native_first_effect(root, request):
                         native_process=claim[0])
 
 
-def _events(outbox):
+def _events(outbox, *, allow_empty=False):
     paths = sorted((outbox / "runtime_events").glob("*.json"))
-    if not 0 < len(paths) <= _MAX_EVENTS:
+    if len(paths) > _MAX_EVENTS or not paths and not allow_empty:
         _fail("BOUNDED_RUNTIME_EVENT_CHAIN_REQUIRED")
     result, remaining = [], _MAX_DOCUMENT
     for path in paths:
@@ -299,7 +308,7 @@ def _events(outbox):
     return result
 
 
-def _check_events(raw_events, request, secret):
+def _check_events(raw_events, request, secret, *, require_terminal=True):
     from .incident_admission import diagnostic_request
     if not isinstance(raw_events, (list, tuple)) or not 0 < len(raw_events) <= _MAX_EVENTS:
         _fail("BOUNDED_RUNTIME_EVENT_CHAIN_REQUIRED")
@@ -327,13 +336,15 @@ def _check_events(raw_events, request, secret):
             _fail("ORIGINAL_RUNTIME_EVENT_CHAIN_DIFFERS")
         entries.append({"seq": seq, "raw_sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw), "payload_digest": _digest(value)})
         previous = value
-    if previous.get("phase") != "terminal" or not isinstance(previous.get("terminal_result"), dict):
+    if ((require_terminal or previous.get("phase") == "terminal")
+            and (previous.get("phase") != "terminal" or not isinstance(previous.get("terminal_result"), dict))):
         _fail("ACTUAL_TERMINAL_RECEIPT_REQUIRED")
     return entries, previous
 
 
 def _publish_raw(path, raw):
     # Same no-replace, fsync publication primitive as incident_store.publish_new.
+    path = _safe_path(path)
     temporary = path.with_name("." + path.name + "." + uuid.uuid4().hex + ".pending")
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -344,77 +355,146 @@ def _publish_raw(path, raw):
         temporary.unlink(missing_ok=True)
 
 
-def archive_terminal(root, request_id, ordered_event_bytes=None):
-    """Archive an already sealed terminal without calling or reclassifying native work."""
+def _records(directory, request, secret, raw_request):
+    records = {}
+    for name, kind in (("host-dispatch", "host_dispatch"), ("native-claim", "native_claim"),
+                       ("first-effect", "native_first_effect"), ("terminal-index", "terminal_archive")):
+        path = directory / (name + ".json")
+        if _present(path):
+            records[kind] = _load(path, secret, request, kind)
+    host, claim, first, index = (records.get(k) for k in
+        ("host_dispatch", "native_claim", "native_first_effect", "terminal_archive"))
+    if host and host.get("raw_request_sha256") != hashlib.sha256(raw_request).hexdigest():
+        _fail("HOST_DISPATCH_RAW_REQUEST_DIFFERS")
+    if claim:
+        if not host or claim.get("host_dispatch_digest") != _digest(host):
+            _fail("NATIVE_CLAIM_HOST_OBSERVATION_DIFFERS")
+        runtime = claim.get("observed_native_runtime")
+        if (not isinstance(runtime, dict) or set(runtime) != {"runtime_epoch", "loaded_fingerprint"}
+                or not isinstance(runtime["runtime_epoch"], str) or not runtime["runtime_epoch"]
+                or not isinstance(runtime["loaded_fingerprint"], str) or not runtime["loaded_fingerprint"]):
+            _fail("NATIVE_CLAIM_RUNTIME_OBSERVATION_REQUIRED")
+        from .incident_admission import diagnostic_request
+        diagnostic = (request.get("runtime_epoch") is None and request.get("adapter_fingerprint") is None
+            and diagnostic_request(request))
+        if not diagnostic and runtime != {"runtime_epoch": request.get("runtime_epoch"),
+                "loaded_fingerprint": request.get("adapter_fingerprint")}:
+            _fail("NATIVE_CLAIM_RUNTIME_OBSERVATION_DIFFERS")
+    if first and (not claim or first.get("native_claim_digest") != _digest(claim)
+            or first.get("native_process") != claim.get("native_process")):
+        _fail("NATIVE_FIRST_EFFECT_CLAIM_DIFFERS")
+    if index and (not host or not claim or index.get("host_dispatch_digest") != _digest(host)
+            or index.get("native_claim_digest") != _digest(claim)):
+        _fail("TERMINAL_OBSERVATION_CHAIN_DIFFERS")
+    return records
+
+
+def _terminal_facts(actual, request, secret, host, claim):
+    entries, terminal = _check_events(actual, request, secret)
+    if any(store.decode(raw).get("runtime_epoch") != claim["observed_native_runtime"]["runtime_epoch"] for raw in actual):
+        _fail("TERMINAL_NATIVE_OBSERVATION_EPOCH_DIFFERS")
+    return {"host_dispatch_digest": _digest(host), "native_claim_digest": _digest(claim),
+        "events": entries, "terminal_payload_digest": _digest(terminal),
+        "terminal_bytes_sha256": entries[-1]["raw_sha256"], "outcome": terminal["outcome"]}
+
+
+def _check_archive_prefix(directory, actual):
+    paths = sorted(_safe_path(directory / "terminal-archive").glob("*.json"))
+    if len(paths) > len(actual):
+        _fail("RETAINED_RECEIPT_PREFIX_DIFFERS")
+    for seq, (path, raw) in enumerate(zip(paths, actual), 1):
+        if path.name != str(seq).zfill(12) + ".json" or _read(path, len(raw)) != raw:
+            _fail("RETAINED_RECEIPT_BYTES_DIFFER")
+    return len(paths)
+
+
+def _archive_locked(root, request, secret, outbox, raw_request, ordered_event_bytes=None, *, allow_pending=False):
+    directory = _directory(root, request["request_id"])
+    records = _records(directory, request, secret, raw_request)
+    host, claim = (records.get(k) for k in ("host_dispatch", "native_claim"))
+    if not host or not claim:
+        if allow_pending:
+            return None
+        _fail("PROSPECTIVE_HOST_AND_NATIVE_CLAIM_REQUIRED")
+    actual = _events(outbox, allow_empty=allow_pending)
+    if ordered_event_bytes is not None and list(ordered_event_bytes) != actual:
+        _fail("SUPPLIED_RECEIPTS_DIFFER_FROM_ACTUAL_OUTBOX")
+    if not actual:
+        if records.get("terminal_archive") or _check_archive_prefix(directory, actual):
+            _fail("RETAINED_TERMINAL_WITHOUT_ORIGINAL")
+        return None
+    _, last = _check_events(actual, request, secret, require_terminal=not allow_pending)
+    if allow_pending and last.get("phase") != "terminal":
+        if records.get("terminal_archive") or _check_archive_prefix(directory, []):
+            _fail("RETAINED_TERMINAL_WITHOUT_ORIGINAL")
+        return None
+    facts = _terminal_facts(actual, request, secret, host, claim)
+    prefix_length = _check_archive_prefix(directory, actual)
+    index = records.get("terminal_archive")
+    if index:
+        if any(index.get(k) != v for k, v in facts.items()) or prefix_length != len(actual):
+            _fail("RETAINED_TERMINAL_ARCHIVE_DIFFERS")
+        return index
+    for seq, raw in enumerate(actual[prefix_length:], prefix_length + 1):
+        _publish_raw(directory / "terminal-archive" / (str(seq).zfill(12) + ".json"), raw)
+    return _publish(directory / "terminal-index.json", request, secret, "terminal_archive", **facts)
+
+
+def _existing_request(root, request_id):
     rid = str(uuid.UUID(request_id))
     if rid != request_id:
         _fail("CANONICAL_REQUEST_ID_REQUIRED")
     request = store.decode(_read(Path(root) / "state" / "request_records" / rid / "request.json"))
-    root, request, secret, outbox, _ = _request(root, request)
+    if request.get("request_id") != rid:
+        _fail("PRODUCER_REQUEST_DIRECTORY_DIFFERS")
+    return _request(root, request)
+
+
+def archive_terminal(root, request_id, ordered_event_bytes=None):
+    """Archive an already sealed terminal without calling or reclassifying native work."""
+    root, request, secret, outbox, raw_request = _existing_request(root, request_id)
     with _lock(root, request):
-        directory = _directory(root, rid)
-        host = _load(directory / "host-dispatch.json", secret, request, "host_dispatch")
-        claim = _load(directory / "native-claim.json", secret, request, "native_claim")
-        if claim.get("host_dispatch_digest") != _digest(host):
-            _fail("NATIVE_CLAIM_HOST_OBSERVATION_DIFFERS")
-        actual = _events(outbox)
-        if ordered_event_bytes is not None and list(ordered_event_bytes) != actual:
-            _fail("SUPPLIED_RECEIPTS_DIFFER_FROM_ACTUAL_OUTBOX")
-        entries, terminal = _check_events(actual, request, secret)
-        if any(store.decode(raw).get("runtime_epoch") != claim["observed_native_runtime"]["runtime_epoch"] for raw in actual):
-            _fail("TERMINAL_NATIVE_OBSERVATION_EPOCH_DIFFERS")
-        for entry, raw in zip(entries, actual):
-            path = directory / "terminal-archive" / (str(entry["seq"]).zfill(12) + ".json")
-            if path.exists():
-                if _read(path) != raw:
-                    _fail("RETAINED_RECEIPT_BYTES_DIFFER")
-            else:
-                _publish_raw(path, raw)
-        facts = {"host_dispatch_digest": _digest(host), "native_claim_digest": _digest(claim),
-            "events": entries, "terminal_payload_digest": _digest(terminal),
-            "terminal_bytes_sha256": entries[-1]["raw_sha256"], "outcome": terminal["outcome"]}
-        path = directory / "terminal-index.json"
-        if path.exists():
-            value = _load(path, secret, request, "terminal_archive")
-            if any(value.get(k) != v for k, v in facts.items()):
-                _fail("RETAINED_TERMINAL_ARCHIVE_DIFFERS")
-            return value
-        return _publish(path, request, secret, "terminal_archive", **facts)
+        return _archive_locked(root, request, secret, outbox, raw_request, ordered_event_bytes)
+
+
+def reconcile_terminal_if_prospective(root, request_id):
+    """Finish ONLY a preexisting prospective terminal archive, including after restart.
+
+    None means legacy/absent prospective chain or no terminal yet. No dispatch,
+    process query, SDK call, private claim or first-effect record is created.
+    Existing malformed/orphan records and archive prefixes fail visibly.
+    """
+    rid = str(uuid.UUID(request_id))
+    if rid != request_id:
+        _fail("CANONICAL_REQUEST_ID_REQUIRED")
+    if rid in _LEGACY:
+        return None
+    directory = _directory(_safe_path(root), rid)
+    # Avoid creating even a lock for an entirely unobserved old request.
+    if not _present(directory):
+        return None
+    root, request, secret, outbox, raw_request = _existing_request(root, rid)
+    # Validate present records before deciding whether there is enough authority
+    # to take the writer lock; this never creates a missing prospective record.
+    records = _records(directory, request, secret, raw_request)
+    if not records.get("host_dispatch") or not records.get("native_claim"):
+        if _check_archive_prefix(directory, []):
+            _fail("RETAINED_TERMINAL_WITHOUT_PROSPECTIVE_CHAIN")
+        return None
+    with _lock(root, request):
+        return _archive_locked(root, request, secret, outbox, raw_request, allow_pending=True)
 
 
 def read_producer_observation(root, request_id):
     """Observation only. Missing prospective records stay missing, including after restart."""
-    rid = str(uuid.UUID(request_id))
-    if rid != request_id:
-        _fail("CANONICAL_REQUEST_ID_REQUIRED")
-    request = store.decode(_read(Path(root) / "state" / "request_records" / rid / "request.json"))
-    root, request, secret, _, _ = _request(root, request)
-    result = {"scope_kind": "observed_partial_v1", "closure_authority": "none", "records": {}}
-    directory = _directory(root, rid)
-    for name, kind in (("host-dispatch", "host_dispatch"), ("native-claim", "native_claim"),
-                       ("first-effect", "native_first_effect"), ("terminal-index", "terminal_archive")):
-        path = directory / (name + ".json")
-        if path.exists():
-            result["records"][kind] = _load(path, secret, request, kind)
-    index = result["records"].get("terminal_archive")
-    host, claim, first = (result["records"].get(k) for k in ("host_dispatch", "native_claim", "native_first_effect"))
-    if claim and (not host or claim.get("host_dispatch_digest") != _digest(host)):
-        _fail("NATIVE_CLAIM_HOST_OBSERVATION_DIFFERS")
-    if first and (not claim or first.get("native_claim_digest") != _digest(claim)):
-        _fail("NATIVE_FIRST_EFFECT_CLAIM_DIFFERS")
+    root, request, secret, outbox, raw_request = _existing_request(root, request_id)
+    directory = _directory(root, request["request_id"])
+    records = _records(directory, request, secret, raw_request)
+    index = records.get("terminal_archive")
     if index:
-        if (not host or not claim or index.get("host_dispatch_digest") != _digest(host)
-                or index.get("native_claim_digest") != _digest(claim)
-                or not isinstance(index.get("events"), list) or not 0 < len(index["events"]) <= _MAX_EVENTS):
-            _fail("TERMINAL_OBSERVATION_CHAIN_DIFFERS")
-        raw, remaining = [], _MAX_DOCUMENT
-        for row in index["events"]:
-            if remaining <= 0:
-                _fail("RUNTIME_EVENT_ARCHIVE_BUDGET")
-            item = _read(directory / "terminal-archive" / (str(row["seq"]).zfill(12) + ".json"), remaining)
-            raw.append(item)
-            remaining -= len(item)
-        entries, terminal = _check_events(raw, request, secret)
-        if entries != index["events"] or _digest(terminal) != index["terminal_payload_digest"]:
+        actual = _events(outbox)
+        facts = _terminal_facts(actual, request, secret, records["host_dispatch"], records["native_claim"])
+        if (any(index.get(k) != v for k, v in facts.items())
+                or _check_archive_prefix(directory, actual) != len(actual)):
             _fail("RETAINED_TERMINAL_ARCHIVE_DIFFERS")
-    return result
+    return {"scope_kind": "observed_partial_v1", "closure_authority": "none", "records": records}

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 import uuid
 from unittest.mock import patch
@@ -35,15 +36,18 @@ def test_prospective_process_records_preserve_actual_terminal_bytes(tmp_path):
     (outbox / "request.json").write_bytes(raw_request)
     assert producer.record_native_claim_if_prospective(root, request) is None
     assert not (state / "producer-observations").exists()
+    assert producer.reconcile_terminal_if_prospective(root, request["request_id"]) is None
     host = producer.record_host_dispatch(root, request)
     assert host["host_dispatcher"]["pid"] == os.getpid()
     assert len(host["host_dispatcher"]["image"]["file_id"]) == 32
+    assert producer.reconcile_terminal_if_prospective(root, request["request_id"]) is None
     native_runtime = {"runtime_epoch": request["runtime_epoch"], "loaded_fingerprint": request["adapter_fingerprint"]}
     # SDK runtime attestation is outside this reproduction. Process identity is
     # nevertheless obtained by the real query-only Win32 implementation.
     with patch.object(producer, "_native_runtime", return_value=native_runtime):
         claim = producer.record_native_claim(root, request)
         assert producer.record_native_claim(root, request) == claim
+        assert producer.reconcile_terminal_if_prospective(root, request["request_id"]) is None
         assert producer.assert_native_first_effect(root, request)["native_process"] == claim["native_process"]
         producer._CLAIMS.clear()
         with pytest.raises(producer.ObservationUnavailable, match="PRIVATE_PROSPECTIVE"):
@@ -51,23 +55,89 @@ def test_prospective_process_records_preserve_actual_terminal_bytes(tmp_path):
         with pytest.raises(producer.ObservationUnavailable, match="RETROSPECTIVE_OR_REPLAYED"):
             producer.record_native_claim(root, request)
     result = {"ok": False, "outcome": "outcome_unknown"}
-    event = {"seq": 1, "phase": "terminal", "outcome": "outcome_unknown", "request_id": request["request_id"],
+    event = {"seq": 2, "phase": "terminal", "outcome": "outcome_unknown", "request_id": request["request_id"],
         "request_digest": producer._digest(request), "operation_digest": producer._digest(request["operations"]),
         "session_id": request["session_id"], "host_instance_id": request["host_instance_id"],
         "runtime_epoch": request["runtime_epoch"], "terminal_result": result, "result_digest": producer._digest(result)}
     event["mac"] = hmac.new(secret, store.canonical(event), hashlib.sha256).hexdigest()
     # Deliberately noncanonical whitespace verifies that raw bytes are retained.
     raw_event = json.dumps(event, indent=2).encode()
-    (outbox / "runtime_events").mkdir()
-    (outbox / "runtime_events" / "0001-terminal.json").write_bytes(raw_event)
-    index = producer.archive_terminal(root, request["request_id"])
+    claimed = dict(event, seq=1, phase="claimed", outcome=None, terminal_result=None, result_digest=None)
+    claimed.pop("mac")
+    claimed["mac"] = hmac.new(secret, store.canonical(claimed), hashlib.sha256).hexdigest()
+    raw_claimed = store.canonical(claimed)
+    events = outbox / "runtime_events"
+    events.mkdir()
+    (events / "0001-claimed.json").write_bytes(raw_claimed)
+    (events / "0002-terminal.json").write_bytes(raw_event)
+    directory = state / "producer-observations" / request["request_id"]
+    before_chain = {p.name: p.read_bytes() for p in directory.glob("*.json")}
+    publish_raw = producer._publish_raw
+    def crash_after_prefix(path, raw):
+        if path.name == "000000000002.json":
+            raise OSError("fixture crash before second archive receipt")
+        publish_raw(path, raw)
+    with patch.object(producer, "_publish_raw", side_effect=crash_after_prefix):
+        with pytest.raises(OSError, match="fixture crash"):
+            producer.archive_terminal(root, request["request_id"])
+    assert not (directory / "terminal-index.json").exists()
+    prefix = directory / "terminal-archive/000000000001.json"
+    assert prefix.read_bytes() == raw_claimed
+    # A mismatched retained prefix cannot be repaired or silently replaced.
+    prefix.write_bytes(b"tampered")
+    with pytest.raises(producer.ObservationUnavailable, match="RETAINED_RECEIPT"):
+        producer.reconcile_terminal_if_prospective(root, request["request_id"])
+    assert prefix.read_bytes() == b"tampered"
+    prefix.write_bytes(raw_claimed)
+    # A fresh interpreter has no private claims and must never query a process,
+    # SDK, re-enrol a claim or replay a dispatch to finish these durable bytes.
+    child = r'''import json,sys
+sys.path.insert(0,sys.argv[1])
+from cascadeur_complete import producer_observation as p
+def forbidden(*a,**k):
+    raise AssertionError("reconciliation attempted new producer/native work")
+for name in ("capture_current_process_identity","record_host_dispatch","record_native_claim",
+             "assert_native_first_effect","_native_runtime"):
+    setattr(p,name,forbidden)
+assert not p._CLAIMS
+index=p.reconcile_terminal_if_prospective(sys.argv[2],sys.argv[3])
+assert index == p.reconcile_terminal_if_prospective(sys.argv[2],sys.argv[3])
+assert p.read_producer_observation(sys.argv[2],sys.argv[3])["records"]["terminal_archive"] == index
+assert not p._CLAIMS
+print(json.dumps(index))
+'''
+    checked = subprocess.run([sys.executable, "-c", child, str(Path(producer.__file__).parents[1]),
+        str(root), request["request_id"]], capture_output=True, text=True, timeout=30)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    index = json.loads(checked.stdout)
     assert index == producer.archive_terminal(root, request["request_id"])
     observed = producer.read_producer_observation(root, request["request_id"])
     assert observed["closure_authority"] == "none"
+    assert index["outcome"] == "outcome_unknown"
     assert index["terminal_bytes_sha256"] == hashlib.sha256(raw_event).hexdigest()
+    for name, raw in before_chain.items():
+        assert (directory / name).read_bytes() == raw
     assert (outbox / "request.json").read_bytes() == raw_request
-    assert (outbox / "runtime_events" / "0001-terminal.json").read_bytes() == raw_event
+    assert (events / "0001-claimed.json").read_bytes() == raw_claimed
+    assert (events / "0002-terminal.json").read_bytes() == raw_event
     assert not (state / "incidents" / "producer-closures").exists()
+    # Even a MAC-valid index must agree with the actual original terminal facts.
+    index_path = directory / "terminal-index.json"
+    for changes in ({"outcome": "succeeded"}, {"terminal_bytes_sha256": "0"*64}):
+        changed = dict(index, **changes)
+        changed.pop("mac")
+        index_path.write_bytes(store.canonical(store.seal(changed, secret, producer._PURPOSE)))
+        with pytest.raises(producer.ObservationUnavailable, match="RETAINED_TERMINAL_ARCHIVE_DIFFERS"):
+            producer.read_producer_observation(root, request["request_id"])
+    index_path.write_bytes(store.canonical(index))
+    claim_path = directory / "native-claim.json"
+    changed = dict(claim, observed_native_runtime=dict(native_runtime, runtime_epoch=str(uuid.uuid4())))
+    changed.pop("mac")
+    claim_path.write_bytes(store.canonical(store.seal(changed, secret, producer._PURPOSE)))
+    with pytest.raises(producer.ObservationUnavailable, match="NATIVE_CLAIM_RUNTIME_OBSERVATION_DIFFERS"):
+        producer.read_producer_observation(root, request["request_id"])
+    claim_path.write_bytes(before_chain["native-claim.json"])
+    assert producer.reconcile_terminal_if_prospective(root, next(iter(producer._LEGACY))) is None
     # A fresh process/old outbox cannot manufacture a host dispatch retrospectively.
     old = dict(request, request_id=str(uuid.uuid4()), created_at=producer._LOADED_AT-1)
     old.pop("mac")
