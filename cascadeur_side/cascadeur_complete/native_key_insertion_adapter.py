@@ -38,6 +38,7 @@ class NativeKeyInsertionAdapter(NativeSceneAdapter):
         super().__init__(core._freeze({"operations": [OPERATION], "insertion_qualification": proof}))
         self.qualified_capabilities = {}
         self._completed = {}
+        self._failure_records = {}
 
     def _qualified(self):
         proof = core.qualification()
@@ -82,9 +83,19 @@ class NativeKeyInsertionAdapter(NativeSceneAdapter):
         # capture; this never grants a second insertion dispatch.
         if completed is not None:
             record = core._SOURCES.get(completed["private_source_id"])
-            if (record is None or record["state"] != "completed" or record.get("after") != projection
-                    or workspace != completed["scope"]["snapshot_manifest"]):
+            if record is None or workspace != completed["scope"]["snapshot_manifest"]:
                 raise ValueError("SCENE_CHANGED: completed insertion projection no longer exact")
+            if record["state"] in {"prepared", "dispatching"}:
+                # The first-write guard may read the sealed before; it must not
+                # acquire a second execution right from this consumed entry.
+                if projection != record["before"]:
+                    raise ValueError("SCENE_CHANGED: insertion before changed")
+            elif record["state"] == "completed_failure":
+                failure = core.validate_failure_observation(scene, record["bound_request"], record["failure_observation_ref"])
+                if not failure["scope_contained"] or record["after"] != projection:
+                    raise ValueError("KEY_INSERTION_FAILED_AFTER_OUTSIDE_SOURCE_SCOPE")
+            elif record["state"] != "completed" or record.get("after") != projection:
+                raise ValueError("KEY_INSERTION_RECONCILIATION_REQUIRED: consumed unresolved insertion")
             return projection, copy.deepcopy(completed["scope"]), True
         before, driver, additions = core._inspect(scene, args["object_id"], args["layer_id"], args["additions"])
         required = {"operation_name": OPERATION, "operation_arguments": copy.deepcopy(args),
@@ -113,15 +124,97 @@ class NativeKeyInsertionAdapter(NativeSceneAdapter):
         if completed:
             raise ValueError("KEY_INSERTION_SOURCE_CONSUMED: completed insertion cannot be replayed")
         private = core.prepare_insertion(scene, arguments["object_id"], arguments["layer_id"], arguments["additions"])
+        key = (guards.scene_instance(scene)["scene_instance_id"], guards.digest(arguments))
+        # Consume before entering native code, for success, known failure and
+        # unknown alike. Read/capture rights never recreate dispatch rights.
+        self._completed[key] = {"scope": copy.deepcopy(scope), "private_source_id": private["source_id"]}
+        core._SOURCES[private["source_id"]]["bound_request"] = request
         from .native_key_insertion_evidence import bind_execution
         bind_execution(scene, arguments, request, private)
-        result = core.insert_positions(scene, private, before_write=lambda: guards.assert_source(
-            scene, source, operation_name=OPERATION, arguments=arguments))
-        key = (guards.scene_instance(scene)["scene_instance_id"], guards.digest(arguments))
-        self._completed[key] = {"scope": copy.deepcopy(scope), "private_source_id": private["source_id"]}
+        try:
+            result = core.insert_positions(scene, private, before_write=lambda: guards.assert_source(
+                scene, source, operation_name=OPERATION, arguments=arguments))
+        except Exception:
+            record = core._SOURCES[private["source_id"]]
+            ref = record.get("failure_observation_ref")
+            if record["state"] == "completed_failure" and isinstance(ref, str):
+                try:
+                    base = core.validate_failure_observation(scene, request, ref)
+                    failure = copy.deepcopy(base)
+                    post = self.capture_known_failed_after(scene, request, ref) if base["scope_contained"] else None
+                    failure["post_source_digest"] = None if post is None else guards.digest(post)
+                    evidence = core._failure_lifetime_contract()
+                    if (post is not None and failure["completion"] == "completed"
+                            and evidence.get("recovery_contract") == "independent_insertion_exact_snapshot_scope_v1"):
+                        failure["recovery_contract_digest"] = guards.digest({"evidence": evidence,
+                            "post_source_digest": guards.digest(post), "scope": source["scope"]})
+                    self._failure_records[ref] = {"bytes": core._freeze(failure), "core_bytes": core._freeze(base),
+                        "post_source": copy.deepcopy(post), "request": request, "source_id": private["source_id"]}
+                    guards.bind_failure_observation(guards.current_adapter_attempt(), ref)
+                    if failure["recovery_contract_digest"] is not None:
+                        self.verification["recovery_after_partial_write_observed"] = {
+                            "runtime_fingerprint": guards.LOADED_FINGERPRINT, "installed_build": self.observed_build(),
+                            "known_effect_classes": ["scene"], "evidence_sha256": guards.digest(failure),
+                            "request_digest": guards.digest(request), "post_source_digest": guards.digest(post),
+                            "contract": "independent_insertion_exact_snapshot_scope_v1"}
+                except Exception as observation_error:
+                    record["failure_binding_error"] = str(observation_error)[:2000]
+            raise
         result["observed_postconditions"] = ["key_topology_inserted"]
         result["recipe_topology_authorization"] = "not_issued"
         return result, []
+
+    def capture_known_failed_after(self, scene, request, record_ref):
+        failure = core.validate_failure_observation(scene, request, record_ref)
+        if not failure["scope_contained"]:
+            raise ValueError("KEY_INSERTION_FAILED_AFTER_OUTSIDE_SOURCE_SCOPE")
+        original = request["source_binding"]
+        post = guards.capture_source(scene, original["scope"], original["inputs_digest"],
+            selection_digest=original["binding"].get("selection_digest"))
+        if post["sample_digest"] != failure["actual_after_digest"]:
+            raise ValueError("KEY_INSERTION_FAILED_AFTER_CHANGED")
+        return post
+
+    def failure_observation_revoked(self, record_ref):
+        entry = self._failure_records.get(record_ref)
+        if entry is None:
+            return True
+        source = core._SOURCES.get(entry["source_id"])
+        base = json.loads(entry["core_bytes"])
+        return (source is None or source["state"] != "completed_failure"
+            or source["trace"] != base["native_transaction"]
+            or base["adapter_callback_generation"] != core._CALLBACK_GENERATION)
+
+    def validate_failure_observation(self, scene, request, record_ref):
+        entry = self._failure_records.get(record_ref)
+        if entry is None or entry["request"] is not request or self.failure_observation_revoked(record_ref):
+            raise ValueError("KEY_INSERTION_FAILURE_OBSERVATION_UNAVAILABLE")
+        base = core.validate_failure_observation(scene, request, record_ref)
+        if core._freeze(base) != entry["core_bytes"]:
+            raise ValueError("KEY_INSERTION_FAILURE_OBSERVATION_CHANGED")
+        failure = json.loads(entry["bytes"])
+        post = entry["post_source"]
+        if post is not None:
+            guards.assert_source(scene, post, operation_name=OPERATION, arguments=request["operations"][0]["arguments"])
+            if guards.digest(post) != failure["post_source_digest"] or post["sample_digest"] != failure["actual_after_digest"]:
+                raise ValueError("KEY_INSERTION_FAILED_AFTER_CHANGED")
+        elif failure["post_source_digest"] is not None or failure["scope_contained"]:
+            raise ValueError("KEY_INSERTION_FAILED_AFTER_SOURCE_UNAVAILABLE")
+        return failure
+
+    def prepare_recovery_binding(self, scene, request, result):
+        selected = guards.selected_effect_for_request(request, scene)
+        private = (selected or {}).get("private_failure_observation") or {}
+        failure = self.validate_failure_observation(scene, request, private.get("reference"))
+        post = (result.get("result") or {}).get("post_source_binding")
+        attestation = self.verification.get("recovery_after_partial_write_observed") or {}
+        if (failure["completion"] != "completed" or failure["recovery_contract_digest"] is None
+                or private.get("digest") != guards.digest(failure) or attestation.get("evidence_sha256") != guards.digest(failure)
+                or attestation.get("request_digest") != guards.digest(request)
+                or guards.digest(post) != failure["post_source_digest"]
+                or (result.get("result") or {}).get("failed_after_observation") != selected):
+            raise ValueError("KEY_INSERTION_RECOVERY_ATTESTATION_UNAVAILABLE")
+        return super().prepare_recovery_binding(scene, request, result)
 
 
 def register_key_insertion_adapter():

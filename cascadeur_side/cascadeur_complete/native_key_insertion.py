@@ -21,6 +21,11 @@ _CALLBACK_GENERATION = 0
 _SOURCES = {}
 _RUNS = {}
 _PROBE_SCENE = None
+# Successful insertion trials do not issue a failure-lifetime contract. Only
+# an actual code-owned failure qualification may populate this private record;
+# no public API accepts one from a caller or promotes a successful return.
+_FAILURE_LIFETIME_BYTES = None
+_FAILURE_OBSERVATIONS = {}
 
 
 def _freeze(value):
@@ -195,6 +200,92 @@ def predict_insertion(before, driver, additions):
     return authored, expected
 
 
+def _failure_lifetime_contract():
+    if not isinstance(_FAILURE_LIFETIME_BYTES, bytes):
+        raise ValueError("KEY_INSERTION_FAILURE_LIFETIME_UNQUALIFIED")
+    evidence = json.loads(_FAILURE_LIFETIME_BYTES)
+    proof = qualification()
+    if (proof is None or evidence.get("contract") != "independent_insert_failure_closed_lifetime_v1"
+            or evidence.get("runtime_epoch") != guards.RUNTIME_EPOCH
+            or evidence.get("runtime_fingerprint") != guards.LOADED_FINGERPRINT
+            or evidence.get("native_build") != SUPPORTED_BUILD
+            or evidence.get("callback_generation") != _CALLBACK_GENERATION
+            or evidence.get("insertion_qualification_digest") != guards.digest(proof)):
+        raise ValueError("KEY_INSERTION_FAILURE_LIFETIME_STALE")
+    return evidence
+
+
+def _failure_scope_contained(before, after):
+    """No new scene/object/layer/data identity may escape the captured closure."""
+    return (before.get("frames") == after.get("frames")
+        and all([row.get("id") for row in before.get(key, [])]
+                == [row.get("id") for row in after.get(key, [])] for key in ("objects", "layers", "data")))
+
+
+def _observe_completed_failure(scene, source, record, expected, error):
+    evidence = _failure_lifetime_contract()
+    request = record.get("bound_request")
+    trace = record["trace"]
+    additions = source["additions"]
+    frames = [row["frame"] for row in additions]
+    after = record.get("after")
+    if (not isinstance(request, dict) or _PROBE_SCENE is scene or after is None
+            or not trace["native_returned"] or not trace["native_true"] or trace["active"]
+            or not trace["callback_completed"] or trace["attempts"] != 1 or trace["unbounded"]
+            or trace["sections_started"] != frames or trace["sections_returned"] != frames
+            or trace["values_started"] != frames or trace["values_returned"] != frames
+            or source["callback_generation"] != _CALLBACK_GENERATION
+            or source["scene_identity"] != guards.scene_instance(scene)):
+        raise ValueError("KEY_INSERTION_FAILURE_COMPLETION_UNBOUNDED")
+    from . import runtime as rt
+    if rt._scene_view() is not scene or record["scene"] is not scene:
+        raise ValueError("KEY_INSERTION_FAILURE_SCENE_CHANGED")
+    attempt = guards.adapter_attempt_identity(guards.current_adapter_attempt())
+    ref = uuid.uuid4().hex
+    contained = _failure_scope_contained(record["before"], after)
+    completion = "no_effect" if after == record["before"] else "completed"
+    detail = {"source_id": source["source_id"], "failure_observation_ref": ref,
+        "native_transaction": copy.deepcopy(trace), "actual_after_digest": guards.digest(after),
+        "expected_projection_digest": guards.digest(expected), "scope_contained": contained}
+    observation = {"operation_name": "motion.key_topology_insert", "completion": completion,
+        "scene_before": dict(source["scene_identity"]), "scene_after": dict(guards.scene_instance(scene)), "detail": detail}
+    failure = {**attempt, "contract": "completed_native_failure_v1", "completion": completion,
+        "postcondition": "mismatched", "scene_after": dict(guards.scene_instance(scene)),
+        "before_projection_digest": guards.digest(record["before"]), "expected_projection_digest": guards.digest(expected),
+        "actual_after_digest": guards.digest(after), "actual_effect_scope_digest": guards.digest({
+            "object_ids": [row["id"] for row in after["objects"]], "layer_ids": [row["id"] for row in after["layers"]],
+            "data_ids": [row["id"] for row in after["data"]], "scope_contained": contained}),
+        "native_contract_evidence_digest": guards.digest(evidence), "native_transaction": copy.deepcopy(trace),
+        "adapter_callback_generation": _CALLBACK_GENERATION, "post_source_digest": None,
+        "recovery_contract_digest": None, "scope_contained": contained,
+        "primary_error": {"type": type(error).__name__, "message": str(error)[:12000]}, "effect_observation": observation}
+    _FAILURE_OBSERVATIONS[ref] = {"bytes": _freeze(failure), "source_id": source["source_id"], "request": request}
+    record.update(state="completed_failure", failure_observation_ref=ref)
+    return observation
+
+
+def validate_failure_observation(scene, request, record_ref):
+    entry = _FAILURE_OBSERVATIONS.get(record_ref)
+    if entry is None or entry["request"] is not request:
+        raise ValueError("KEY_INSERTION_FAILURE_OBSERVATION_UNAVAILABLE")
+    record = _SOURCES.get(entry["source_id"])
+    failure = json.loads(entry["bytes"])
+    evidence = _failure_lifetime_contract()
+    from . import runtime as rt
+    from .native_scene_reader import read_scene
+    if (record is None or record["state"] != "completed_failure" or record["scene"] is not scene
+            or record.get("failure_observation_ref") != record_ref
+            or record["trace"] != failure["native_transaction"] or record["trace"]["unbounded"]
+            or failure["adapter_callback_generation"] != _CALLBACK_GENERATION
+            or failure["request_digest"] != guards.digest(request)
+            or failure["native_contract_evidence_digest"] != guards.digest(evidence)
+            or failure["scene_after"] != guards.scene_instance(scene) or rt._scene_view() is not scene
+            or record["after"] != read_scene(scene)
+            or guards.digest(record["after"]) != failure["actual_after_digest"]):
+        raise ValueError("KEY_INSERTION_FAILURE_OBSERVATION_CHANGED")
+    return failure
+
+
 def insert_positions(scene, source, *, before_write=None):
     """Insert only absent keys using the same primitive exercised by the probe.
 
@@ -219,6 +310,7 @@ def insert_positions(scene, source, *, before_write=None):
     if _PROBE_SCENE is not scene and qualification() is None:
         raise ValueError("KEY_INSERTION_UNQUALIFIED")
     authored, expected = predict_insertion(before, driver, additions)
+    record["expected"] = copy.deepcopy(expected)
     domain = rt._domain_scene(scene)
     data_id = csc.model.DataId(driver["position_closure"]["data_ids"]["local_position"])
     layer_id = rt._guid(source["layer_id"])
@@ -248,6 +340,8 @@ def insert_positions(scene, source, *, before_write=None):
             if record.get("run_id") in _RUNS:
                 _RUNS[record["run_id"]].update(status="unknown", phase="late_callback_rejected")
             if observed_effect[0] is not None: observed_effect[0]["completion"] = "unknown"
+            if record.get("bound_request") is not None:
+                guards.revoke_adapter_observation(record["bound_request"], "KEY_INSERTION_LATE_CALLBACK")
             raise RuntimeError("NATIVE_COMPLETION_UNKNOWN: late, replayed or cross-thread insertion callback")
         try:
             guards.before_write(guard)
@@ -278,6 +372,7 @@ def insert_positions(scene, source, *, before_write=None):
         if not trace["native_true"] or not trace["callback_completed"] or trace["attempts"] != 1 or trace["unbounded"]:
             raise RuntimeError("NATIVE_COMPLETION_UNKNOWN: exactly one synchronous successful insertion callback required")
         after = read_scene(scene)
+        record["after"] = copy.deepcopy(after)
         if after != expected or rt._scene_view() is not scene:
             raise ValueError(_scope_failure(before, expected, after, operation="motion.key_topology_insert",
                 space="local", data_id=str(data_id), callbacks=[], active_scene=rt._scene_view() is scene))
@@ -293,10 +388,26 @@ def insert_positions(scene, source, *, before_write=None):
         record.update(state="completed", result=result, after=after)
         return copy.deepcopy(result)
     except Exception as exc:
-        record.update(state="unknown", error=str(exc)[:2048])
-        observed_effect[0] = guards.observe_effect("motion.key_topology_insert", "unknown", scene_before=identity,
-            scene_after=dict(guards.scene_instance(scene)), detail={"source_id": source["source_id"],
-                "native_transaction": copy.deepcopy(trace), "reason": str(exc)[:2048], "retry": "forbidden"})
+        # Keep a complete observed after even when it differs from prediction.
+        # The lifetime verifier, not the returned modify/phase, decides whether
+        # that after can become a known failed execution.
+        record["error"] = str(exc)[:12000]
+        try:
+            if record.get("failure_observation_ref") is not None:
+                failure = validate_failure_observation(scene, record["bound_request"], record["failure_observation_ref"])
+                item = failure["effect_observation"]
+            else:
+                item = _observe_completed_failure(scene, source, record, expected, exc)
+            observed_effect[0] = guards.observe_effect(item["operation_name"], item["completion"],
+                scene_before=item["scene_before"], scene_after=item["scene_after"], detail=item["detail"])
+        except Exception as observation_error:
+            record.update(state="unknown", failure_completion_blocker=str(observation_error)[:2000])
+            observed_effect[0] = guards.observe_effect("motion.key_topology_insert", "unknown", scene_before=identity,
+                scene_after=None, detail={"source_id": source["source_id"],
+                    "native_transaction": copy.deepcopy(trace), "reason": str(exc)[:2048],
+                    "failure_completion_blocker": str(observation_error)[:2000],
+                    "actual_after_digest": None if record.get("after") is None else guards.digest(record["after"]),
+                    "retry": "forbidden"})
         raise
 
 

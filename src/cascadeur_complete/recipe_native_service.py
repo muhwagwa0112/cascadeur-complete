@@ -77,6 +77,19 @@ def _assert_export_source(source, spec):
 
 
 class RecipeNativeServiceMixin:
+    def get_geometry_capture(self, capture_id):
+        import uuid
+        if not isinstance(capture_id, str) or str(uuid.UUID(capture_id)) != capture_id:
+            raise RecipeConflict("GEOMETRY_UUID_INVALID")
+        return self.client.execute("transform_get", [Operation(name="system.get_geometry_capture",
+            arguments={"capture_id": capture_id})])
+
+    def verify_geometry_capture(self, manifest, geometry_digest):
+        if not isinstance(manifest, dict) or digest(manifest) != geometry_digest:
+            raise RecipeConflict("GEOMETRY_MANIFEST_DIGEST_DIFFERS")
+        return self.client.execute("transform_get", [Operation(name="system.verify_observation", arguments={
+            "observation": manifest, "digest": geometry_digest, "kind": "geometry_capture"})])
+
     def recipe_observe_target(self, spec, source):
         """Authenticate exact target ownership without rewriting source scope.
 
@@ -219,6 +232,23 @@ class RecipeNativeServiceMixin:
         elif spec.input.kind == "active_scene":
             reasons.append({"code": "SOURCE_BINDING_REQUIRED"})
         verified = set(capabilities.get("operations", []))
+        if spec.motion.mode == "native_unbaking":
+            from .unbaking_contract import require_unbaking_step
+            try:
+                require_unbaking_step(self, spec.motion.unbaking_step)
+            except ValueError as exc:
+                reasons.append({"code": "UNBAKING_STEP_UNQUALIFIED", "detail": str(exc)})
+        if spec.geometry_capture is not None:
+            if not capabilities.get("geometry_capture"):
+                reasons.append({"code": "GEOMETRY_CALCULATION_CONTRACT_UNQUALIFIED"})
+            captures = sum(step.stage == "geometry_capture" for step in steps)
+            calculations = (spec.clip.last_frame-spec.clip.first_frame+1)*len(spec.geometry_capture.mesh_ids)
+            if (calculations > spec.geometry_capture.max_calculations
+                    or captures*calculations > spec.budgets.geometry_calculations
+                    or captures*spec.geometry_capture.max_artifact_bytes > spec.budgets.disk_bytes):
+                reasons.append({"code": "GEOMETRY_CAPTURE_RESOURCE_BUDGET_EXCEEDED"})
+        elif spec.character.required_mesh_ids or spec.character.rig_profile.get("mesh_ids") or spec.references.geometry:
+            reasons.append({"code": "GEOMETRY_CAPTURE_POLICY_REQUIRED"})
         for step in steps:
             if (step.effect in {"evaluation", "scene_mutation", "file_stage"} and not step.not_required_reason
                     and step.operation_name not in verified):
@@ -497,7 +527,9 @@ class RecipeNativeServiceMixin:
             args = {"checkpoint_path": path, "working_path": working}
             outputs = [path, working]
         elif stage in {"evaluation", "insertion_evaluation"}:
-            args = {} if stage == "insertion_evaluation" else dict(step.fixed_parameters)
+            # cleanup_index selects a host observation; it is not a native
+            # evaluation argument. The installed adapter accepts exact {}.
+            args = {}
         elif stage == "rig":
             if spec.rig.mode == "template":
                 args = {"path": spec.rig.template.path}
@@ -547,6 +579,10 @@ class RecipeNativeServiceMixin:
                 raise RecipeConflict("MOTION_STAGE_UNSUPPORTED")
         elif stage in {"correction", "key_insert"}:
             args = context["candidate"]["arguments"]
+        elif stage == "geometry_capture":
+            from .geometry_contract import GeometryCaptureArguments
+            args = GeometryCaptureArguments.model_validate(context["geometry_arguments"]).model_dump(mode="json")
+            outputs = [str(self.paths.state / "geometry" / args["capture_id"])]
         elif stage == "export_stage":
             export = context["export_stage"]
             # This strict profile is consumed only by a registered export adapter;
@@ -568,7 +604,7 @@ class RecipeNativeServiceMixin:
         return StageEffect(step_id=step.step_id, declaration_digest=step.fixed_parameters_digest,
             lowering_rule_id=step.lowering_rule_id, lowering_rule_digest=step.lowering_rule_digest,
             feature_id=step.feature_id, operation_name=step.operation_name,
-            effect_class="mixed" if stage in {"checkpoint", "initial_checkpoint"} else "file" if stage == "export_stage" else "evaluation" if stage in {"evaluation", "insertion_evaluation"} else "scene",
+            effect_class="mixed" if stage in {"checkpoint", "initial_checkpoint"} else "file" if stage in {"export_stage", "geometry_capture"} else "evaluation" if stage in {"evaluation", "insertion_evaluation"} else "scene",
             arguments=args, arguments_digest=digest(args), operation_digest=digest([{"name": step.operation_name, "arguments": args}]),
             effect_bounds_digest=digest(step.max_effect_from_baseline),
             source_binding=source, input_files=tuple(inputs), output_paths=tuple(outputs), target_object_ids=ids,

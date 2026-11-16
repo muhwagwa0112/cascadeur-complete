@@ -64,6 +64,8 @@ def ensure_independent_models():
     checking the current loaded package, build and epoch. A fresh process still
     performs the experiment; callers cannot supply proof bytes or model IDs.
     """
+    from .incident_admission import assert_setup_admission
+    assert_setup_admission("setup.qualify_independent_models")
     from . import guarded_runtime as guards
     value = qualification()
     if value is None:
@@ -71,7 +73,7 @@ def ensure_independent_models():
     return {"qualified_models": list(value["qualified_models"]),
             "qualification_digest": guards.digest(value),
             "native_build": value["native_build"], "runtime_epoch": value["runtime_epoch"],
-            "trial_count": len(value["trials"]), "reused": True}
+            "trial_count": len(value["trials"]), "reused": True, "retention": value.get("retention")}
 
 
 def qualified_export_metadata(bv, dv, behaviour, object_id):
@@ -195,28 +197,41 @@ def _prediction(keys, modes, count):
 def qualify_independent_models():
     """Run an explicit 5-frame native experiment; no caller proof can invoke it."""
     global _QUALIFICATION_BYTES
+    from .incident_admission import assert_setup_admission
+    assert_setup_admission("setup.qualify_independent_models")
     import csc
     import numpy as np
     from . import guarded_runtime as guards
     from . import runtime as rt
     from .native_adapters import installed_build
-    from .native_fixture import create_disposable_scene, create_independent_transform, set_independent_keys, release_disposable_scene
+    from .native_fixture import create_disposable_scene, create_independent_transform, set_independent_keys
+    from .native_probe_retention import RetainedProbe, retained_probe_result
     from .native_key_layout import LINEAR_MODEL, STEP_MODEL, PIECEWISE_MODEL
     from .native_scene_reader import read_scene
     guards.assert_loaded_package()
     if installed_build() != SUPPORTED_BUILD:
         raise ValueError("UNSUPPORTED_VERSION: finite interpolation qualification requires " + SUPPORTED_BUILD)
+    prior = retained_probe_result("finite_models")
+    if prior is not None:
+        if qualification() is None:
+            raise ValueError("FINITE_MODEL_UNQUALIFIED: private native proof is unavailable")
+        return prior
     previous = csc.app.get_application().get_scene_manager().current_scene()
     if previous is not None and rt._domain_scene(previous).model_viewer().get_objects():
         raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE: populated scenes are not scanned or edited")
+    retained = RetainedProbe("finite_models")
+    qualification_error = None
     scene = None
     programs = [(["LINEAR","LINEAR"], LINEAR_MODEL), (["STEP","STEP"], STEP_MODEL),
                 (["LINEAR","STEP"], PIECEWISE_MODEL), (["STEP","LINEAR"], PIECEWISE_MODEL)]
     trials = []
     metadata = None
     try:
-        scene = create_disposable_scene()
+        retained.before_new_tab()
+        scene = create_disposable_scene(retain_on_failure=True)
+        retained.track(scene, "fixture")
         baseline = [(0,[0.,0.,0.]), (2,[2.,1.,0.]), (4,[0.,2.,1.])]
+        retained.before_effect()
         fixture = create_independent_transform(scene, "MCPInterpolationQualification", baseline, programs[0][0])
         domain = rt._domain_scene(scene)
         obj = next(iter(domain.model_viewer().get_objects()))
@@ -228,12 +243,15 @@ def qualify_independent_models():
         if not parent.is_null():
             raise ValueError("FIXTURE_DEPENDENCY_UNQUALIFIED: official fixture has a parent")
         metadata = _metadata(bv, dv, bv.get_behaviour_by_name(obj, "FbxExport"), fixture["object_id"])
+        retained.save_fixture(scene, "fixture-before.casc", read_scene)
         for modes, model in programs:
             base_actual = None
             for perturb in [None] + [(key,axis) for key in range(3) for axis in range(3)]:
                 keys = [(frame,list(position)) for frame,position in baseline]
                 if perturb is not None: keys[perturb[0]][1][perturb[1]] += .25
+                retained.before_effect()
                 fixture = set_independent_keys(scene, fixture["object_id"], keys, modes)
+                retained.before_effect()
                 actual = evaluate_independent_transform(scene, fixture)
                 expected = np.asarray(_prediction(keys,modes,5))
                 residual = max(float(np.max(np.abs(np.asarray(rows)-expected))) for rows in actual["positions"].values())
@@ -255,15 +273,22 @@ def qualify_independent_models():
                 trials.append({"model":model,"segment_modes":modes,"keys":keys,"perturbation":perturb,
                     "actual":actual,"max_absolute_error_scene_units":residual,
                     "max_influence_error_scene_units":delta_residual,"projection_digest":guards.digest(projection)})
+        retained.save_fixture(scene, "fixture-after.casc", read_scene)
         evidence = {"schema_version":1,"native_build":installed_build(),"runtime_fingerprint":guards.LOADED_FINGERPRINT,
             "runtime_epoch":guards.RUNTIME_EPOCH,"reader_contract":"native_independent_position_v1",
             "qualified_models":[LINEAR_MODEL,STEP_MODEL,PIECEWISE_MODEL],"export_metadata_contract":metadata,
             "domain":{"channel":"position","spaces":["local","global"],"parent":None,
                       "controllers":False,"cycles":False,"additive":False,"key_id_kind":"layer_frame_locator",
                       "observation_frames":[0,1,2,3,4],"observation_keys":[0,2,4]},"trials":trials}
+    except Exception as error:
+        qualification_error = error
+        raise
     finally:
-        if scene is not None: release_disposable_scene(scene)
-    # Publish only after every native readback and disposable cleanup succeeded.
+        retention = retained.finish(qualification_error)
+    # Preserve the existing model proof rules; tab destruction is not evidence.
+    retained.before_effect()
+    evidence["retention"] = retention
     _QUALIFICATION_BYTES = json.dumps(evidence,sort_keys=True,separators=(",",":"),ensure_ascii=False,allow_nan=False).encode()
-    return {"qualified_models":qualified_models(),"qualification_digest":guards.digest(evidence),
-            "native_build":evidence["native_build"],"runtime_epoch":guards.RUNTIME_EPOCH,"trial_count":len(trials)}
+    return retained.complete({"qualified_models":qualified_models(),"qualification_digest":guards.digest(evidence),
+            "native_build":evidence["native_build"],"runtime_epoch":guards.RUNTIME_EPOCH,"trial_count":len(trials),
+            "retention":retention})

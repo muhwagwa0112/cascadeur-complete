@@ -1,0 +1,9 @@
+{
+  "base_commit": "fc0e98eaa30e819f98880a32dce30c6767a5cc64",
+  "patch": "01-runtime-error-observation-payload.patch",
+  "source_path": "cascadeur_side/cascadeur_complete/runtime.py",
+  "base_sha256": "0010268dff8e685354cf2be4de8210ceac0c09c3f622a0676e6ed45e005a92bc",
+  "proposed_sha256": "1eaad5b7d8950f235ff3b28b9e4d0aa912cc57c1e2d80bb72e56696ac177002a",
+  "applied_to_product": false,
+  "checks": "Pinned-context git apply --check and proposed-runtime Python 3.11 AST passed; no product/native execution"
+}

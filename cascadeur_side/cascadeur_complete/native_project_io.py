@@ -87,7 +87,7 @@ def _same_inventory(actual, expected):
     return len(actual) == len(expected) and all(any(item is wanted for item in actual) for wanted in expected)
 
 
-def _copy_locked(source, working, expected_sha256, expected_length, observation):
+def _copy_locked(source, working, expected_sha256, expected_length, observation, before_effect):
     """Copy the same locked stream that _locked_input hashed, never reopen it."""
     from .native_adapters import _locked_input
     lock = _locked_input(source)
@@ -97,8 +97,10 @@ def _copy_locked(source, working, expected_sha256, expected_length, observation)
                 or expected_sha256 is not None and manifest["sha256"] != expected_sha256
                 or expected_length is not None and manifest["length"] != expected_length):
             raise ValueError("PROJECT_COPY_INPUT_DIGEST_MISMATCH")
+        before_effect()
         working.parent.mkdir(parents=True, exist_ok=True)
         _no_alias(working)
+        before_effect()
         descriptor = os.open(working, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o600)
         observation["working_file_created"] = True
         digest, length = hashlib.sha256(), 0
@@ -124,7 +126,7 @@ def _copy_locked(source, working, expected_sha256, expected_length, observation)
             observation["working_file"] = dict(copied)
 
 
-def load_project_copy(source_path, working_path, expected_sha256=None, expected_length=None):
+def load_project_copy(source_path, working_path, expected_sha256=None, expected_length=None, *, source_guard=None):
     """Return (owned target, JSON observation) only for synchronous reuse.
 
     The caller must run its source guard immediately before invoking this
@@ -138,6 +140,13 @@ def load_project_copy(source_path, working_path, expected_sha256=None, expected_
     from . import guarded_runtime as guards
     from . import runtime as rt
     from .native_adapters import _locked_input
+    from .incident_admission import assert_request_admission
+
+    if not callable(source_guard):
+        raise ValueError("PROJECT_COPY_PRIVATE_SOURCE_GUARD_REQUIRED")
+    def before_effect():
+        assert_request_admission()
+        source_guard()
 
     guards.assert_loaded_package()
     if expected_sha256 is not None and (not isinstance(expected_sha256, str)
@@ -165,14 +174,16 @@ def load_project_copy(source_path, working_path, expected_sha256=None, expected_
         "native_completion": "not_started", "source_path": str(source), "working_path": str(working),
         "working_file_created": False, "scene_count_before": len(original), "events": []}
     try:
-        _copy_locked(source, working, expected_sha256, expected_length, observation)
+        _copy_locked(source, working, expected_sha256, expected_length, observation, before_effect)
         if (manager.current_scene() is not previous or not _same_inventory(_scenes(manager), original)
                 or [str(scene.get_path_name()) for scene in original] != original_paths):
             raise ValueError("PROJECT_COPY_ORIGINAL_TABS_CHANGED")
+        before_effect()
         target = manager.create_application_scene()
         if target is None or any(target is scene for scene in original):
             raise ValueError("NATIVE_COMPLETION_UNKNOWN: loader placeholder is not a fresh scene")
         observation["owned_placeholder_created"] = True
+        before_effect()
         manager.set_current_scene(target)
         domain = rt._domain_scene(target)
         if (manager.current_scene() is not target or str(target.get_path_name())
@@ -208,6 +219,7 @@ def load_project_copy(source_path, working_path, expected_sha256=None, expected_
             try:
                 active[0] = True
                 observation["native_completion"] = "unknown"
+                before_effect()
                 result = data_sources.load_scene(str(working))
                 observation["synchronous_return"] = result is True
             finally:
@@ -240,6 +252,7 @@ def load_project_copy(source_path, working_path, expected_sha256=None, expected_
             observation["scene_count_after"] = len(inventory)
             observation["original_tabs_present"] = all(any(item is scene for item in inventory) for scene in original)
             if any(item is previous for item in inventory):
+                before_effect()
                 manager.set_current_scene(previous)
             observation["original_current_restored"] = manager.current_scene() is previous
         except Exception as restore_error:

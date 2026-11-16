@@ -21,18 +21,23 @@ def bridge_manifest(root: Path) -> dict:
     return {"schema_version": 1, "files": files, "fingerprint": digest(files)}
 
 
-def expected_bridge_fingerprint() -> str | None:
+def expected_bridge_manifest() -> dict | None:
     package_root = Path(__file__).resolve().parents[2]
     source = package_root / "cascadeur_side" / "cascadeur_complete"
     if source.is_dir():
-        return bridge_manifest(source)["fingerprint"]
+        return bridge_manifest(source)
     manifest_path = (Path(sys.executable).parent if getattr(sys, "frozen", False) else package_root) / "bridge-package.json"
     if not manifest_path.is_file():
         return None
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("schema_version") != 1 or manifest.get("fingerprint") != digest(manifest.get("files", {})):
         raise ValueError("Installed bridge package manifest differs")
-    return manifest["fingerprint"]
+    return manifest
+
+
+def expected_bridge_fingerprint() -> str | None:
+    manifest = expected_bridge_manifest()
+    return manifest["fingerprint"] if manifest else None
 
 
 def main():

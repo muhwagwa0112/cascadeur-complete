@@ -37,6 +37,7 @@ def validate_usage(plan: WorkflowPlan, usage: BudgetUsage, deadline: float) -> N
         "solve_iterations": limits.solve_iterations, "correction_passes": limits.max_correction_passes,
         "generated_keys": limits.generated_keys, "written_keys": limits.written_keys,
         "memory_bytes": limits.memory_bytes, "disk_bytes": limits.disk_bytes, "output_bytes": limits.output_bytes,
+        "geometry_calculations": limits.geometry_calculations,
     }.items():
         if getattr(usage, name) > cap:
             raise RecipeConflict(f"RESOURCE_BUDGET_EXCEEDED: {name}")
@@ -99,6 +100,10 @@ def validate_step_authorization(
                 if (path.parent.parent != destination.parent or not path.parent.name.startswith(f".cascadeur-export-{run.run_id}-{step.step_id}-")
                         or path.name not in {"raw.fbx", "sealed.fbx"}):
                     raise RecipeConflict("LOWERED_OUTPUT_ESCAPES_EXPORT_STAGE")
+            elif policy == "geometry_capture":
+                expected = store.paths.state / "geometry" / arguments.get("capture_id", "")
+                if path != expected.resolve() or stage_effect.output_paths != (str(expected),):
+                    raise RecipeConflict("LOWERED_OUTPUT_ESCAPES_GEOMETRY_CAPTURE")
             elif output not in step.max_effect_from_baseline.output_paths:
                 raise RecipeConflict("LOWERED_OUTPUT_NOT_AUTHORIZED")
     if step.effect in {"evaluation", "scene_mutation", "file_stage"} and step.stage != "initial_checkpoint":
@@ -107,6 +112,22 @@ def validate_step_authorization(
         expected_lineage = step.target.lineage_id
         if expected_lineage is not None and source.binding.document_lineage_id != expected_lineage:
             raise RecipeConflict("Target document lineage differs from the authorized plan")
+    if step.stage == "geometry_capture":
+        import uuid
+        from .geometry_contract import GeometryCaptureArguments
+        value = GeometryCaptureArguments.model_validate(arguments)
+        declared = plan.spec.geometry_capture
+        if (declared is None or stage_effect is None or source is None
+                or value.capture_id != str(uuid.uuid5(uuid.UUID(run.run_id), step.step_id))
+                or any(arguments[key] != expected for key, expected in declared.model_dump(mode="json").items())
+                or step.fixed_parameters.get("policy") != declared.model_dump(mode="json")
+                or source.scope.get("operation_name") != step.operation_name
+                or source.scope.get("operation_arguments") != arguments
+                or source.scope.get("operation_arguments_digest") != digest(arguments)
+                or stage_effect.effect_class != "file" or step.allowed_channels != ("file",)
+                or set(value.mesh_ids) != set(step.target.object_ids)):
+            raise RecipeConflict("GEOMETRY_CAPTURE_AUTHORIZATION_MISMATCH")
+        return
     if step.stage == "motion" and plan.spec.motion.mode == "native_unbaking":
         from .unbaking_contract import UnbakingTopologyPolicy, unbaking_topology_policy
         motion = plan.spec.motion

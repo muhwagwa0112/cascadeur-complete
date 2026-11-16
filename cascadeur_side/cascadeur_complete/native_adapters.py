@@ -196,6 +196,13 @@ def _save_observed(scene, path):
 
 def checkpoint(scene, arguments, request, adapter):
     from . import runtime as rt
+    def current_admission():
+        from .incident_admission import assert_request_admission, assert_current_setup_admission
+        assert_request_admission()
+        if not request.get("request_id"):
+            # Qualification's local sub-operation cannot escape the privately
+            # admitted explicit setup step by manufacturing a wire request.
+            assert_current_setup_admission()
     name = request["operations"][0]["name"]
     reader = getattr(adapter, "read_scene", read_scene)
     file_input = name == "safety.bootstrap" and arguments.get("input_kind", "active_scene") == "casc_file"
@@ -219,6 +226,9 @@ def checkpoint(scene, arguments, request, adapter):
     original = reader(scene)
     expected_target = original
     original_path = str(scene.get_path_name())
+    def original_unchanged():
+        if reader(scene) != original or str(scene.get_path_name()) != original_path:
+            raise ValueError("CHECKPOINT_ORIGINAL_SOURCE_CHANGED")
     before = dict(guards.scene_instance(scene))
     source = request.get("source_binding")
     manager = csc.app.get_application().get_scene_manager()
@@ -241,7 +251,7 @@ def checkpoint(scene, arguments, request, adapter):
             # FPS/units. Load a fresh owned file through the complete project
             # API, retaining source bytes and all preexisting tabs.
             target, load_observation = load_project_copy(path, working,
-                expected_sha256=manifest["sha256"], expected_length=manifest["length"])
+                expected_sha256=manifest["sha256"], expected_length=manifest["length"], source_guard=original_unchanged)
             expected_target = reader(target)
             if not file_input and expected_target != original:
                 raise ValueError("CHECKPOINT_UNAVAILABLE: persisted source differs from live source")
@@ -252,12 +262,27 @@ def checkpoint(scene, arguments, request, adapter):
         if before["scene_instance_id"] not in _WORKSPACES:
             raise ValueError("CHECKPOINT_UNAVAILABLE: current scene is not an owned working instance")
         guards.before_write()
+    current_admission()
     backup.parent.mkdir(parents=True, exist_ok=True)
+    current_admission()
     working.parent.mkdir(parents=True, exist_ok=True)
+    from .native_scene_adapter import NativeSceneAdapter
+    serialization_anchor = None
+    if isinstance(adapter, NativeSceneAdapter):
+        from .native_serialization import pin_reference, compare_with_private_policy
+        serialization_anchor = pin_reference(target)
+    current_admission()
     checkpoint_file = _save_observed(target, backup)
+    checkpoint_observation = (compare_with_private_policy(target, serialization_anchor, phase="checkpoint_save")
+                              if serialization_anchor is not None else None)
+    current_admission()
     working_file = _save_observed(target, working)
+    working_observation = (compare_with_private_policy(target, serialization_anchor, phase="working_save")
+                           if serialization_anchor is not None else None)
     saved_projection = reader(target)
-    if saved_projection != expected_target or (target is not scene and (reader(scene) != original or str(scene.get_path_name()) != original_path)):
+    if ((serialization_anchor is None and saved_projection != expected_target)
+            or (working_observation is not None and saved_projection != working_observation.projection)
+            or (target is not scene and (reader(scene) != original or str(scene.get_path_name()) != original_path))):
         raise ValueError("NATIVE_COMPLETION_UNKNOWN: clone or source changed during checkpoint")
     identity = dict(guards.scene_instance(target))
     snapshot = {"schema_version": 1, "snapshot_id": str(uuid.uuid4()), "path": str(backup),
@@ -266,11 +291,25 @@ def checkpoint(scene, arguments, request, adapter):
         "document_lineage_id": identity["document_lineage_id"], "runtime_epoch": guards.RUNTIME_EPOCH,
         "adapter_fingerprint": guards.LOADED_FINGERPRINT, "native_completion": "observed",
         "authored_projection_digest": guards.digest(saved_projection)}
+    if serialization_anchor is not None:
+        fixed = {"reference_projection_digest": serialization_anchor.reference_projection_digest,
+            "checkpoint_observed_projection_digest": guards.digest(checkpoint_observation.projection),
+            "checkpoint_file": checkpoint_file,
+            "serialization_policy_digest": checkpoint_observation.as_dict()["serialization_policy_digest"],
+            "runtime_epoch": guards.RUNTIME_EPOCH, "adapter_fingerprint": guards.LOADED_FINGERPRINT}
+        snapshot.update(schema_version=2, checkpoint_anchor_digest=guards.digest(fixed),
+            reference_projection_digest=fixed["reference_projection_digest"],
+            checkpoint_observed_projection_digest=fixed["checkpoint_observed_projection_digest"],
+            working_projection_digest=guards.digest(saved_projection), working_file_sha256=working_file["sha256"],
+            working_file_bytes=working_file["length"], serialization_policy_digest=fixed["serialization_policy_digest"],
+            serialization_observation_digest=guards.digest(working_observation.as_dict()))
     _WORKSPACES[identity["scene_instance_id"]] = snapshot
-    from .native_scene_adapter import NativeSceneAdapter
     if isinstance(adapter, NativeSceneAdapter):
         from .native_checkpoint_restore import remember_checkpoint
-        remember_checkpoint(target, snapshot, saved_projection, run_id=run_id)
+        remember_checkpoint(target, snapshot, saved_projection, run_id=run_id,
+            immutable_anchor=serialization_anchor, checkpoint_projection=checkpoint_observation.projection,
+            checkpoint_observation=checkpoint_observation.as_dict(),
+            serialization_observation=working_observation.as_dict())
     scope = adapter.required_scope(target, source["scope"])
     successor = guards._capture_with_adapter(target, scope, source["inputs_digest"], None, None, adapter)
     observation = {"schema_version": 1, "completion": "native_observed", "checkpoint": checkpoint_file,
@@ -319,88 +358,124 @@ class _locked_input:
 
 
 def qualify_disposable(*, include_scene_adapter=False):
-    """Explicit native setup action; never reachable as an unguarded wire op."""
+    """Explicit native setup; retain the owned fixture and checkpoint tabs."""
     global _ERROR
+    from .incident_admission import assert_setup_admission
+    assert_setup_admission("setup.qualify_native_adapter")
+    from .native_probe_retention import RetainedProbe, retained_probe_result
+    if include_scene_adapter:
+        raise ValueError("BROAD_SCENE_QUALIFICATION_UNSUPPORTED: requires a separately admitted lifecycle")
     guards.assert_loaded_package()
     ensure_installed()
     if installed_build() != SUPPORTED_BUILD:
         raise ValueError("Unsupported native SDK build")
-    import pycsc
-    from . import runtime as rt
-    manager = csc.app.get_application().get_scene_manager()
-    previous = manager.current_scene()
-    if include_scene_adapter and previous is not None and rt._domain_scene(previous).model_viewer().get_objects():
-        raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE")
-    disposable = manager.create_application_scene()
-    try:
-        manager.set_current_scene(disposable)
-        pycsc.wrap(disposable.domain_scene()).create_object("MCP adapter qualification")
-        original = read_scene(disposable)
-        object_id = original["objects"][0]["id"]
-        request = {"operations": [{"name": "animation.transform_set", "arguments": {
-            "ids": [object_id], "position": [1.25, 2.5, -0.75], "space": "local", "frame": 0}}]}
-        guards.begin_request(request)
-        guards.set_write_guard(lambda: read_scene(disposable) == original or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
-        adapter = TransformAdapter({})
-        adapter.execute(disposable, request["operations"][0]["arguments"], request)
-        after = read_scene(disposable)
-        if original == after or guards.effect_observations()[0]["completion"] != "completed":
-            raise ValueError("Native qualification did not observe changed data")
-        observed_id = dict(guards.scene_instance(disposable))
-        if observed_id != guards.scene_instance(disposable):
-            raise ValueError("Scene identity is unstable")
-        # Observe the source-preserving save/load path using the same executor.
-        folder = rt.runtime_root() / "snapshots" / ("qualification-" + str(uuid.uuid4()))
-        folder.mkdir(parents=True)
-        source_file = _save_observed(disposable, folder / "source.casc")
-        args = {"checkpoint_path": str(folder / "backup.casc"), "working_path": str(folder / "working.casc"),
-                "input_kind": "active_scene"}
-        scope = adapter.required_scope(disposable, {"operation_name": "safety.bootstrap", "operation_arguments": args})
-        source = guards._capture_with_adapter(disposable, scope, guards.digest({"qualification": True}), None, None, adapter)
-        bootstrap_request = {"operations": [{"name": "safety.bootstrap", "arguments": args}], "source_binding": source}
-        guards.begin_request(bootstrap_request)
-        guards.set_write_guard(lambda: read_scene(disposable) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
-        checkpoint_result, _ = checkpoint(disposable, args, bootstrap_request, adapter)
-        successor_scene = manager.current_scene()
-        next_args = {"checkpoint_path": str(folder / "next-backup.casc"),
-                     "working_path": str(folder / "next-working.casc")}
-        next_scope = adapter.required_scope(successor_scene, {"operation_name": "safety.checkpoint", "operation_arguments": next_args})
-        next_source = guards._capture_with_adapter(successor_scene, next_scope, source["inputs_digest"], None, None, adapter)
-        next_request = {"operations": [{"name": "safety.checkpoint", "arguments": next_args}], "source_binding": next_source}
-        guards.begin_request(next_request)
-        guards.set_write_guard(lambda: read_scene(successor_scene) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
-        repeated_checkpoint, _ = checkpoint(successor_scene, next_args, next_request, adapter)
-        evidence = {"build": installed_build(), "runtime_fingerprint": guards.LOADED_FINGERPRINT,
-            "sdk": "csc.model.DataEditor.set_data_value/Scene.modify_update",
-            "before": original, "after": after, "effect": guards.effect_observations(),
-            "identity": observed_id, "source_file": source_file,
-            "checkpoint": checkpoint_result, "successor_checkpoint": repeated_checkpoint,
-            "operations": ["animation.transform_set", "safety.bootstrap", "safety.checkpoint"]}
+    result = retained_probe_result("native_adapter")
+    if result is not None:
+        operations = ("animation.transform_set", "safety.bootstrap", "safety.checkpoint")
+        registered = [guards._ADAPTERS.get(name) for name in operations]
+        adapter = registered[0]
+        if (type(adapter) is not TransformAdapter
+                or any(value is not adapter for value in registered)
+                or adapter.verification.get("evidence_sha256") != result.get("evidence_sha256")):
+            raise ValueError("NATIVE_QUALIFICATION_REPLACED: inspect current qualified operations; no probe repeated")
+        # Revalidate the same private registered instance with the existing
+        # evidence/build/loaded-byte checks. Do not replace a broader adapter.
+        for name in operations:
+            guards.register_adapter(name, adapter)
+    if result is None:
+        import pycsc
+        from . import runtime as rt
+        retained = RetainedProbe("native_adapter")
+        manager = retained.manager
+        local_before = dict(vars(guards._LOCAL))
+        qualification_error = None
+        try:
+            retained.before_new_tab()
+            disposable = manager.create_application_scene()
+            retained.track(disposable, "fixture")
+            retained.before_effect()
+            manager.set_current_scene(disposable)
+            retained.before_effect()
+            pycsc.wrap(disposable.domain_scene()).create_object("MCP adapter qualification")
+            original = read_scene(disposable)
+            object_id = original["objects"][0]["id"]
+            request = {"operations": [{"name": "animation.transform_set", "arguments": {
+                "ids": [object_id], "position": [1.25, 2.5, -0.75], "space": "local", "frame": 0}}]}
+            guards.begin_request(request)
+            guards.set_write_guard(lambda: read_scene(disposable) == original or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+            adapter = TransformAdapter({})
+            retained.before_effect()
+            adapter.execute(disposable, request["operations"][0]["arguments"], request)
+            after = read_scene(disposable)
+            if original == after or guards.effect_observations()[0]["completion"] != "completed":
+                raise ValueError("Native qualification did not observe changed data")
+            observed_id = dict(guards.scene_instance(disposable))
+            if observed_id != guards.scene_instance(disposable):
+                raise ValueError("Scene identity is unstable")
+            folder = retained.directory
+            source_file = retained.save_fixture(disposable, "source.casc", read_scene)
+            args = {"checkpoint_path": str(folder / "backup.casc"), "working_path": str(folder / "working.casc"),
+                    "input_kind": "active_scene"}
+            retained.plan_file("backup.casc")
+            retained.plan_file("working.casc")
+            scope = adapter.required_scope(disposable, {"operation_name": "safety.bootstrap", "operation_arguments": args})
+            source = guards._capture_with_adapter(disposable, scope, guards.digest({"qualification": True}), None, None, adapter)
+            bootstrap_request = {"operations": [{"name": "safety.bootstrap", "arguments": args}], "source_binding": source}
+            guards.begin_request(bootstrap_request)
+            guards.set_write_guard(lambda: read_scene(disposable) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+            retained.before_new_tab()
+            checkpoint_result, _ = checkpoint(disposable, args, bootstrap_request, adapter)
+            successor_scene = manager.current_scene()
+            retained.track(successor_scene, "working")
+            retained.record_file(checkpoint_result["checkpoint_observation"]["checkpoint"])
+            retained.record_file(checkpoint_result["checkpoint_observation"]["working_file"])
+            next_args = {"checkpoint_path": str(folder / "next-backup.casc"),
+                         "working_path": str(folder / "next-working.casc")}
+            retained.plan_file("next-backup.casc")
+            retained.plan_file("next-working.casc")
+            next_scope = adapter.required_scope(successor_scene, {"operation_name": "safety.checkpoint", "operation_arguments": next_args})
+            next_source = guards._capture_with_adapter(successor_scene, next_scope, source["inputs_digest"], None, None, adapter)
+            next_request = {"operations": [{"name": "safety.checkpoint", "arguments": next_args}], "source_binding": next_source}
+            guards.begin_request(next_request)
+            guards.set_write_guard(lambda: read_scene(successor_scene) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+            retained.before_effect()
+            repeated_checkpoint, _ = checkpoint(successor_scene, next_args, next_request, adapter)
+            retained.record_file(repeated_checkpoint["checkpoint_observation"]["checkpoint"])
+            retained.record_file(repeated_checkpoint["checkpoint_observation"]["working_file"])
+            evidence = {"build": installed_build(), "runtime_fingerprint": guards.LOADED_FINGERPRINT,
+                "sdk": "csc.model.DataEditor.set_data_value/Scene.modify_update",
+                "before": original, "after": after, "effect": guards.effect_observations(),
+                "identity": observed_id, "source_file": source_file,
+                "checkpoint": checkpoint_result, "successor_checkpoint": repeated_checkpoint,
+                "operations": ["animation.transform_set", "safety.bootstrap", "safety.checkpoint"]}
+        except Exception as error:
+            qualification_error = error
+            _ERROR = str(error)
+            raise
+        finally:
+            try:
+                retention = retained.finish(qualification_error)
+            finally:
+                vars(guards._LOCAL).clear()
+                vars(guards._LOCAL).update(local_before)
+        retained.before_effect()
+        evidence["retention"] = retention
         adapter = TransformAdapter(evidence)
         evidence_path = folder / "qualification.json"
         with evidence_path.open("xb") as stream:
+            import os
             stream.write(adapter.evidence_bytes)
+            stream.flush()
+            os.fsync(stream.fileno())
         adapter.verification["evidence_path"] = str(evidence_path)
         for name in ("animation.transform_set", "safety.bootstrap", "safety.checkpoint"):
+            retained.before_effect()
             guards.register_adapter(name, adapter)
-        scene_qualification = {"status": "not_requested", "reason": "Complete-scene qualification is an explicit separate setup action"}
         _ERROR = None
-        result = {"adapter_id": "independent-transform-key0-v1", "installed_build": installed_build(),
-                "evidence_sha256": adapter.verification["evidence_sha256"], "qualified_operations": evidence["operations"],
-                "checkpoint_completion": "observed_native_save_and_clone_equivalence", "scene_adapter": scene_qualification}
-    finally:
-        if previous is not None:
-            manager.set_current_scene(previous)
-        if "successor_scene" in locals() and successor_scene is not disposable:
-            manager.remove_application_scene(successor_scene)
-        manager.remove_application_scene(disposable)
-    if include_scene_adapter:
-        from .native_scene_adapter import qualify_scene_adapter
-        try:
-            result["scene_adapter"] = qualify_scene_adapter()
-        except Exception as exc:
-            _ERROR = "Scene adapter qualification failed; only independent Transform is qualified: " + str(exc)
-            raise
+        result = retained.complete({"adapter_id": "independent-transform-key0-v1", "installed_build": installed_build(),
+            "evidence_sha256": adapter.verification["evidence_sha256"], "qualified_operations": evidence["operations"],
+            "checkpoint_completion": "observed_native_save_and_clone_equivalence", "retention": retention,
+            "scene_adapter": {"status": "not_requested", "reason": "Complete-scene qualification is an explicit separate setup action"}})
     return result
 
 
@@ -420,10 +495,17 @@ def ensure_installed():
 
 def status():
     ensure_installed()
-    return {"installed_build": installed_build(), "adapter_id": "independent-transform-key0-v1", "qualification_error": _ERROR}
+    from .native_unbaking import step_contract_status, STEPS
+    from .native_geometry_capture import geometry_contract_status
+    return {"installed_build": installed_build(), "adapter_id": "independent-transform-key0-v1", "qualification_error": _ERROR,
+            "unbaking_steps": {step: step_contract_status(step) for step in STEPS},
+            "geometry_capture": geometry_contract_status()}
 
 
 def verify_observation(observation, digest, kind):
+    if kind == "geometry_capture":
+        from .native_geometry_capture import verify_geometry_capture
+        return verify_geometry_capture(observation, digest)
     if digest != guards.digest(observation) or _OBSERVATIONS.get((kind, digest)) != observation:
         raise ValueError("RIG_ADAPTER_UNVERIFIED: observation not issued by this runtime")
     if kind == "motion_capture":

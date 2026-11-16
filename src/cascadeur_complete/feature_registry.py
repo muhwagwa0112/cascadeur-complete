@@ -15,6 +15,23 @@ from .product_catalog import PRODUCT_CATALOG, PRODUCT_VERSION, SUPPORTED_BUILD, 
 DEVELOPER_POLICY = "Developer build with local developer_mode and generic_api policy"
 
 
+def geometry_capture_feature(*, connected, operations):
+    """Bridge capability independent of the pinned product-version inventory."""
+    ready = connected and "system.observe_geometry_capture" in operations
+    return FeatureRecord(id="geometry_capture", family="animation", name="Evaluated geometry capture",
+        description="Guarded immutable evaluated mesh windows with terminal-bound native provenance",
+        route="system.observe_geometry_capture", operation_id="system.observe_geometry_capture", test_id="",
+        execution_mode=ExecutionMode.NATIVE if ready else ExecutionMode.GATED,
+        state=CapabilityState.AVAILABLE if ready else CapabilityState.UNHEALTHY,
+        adapter_id="native-actual-geometry-v1" if ready else None, requires_scene=True,
+        source="Cascadeur bridge private geometry qualification", mutation=True, destructive=False,
+        implemented=True, runtime_available=ready, execution_observed=False,
+        verification=VerificationState.IMPLEMENTED, evidence_kind="handler", contract_status="bound",
+        truth_layer="discovered", preconditions=["Private coordinate and synchronous calculation qualification",
+            "Complete geometry and motion sources", "Current durable evaluation", "Approved file budget"],
+        postconditions=["Immutable window hashes", "Unchanged complete read boundaries", "Terminal receipt seal"])
+
+
 @dataclass(frozen=True)
 class CoreSpec:
     family: str

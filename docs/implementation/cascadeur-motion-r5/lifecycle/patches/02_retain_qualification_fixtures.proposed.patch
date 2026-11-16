@@ -1,0 +1,559 @@
+--- /dev/null
++++ b/cascadeur_side/cascadeur_complete/native_probe_retention.py
+@@ -0,0 +1,225 @@
++"""Finite qualifier retention; no wire operation or cleanup command.
++
++Reserve one observation per qualifier kind in one process, keep native tabs,
++and never import qualification proof from disk.
++Native heap allocation is not bounded by this Python bookkeeping.
++"""
++from __future__ import annotations
++
++import json
++import os
++import uuid
++from pathlib import Path
++
++_ATTEMPTS = {}
++_LIMITS = {
++    "native_adapter": {"new_tabs": 2, "files": 5},
++    "finite_models": {"new_tabs": 1, "files": 2},
++    "position_writer": {"new_tabs": 1, "files": 2},
++}
++_SETUP_OPERATIONS = {
++    "native_adapter": "setup.qualify_native_adapter",
++    "finite_models": "setup.qualify_independent_models",
++    "position_writer": "setup.qualify_independent_position_writer",
++}
++
++
++def _copy(value):
++    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
++
++
++def _context():
++    from . import guarded_runtime as guards
++    from .native_adapters import installed_build
++    guards.assert_loaded_package()
++    return (guards.RUNTIME_EPOCH, guards.LOADED_FINGERPRINT, installed_build())
++
++
++def retained_probe_result(kind):
++    """Return only this process's prior returned observation; never rerun it."""
++    context = _context()
++    previous = _ATTEMPTS.get(kind)
++    if previous is None:
++        return None
++    if previous.context != context:
++        raise ValueError("QUALIFICATION_CONTEXT_CHANGED: clean runtime restart required")
++    if previous.result is not None:
++        return {**_copy(previous.result), "reused": True}
++    raise ValueError("QUALIFICATION_ATTEMPT_RETAINED: inspect " + str(previous.directory))
++
++
++class RetainedProbe:
++    """Retain one bounded fixture set; close/delete is an explicit user action."""
++
++    def __init__(self, kind):
++        import csc
++        from . import runtime as rt
++        from . import guarded_runtime as guards
++        from . import incident_admission
++        from .native_scene_reader import read_scene
++        if kind not in _LIMITS:
++            raise ValueError("Unknown internal qualification kind")
++        if kind in _ATTEMPTS:
++            raise ValueError("QUALIFICATION_ATTEMPT_RETAINED: inspect " + str(_ATTEMPTS[kind].directory))
++        self.setup_invocation_ref = getattr(guards._LOCAL, "setup_invocation_ref", None)
++        self.setup_operation = _SETUP_OPERATIONS[kind]
++        # The dispatcher claimed this immutable invocation once. This call only
++        # rechecks its current helper step, native thread and resource revision.
++        admission = incident_admission.assert_setup_admission(self.setup_operation, self.setup_invocation_ref)
++        self.context = _context()
++        self.manager = csc.app.get_application().get_scene_manager()
++        self.previous = self.manager.current_scene()
++        if self.previous is None or rt._domain_scene(self.previous).model_viewer().get_objects():
++            raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE")
++        self.inventory = list(self.manager.scenes())
++        if not any(item is self.previous for item in self.inventory):
++            raise ValueError("QUALIFICATION_ORIGINAL_SCENE_UNOBSERVED")
++        self.original_projection = read_scene(self.previous)
++        self.original_path = str(self.previous.get_path_name())
++        self.kind = kind
++        self.limit = _LIMITS[kind]
++        self.directory = Path(admission["workspace_path"]).resolve()
++        if (self.directory.parent != (rt.runtime_root() / "snapshots").resolve()
++                or type(admission["maximum_new_tabs"]) is not int
++                or type(admission["maximum_casc_files"]) is not int
++                or admission["maximum_new_tabs"] < self.limit["new_tabs"]
++                or admission["maximum_casc_files"] < self.limit["files"]):
++            raise ValueError("QUALIFICATION_SETUP_SCOPE_MISMATCH")
++        self.directory.mkdir()
++        self.identified = []
++        self.finished = False
++        self.retention_ok = False
++        self.result = None
++        self.public = {
++            "schema_version": 1, "qualification_id": str(uuid.uuid4()), "kind": kind,
++            "runtime_epoch": self.context[0], "runtime_fingerprint": self.context[1],
++            "native_build": self.context[2], "retention_policy": "retain_qualification_tabs_and_files",
++            "retained_directory": str(self.directory), "retention_status": "pending",
++            "maximum_new_tabs": self.limit["new_tabs"], "maximum_casc_files": self.limit["files"],
++            "original_scene_instance_id": guards.scene_instance(self.previous)["scene_instance_id"],
++            "original_path": self.original_path, "retained_tabs": [], "saved_files": [],
++            "attempted_files": [], "errors": [],
++        }
++        _ATTEMPTS[kind] = self
++
++    def track(self, scene, role):
++        from . import guarded_runtime as guards
++        if self.finished or any(scene is item for item in self.inventory):
++            raise ValueError("QUALIFICATION_SCENE_OWNERSHIP_UNAVAILABLE")
++        if not any(scene is item for item in self.manager.scenes()):
++            raise ValueError("QUALIFICATION_SCENE_UNOBSERVED")
++        if any(scene is item[0] for item in self.identified):
++            return
++        if len(self.identified) >= self.limit["new_tabs"]:
++            raise ValueError("QUALIFICATION_TAB_LIMIT_EXCEEDED")
++        self.identified.append((scene, role, dict(guards.scene_instance(scene))))
++
++    def record_file(self, manifest):
++        path = Path(manifest["path"]).resolve()
++        if (self.finished or path.parent != self.directory.resolve() or path.suffix.lower() != ".casc"
++                or len(self.public["saved_files"]) >= self.limit["files"]
++                or any(item["path"] == manifest["path"] for item in self.public["saved_files"])):
++            raise ValueError("QUALIFICATION_FILE_SCOPE_UNAVAILABLE")
++        self.public["saved_files"].append(_copy(manifest))
++
++    def save_fixture(self, scene, name, reader):
++        """Only the normal path saves; failure finalization never invokes save."""
++        from .native_adapters import _save_observed
++        from . import incident_admission
++        if (self.finished or name not in {"fixture-before.casc", "fixture-after.casc"}
++                or name in self.public["attempted_files"]
++                or not any(scene is item[0] for item in self.identified)
++                or len(self.public["attempted_files"]) >= self.limit["files"]):
++            raise ValueError("QUALIFICATION_FILE_SCOPE_UNAVAILABLE")
++        incident_admission.assert_setup_admission(self.setup_operation, self.setup_invocation_ref)
++        before = reader(scene)
++        self.public["attempted_files"].append(name)
++        manifest = _save_observed(scene, self.directory / name)
++        self.record_file(manifest)
++        if reader(scene) != before:
++            raise ValueError("NATIVE_COMPLETION_UNKNOWN: qualification fixture changed during save")
++        return manifest
++
++    def finish(self, error=None):
++        """Restore the original active empty tab; preserve every remaining tab."""
++        from .native_scene_reader import read_scene
++        from .native_fixture import _OWNED
++        if self.finished:
++            raise ValueError("QUALIFICATION_RETENTION_ALREADY_FINISHED")
++        self.finished = True
++        problems = []
++        try:
++            if _context() != self.context:
++                raise ValueError("QUALIFICATION_CONTEXT_CHANGED")
++            live = list(self.manager.scenes())
++            if not any(item is self.previous for item in live):
++                raise ValueError("QUALIFICATION_ORIGINAL_SCENE_REMOVED")
++            # Never dereference a wrapper which is absent from the live inventory.
++            self.manager.set_current_scene(self.previous)
++            live = list(self.manager.scenes())
++            original_present = all(any(item is value for value in live) for item in self.inventory)
++            original_preserved = (
++                original_present and self.manager.current_scene() is self.previous
++                and str(self.previous.get_path_name()) == self.original_path
++                and read_scene(self.previous) == self.original_projection
++            )
++            self.public["original_inventory_preserved"] = original_present
++            self.public["original_active_projection_preserved"] = original_preserved
++            if not original_preserved:
++                problems.append("QUALIFICATION_ORIGINAL_SCENE_CHANGED")
++            new_tabs = [item for item in live if not any(item is value for value in self.inventory)]
++            self.public["new_tab_count"] = len(new_tabs)
++            if len(new_tabs) > self.limit["new_tabs"]:
++                problems.append("QUALIFICATION_TAB_LIMIT_EXCEEDED")
++            # An unexpected tab is retained but is never claimed as owned.
++            for scene in new_tabs[: self.limit["new_tabs"] + 1]:
++                known = next((item for item in self.identified if item[0] is scene), None)
++                row = {"role": "unidentified_new_tab", "ownership": "unverified", "path": None}
++                if known is not None:
++                    row = {"role": known[1], "ownership": "identified_qualification_tab", **known[2],
++                           "path": str(scene.get_path_name())}
++                else:
++                    problems.append("QUALIFICATION_NEW_TAB_UNIDENTIFIED")
++                self.public["retained_tabs"].append(row)
++            for scene, role, identity in self.identified:
++                if not any(scene is value for value in live):
++                    problems.append("QUALIFICATION_IDENTIFIED_SCENE_REMOVED: " + role)
++            self.retention_ok = not problems
++        except Exception as observation_error:
++            problems.append(str(observation_error)[:1000])
++        finally:
++            # Relinquish only the fixture-authoring helper's Python references.
++            # Native tabs/files and guarded_runtime scene identities remain.
++            for scene, _role, _identity in self.identified:
++                owned = _OWNED.get(id(scene))
++                if owned is not None and owned["scene"] is scene:
++                    _OWNED.pop(id(scene))
++            self.public["errors"] = problems
++            self.public["retention_status"] = "observed" if self.retention_ok else "unverified"
++            self.public["qualification_error"] = None if error is None else str(error)[:1000]
++            try:
++                payload = json.dumps(self.public, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
++                with (self.directory / "retention.json").open("xb") as stream:
++                    stream.write(payload)
++                    stream.flush()
++                    os.fsync(stream.fileno())
++            except Exception as record_error:
++                self.retention_ok = False
++                problems.append("QUALIFICATION_RETENTION_RECORD_FAILED: " + str(record_error)[:1000])
++            self.manager = self.previous = self.original_projection = None
++            self.inventory = []
++            self.identified = []
++        if error is not None:
++            error.add_note("Retained qualification directory: " + str(self.directory))
++            for problem in problems:
++                error.add_note(problem)
++        elif not self.retention_ok:
++            raise ValueError("QUALIFICATION_RETENTION_UNVERIFIED: " + "; ".join(problems))
++        return _copy(self.public)
++
++    def complete(self, result):
++        """Cache a returned result only after existing proof publication succeeds."""
++        if not self.finished or not self.retention_ok:
++            raise ValueError("QUALIFICATION_RETENTION_UNVERIFIED")
++        self.result = _copy(result)
++        return _copy(self.result)
+--- a/cascadeur_side/cascadeur_complete/native_adapters.py
++++ b/cascadeur_side/cascadeur_complete/native_adapters.py
+@@ -319,63 +319,94 @@
+ 
+ 
+ def qualify_disposable(*, include_scene_adapter=False):
+-    """Explicit native setup action; never reachable as an unguarded wire op."""
++    """Explicit native setup; retain the owned fixture and checkpoint tabs."""
+     global _ERROR
++    from .native_probe_retention import RetainedProbe, retained_probe_result
+     guards.assert_loaded_package()
+     ensure_installed()
+     if installed_build() != SUPPORTED_BUILD:
+         raise ValueError("Unsupported native SDK build")
+-    import pycsc
+-    from . import runtime as rt
+-    manager = csc.app.get_application().get_scene_manager()
+-    previous = manager.current_scene()
+-    if include_scene_adapter and previous is not None and rt._domain_scene(previous).model_viewer().get_objects():
+-        raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE")
+-    disposable = manager.create_application_scene()
+-    try:
+-        manager.set_current_scene(disposable)
+-        pycsc.wrap(disposable.domain_scene()).create_object("MCP adapter qualification")
+-        original = read_scene(disposable)
+-        object_id = original["objects"][0]["id"]
+-        request = {"operations": [{"name": "animation.transform_set", "arguments": {
+-            "ids": [object_id], "position": [1.25, 2.5, -0.75], "space": "local", "frame": 0}}]}
+-        guards.begin_request(request)
+-        guards.set_write_guard(lambda: read_scene(disposable) == original or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+-        adapter = TransformAdapter({})
+-        adapter.execute(disposable, request["operations"][0]["arguments"], request)
+-        after = read_scene(disposable)
+-        if original == after or guards.effect_observations()[0]["completion"] != "completed":
+-            raise ValueError("Native qualification did not observe changed data")
+-        observed_id = dict(guards.scene_instance(disposable))
+-        if observed_id != guards.scene_instance(disposable):
+-            raise ValueError("Scene identity is unstable")
+-        # Observe the source-preserving save/load path using the same executor.
+-        folder = rt.runtime_root() / "snapshots" / ("qualification-" + str(uuid.uuid4()))
+-        folder.mkdir(parents=True)
+-        source_file = _save_observed(disposable, folder / "source.casc")
+-        args = {"checkpoint_path": str(folder / "backup.casc"), "working_path": str(folder / "working.casc"),
+-                "input_kind": "active_scene"}
+-        scope = adapter.required_scope(disposable, {"operation_name": "safety.bootstrap", "operation_arguments": args})
+-        source = guards._capture_with_adapter(disposable, scope, guards.digest({"qualification": True}), None, None, adapter)
+-        bootstrap_request = {"operations": [{"name": "safety.bootstrap", "arguments": args}], "source_binding": source}
+-        guards.begin_request(bootstrap_request)
+-        guards.set_write_guard(lambda: read_scene(disposable) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+-        checkpoint_result, _ = checkpoint(disposable, args, bootstrap_request, adapter)
+-        successor_scene = manager.current_scene()
+-        next_args = {"checkpoint_path": str(folder / "next-backup.casc"),
+-                     "working_path": str(folder / "next-working.casc")}
+-        next_scope = adapter.required_scope(successor_scene, {"operation_name": "safety.checkpoint", "operation_arguments": next_args})
+-        next_source = guards._capture_with_adapter(successor_scene, next_scope, source["inputs_digest"], None, None, adapter)
+-        next_request = {"operations": [{"name": "safety.checkpoint", "arguments": next_args}], "source_binding": next_source}
+-        guards.begin_request(next_request)
+-        guards.set_write_guard(lambda: read_scene(successor_scene) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
+-        repeated_checkpoint, _ = checkpoint(successor_scene, next_args, next_request, adapter)
+-        evidence = {"build": installed_build(), "runtime_fingerprint": guards.LOADED_FINGERPRINT,
+-            "sdk": "csc.model.DataEditor.set_data_value/Scene.modify_update",
+-            "before": original, "after": after, "effect": guards.effect_observations(),
+-            "identity": observed_id, "source_file": source_file,
+-            "checkpoint": checkpoint_result, "successor_checkpoint": repeated_checkpoint,
+-            "operations": ["animation.transform_set", "safety.bootstrap", "safety.checkpoint"]}
++    result = retained_probe_result("native_adapter")
++    if result is not None:
++        operations = ("animation.transform_set", "safety.bootstrap", "safety.checkpoint")
++        registered = [guards._ADAPTERS.get(name) for name in operations]
++        adapter = registered[0]
++        if (type(adapter) is not TransformAdapter
++                or any(value is not adapter for value in registered)
++                or adapter.verification.get("evidence_sha256") != result.get("evidence_sha256")):
++            raise ValueError("NATIVE_QUALIFICATION_REPLACED: inspect current qualified operations; no probe repeated")
++        # Revalidate the same private registered instance with the existing
++        # evidence/build/loaded-byte checks. Do not replace a broader adapter.
++        for name in operations:
++            guards.register_adapter(name, adapter)
++    if result is None:
++        import pycsc
++        from . import runtime as rt
++        retained = RetainedProbe("native_adapter")
++        manager = retained.manager
++        local_before = dict(vars(guards._LOCAL))
++        qualification_error = None
++        try:
++            disposable = manager.create_application_scene()
++            retained.track(disposable, "fixture")
++            manager.set_current_scene(disposable)
++            pycsc.wrap(disposable.domain_scene()).create_object("MCP adapter qualification")
++            original = read_scene(disposable)
++            object_id = original["objects"][0]["id"]
++            request = {"operations": [{"name": "animation.transform_set", "arguments": {
++                "ids": [object_id], "position": [1.25, 2.5, -0.75], "space": "local", "frame": 0}}]}
++            guards.begin_request(request)
++            guards.set_write_guard(lambda: read_scene(disposable) == original or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
++            adapter = TransformAdapter({})
++            adapter.execute(disposable, request["operations"][0]["arguments"], request)
++            after = read_scene(disposable)
++            if original == after or guards.effect_observations()[0]["completion"] != "completed":
++                raise ValueError("Native qualification did not observe changed data")
++            observed_id = dict(guards.scene_instance(disposable))
++            if observed_id != guards.scene_instance(disposable):
++                raise ValueError("Scene identity is unstable")
++            folder = retained.directory
++            source_file = _save_observed(disposable, folder / "source.casc")
++            retained.record_file(source_file)
++            args = {"checkpoint_path": str(folder / "backup.casc"), "working_path": str(folder / "working.casc"),
++                    "input_kind": "active_scene"}
++            scope = adapter.required_scope(disposable, {"operation_name": "safety.bootstrap", "operation_arguments": args})
++            source = guards._capture_with_adapter(disposable, scope, guards.digest({"qualification": True}), None, None, adapter)
++            bootstrap_request = {"operations": [{"name": "safety.bootstrap", "arguments": args}], "source_binding": source}
++            guards.begin_request(bootstrap_request)
++            guards.set_write_guard(lambda: read_scene(disposable) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
++            checkpoint_result, _ = checkpoint(disposable, args, bootstrap_request, adapter)
++            successor_scene = manager.current_scene()
++            retained.track(successor_scene, "working")
++            retained.record_file(checkpoint_result["checkpoint_observation"]["checkpoint"])
++            retained.record_file(checkpoint_result["checkpoint_observation"]["working_file"])
++            next_args = {"checkpoint_path": str(folder / "next-backup.casc"),
++                         "working_path": str(folder / "next-working.casc")}
++            next_scope = adapter.required_scope(successor_scene, {"operation_name": "safety.checkpoint", "operation_arguments": next_args})
++            next_source = guards._capture_with_adapter(successor_scene, next_scope, source["inputs_digest"], None, None, adapter)
++            next_request = {"operations": [{"name": "safety.checkpoint", "arguments": next_args}], "source_binding": next_source}
++            guards.begin_request(next_request)
++            guards.set_write_guard(lambda: read_scene(successor_scene) == after or (_ for _ in ()).throw(ValueError("SCENE_CHANGED")))
++            repeated_checkpoint, _ = checkpoint(successor_scene, next_args, next_request, adapter)
++            retained.record_file(repeated_checkpoint["checkpoint_observation"]["checkpoint"])
++            retained.record_file(repeated_checkpoint["checkpoint_observation"]["working_file"])
++            evidence = {"build": installed_build(), "runtime_fingerprint": guards.LOADED_FINGERPRINT,
++                "sdk": "csc.model.DataEditor.set_data_value/Scene.modify_update",
++                "before": original, "after": after, "effect": guards.effect_observations(),
++                "identity": observed_id, "source_file": source_file,
++                "checkpoint": checkpoint_result, "successor_checkpoint": repeated_checkpoint,
++                "operations": ["animation.transform_set", "safety.bootstrap", "safety.checkpoint"]}
++        except Exception as error:
++            qualification_error = error
++            _ERROR = str(error)
++            raise
++        finally:
++            try:
++                retention = retained.finish(qualification_error)
++            finally:
++                vars(guards._LOCAL).clear()
++                vars(guards._LOCAL).update(local_before)
++        evidence["retention"] = retention
+         adapter = TransformAdapter(evidence)
+         evidence_path = folder / "qualification.json"
+         with evidence_path.open("xb") as stream:
+@@ -383,18 +414,17 @@
+         adapter.verification["evidence_path"] = str(evidence_path)
+         for name in ("animation.transform_set", "safety.bootstrap", "safety.checkpoint"):
+             guards.register_adapter(name, adapter)
+-        scene_qualification = {"status": "not_requested", "reason": "Complete-scene qualification is an explicit separate setup action"}
+         _ERROR = None
+-        result = {"adapter_id": "independent-transform-key0-v1", "installed_build": installed_build(),
+-                "evidence_sha256": adapter.verification["evidence_sha256"], "qualified_operations": evidence["operations"],
+-                "checkpoint_completion": "observed_native_save_and_clone_equivalence", "scene_adapter": scene_qualification}
+-    finally:
+-        if previous is not None:
+-            manager.set_current_scene(previous)
+-        if "successor_scene" in locals() and successor_scene is not disposable:
+-            manager.remove_application_scene(successor_scene)
+-        manager.remove_application_scene(disposable)
++        result = retained.complete({"adapter_id": "independent-transform-key0-v1", "installed_build": installed_build(),
++            "evidence_sha256": adapter.verification["evidence_sha256"], "qualified_operations": evidence["operations"],
++            "checkpoint_completion": "observed_native_save_and_clone_equivalence", "retention": retention,
++            "scene_adapter": {"status": "not_requested", "reason": "Complete-scene qualification is an explicit separate setup action"}})
+     if include_scene_adapter:
++        from . import runtime as rt
++        manager = csc.app.get_application().get_scene_manager()
++        current = manager.current_scene()
++        if current is None or rt._domain_scene(current).model_viewer().get_objects():
++            raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE")
+         from .native_scene_adapter import qualify_scene_adapter
+         try:
+             result["scene_adapter"] = qualify_scene_adapter()
+--- a/cascadeur_side/cascadeur_complete/native_interpolation_qualification.py
++++ b/cascadeur_side/cascadeur_complete/native_interpolation_qualification.py
+@@ -71,7 +71,7 @@
+     return {"qualified_models": list(value["qualified_models"]),
+             "qualification_digest": guards.digest(value),
+             "native_build": value["native_build"], "runtime_epoch": value["runtime_epoch"],
+-            "trial_count": len(value["trials"]), "reused": True}
++            "trial_count": len(value["trials"]), "reused": True, "retention": value.get("retention")}
+ 
+ 
+ def qualified_export_metadata(bv, dv, behaviour, object_id):
+@@ -200,22 +200,31 @@
+     from . import guarded_runtime as guards
+     from . import runtime as rt
+     from .native_adapters import installed_build
+-    from .native_fixture import create_disposable_scene, create_independent_transform, set_independent_keys, release_disposable_scene
++    from .native_fixture import create_disposable_scene, create_independent_transform, set_independent_keys
++    from .native_probe_retention import RetainedProbe, retained_probe_result
+     from .native_key_layout import LINEAR_MODEL, STEP_MODEL, PIECEWISE_MODEL
+     from .native_scene_reader import read_scene
+     guards.assert_loaded_package()
+     if installed_build() != SUPPORTED_BUILD:
+         raise ValueError("UNSUPPORTED_VERSION: finite interpolation qualification requires " + SUPPORTED_BUILD)
++    prior = retained_probe_result("finite_models")
++    if prior is not None:
++        if qualification() is None:
++            raise ValueError("FINITE_MODEL_UNQUALIFIED: private native proof is unavailable")
++        return prior
+     previous = csc.app.get_application().get_scene_manager().current_scene()
+     if previous is not None and rt._domain_scene(previous).model_viewer().get_objects():
+         raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE: populated scenes are not scanned or edited")
++    retained = RetainedProbe("finite_models")
++    qualification_error = None
+     scene = None
+     programs = [(["LINEAR","LINEAR"], LINEAR_MODEL), (["STEP","STEP"], STEP_MODEL),
+                 (["LINEAR","STEP"], PIECEWISE_MODEL), (["STEP","LINEAR"], PIECEWISE_MODEL)]
+     trials = []
+     metadata = None
+     try:
+-        scene = create_disposable_scene()
++        scene = create_disposable_scene(retain_on_failure=True)
++        retained.track(scene, "fixture")
+         baseline = [(0,[0.,0.,0.]), (2,[2.,1.,0.]), (4,[0.,2.,1.])]
+         fixture = create_independent_transform(scene, "MCPInterpolationQualification", baseline, programs[0][0])
+         domain = rt._domain_scene(scene)
+@@ -228,6 +237,7 @@
+         if not parent.is_null():
+             raise ValueError("FIXTURE_DEPENDENCY_UNQUALIFIED: official fixture has a parent")
+         metadata = _metadata(bv, dv, bv.get_behaviour_by_name(obj, "FbxExport"), fixture["object_id"])
++        retained.save_fixture(scene, "fixture-before.casc", read_scene)
+         for modes, model in programs:
+             base_actual = None
+             for perturb in [None] + [(key,axis) for key in range(3) for axis in range(3)]:
+@@ -255,16 +265,22 @@
+                 trials.append({"model":model,"segment_modes":modes,"keys":keys,"perturbation":perturb,
+                     "actual":actual,"max_absolute_error_scene_units":residual,
+                     "max_influence_error_scene_units":delta_residual,"projection_digest":guards.digest(projection)})
++        retained.save_fixture(scene, "fixture-after.casc", read_scene)
+         evidence = {"schema_version":1,"native_build":installed_build(),"runtime_fingerprint":guards.LOADED_FINGERPRINT,
+             "runtime_epoch":guards.RUNTIME_EPOCH,"reader_contract":"native_independent_position_v1",
+             "qualified_models":[LINEAR_MODEL,STEP_MODEL,PIECEWISE_MODEL],"export_metadata_contract":metadata,
+             "domain":{"channel":"position","spaces":["local","global"],"parent":None,
+                       "controllers":False,"cycles":False,"additive":False,"key_id_kind":"layer_frame_locator",
+                       "observation_frames":[0,1,2,3,4],"observation_keys":[0,2,4]},"trials":trials}
++    except Exception as error:
++        qualification_error = error
++        raise
+     finally:
+-        if scene is not None: release_disposable_scene(scene)
+-    # Publish only after every native readback and disposable cleanup succeeded.
++        retention = retained.finish(qualification_error)
++    # Preserve the existing model proof rules; tab destruction is not evidence.
++    evidence["retention"] = retention
+     _QUALIFICATION_BYTES = json.dumps(evidence,sort_keys=True,separators=(",",":"),ensure_ascii=False,allow_nan=False).encode()
+-    return {"qualified_models":qualified_models(),"qualification_digest":guards.digest(evidence),
+-            "native_build":evidence["native_build"],"runtime_epoch":guards.RUNTIME_EPOCH,"trial_count":len(trials)}
+-
++    return retained.complete({"qualified_models":qualified_models(),"qualification_digest":guards.digest(evidence),
++            "native_build":evidence["native_build"],"runtime_epoch":guards.RUNTIME_EPOCH,"trial_count":len(trials),
++            "retention":retention})
++
+--- a/cascadeur_side/cascadeur_complete/native_independent_position.py
++++ b/cascadeur_side/cascadeur_complete/native_independent_position.py
+@@ -597,20 +597,28 @@
+     global _WRITER_BYTES,_PROBE
+     import csc
+     from . import runtime as rt
+-    from .native_fixture import create_disposable_scene,create_independent_transform,set_independent_keys,release_disposable_scene
++    from .native_fixture import create_disposable_scene,create_independent_transform,set_independent_keys
++    from .native_probe_retention import RetainedProbe, retained_probe_result
++    from .native_scene_reader import read_scene
+     model=_model_proof()
+     guards.assert_loaded_package()
++    prior=retained_probe_result("position_writer")
++    if prior is not None:
++        return {**prior,**register_independent_position_writer(),"reused":True}
+     previous=csc.app.get_application().get_scene_manager().current_scene()
+     if previous is not None and rt._domain_scene(previous).model_viewer().get_objects():
+         raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE: writer probe does not inspect populated scenes")
+     if _PROBE is not None:
+         raise ValueError("POSITION_WRITER_PROBE_ACTIVE")
++    retained=RetainedProbe("position_writer")
++    qualification_error=None
+     saved_local=dict(vars(guards._LOCAL))
+     scene=None
+     trials=[]
+     closure_conditions=None
+     try:
+-        scene=create_disposable_scene()
++        scene=create_disposable_scene(retain_on_failure=True)
++        retained.track(scene,"fixture")
+         baseline=[(0,[0.,0.,0.]),(2,[2.,1.,0.]),(4,[0.,2.,1.])]
+         fixture=create_independent_transform(scene,"MCPPositionWriterQualification",baseline,["LINEAR","LINEAR"])
+         # This unregistered probe has no advertised operation capability.
+@@ -618,6 +626,7 @@
+         NativeSceneAdapter.__init__(probe,json.dumps({"operations":[]}).encode())
+         probe.qualified_capabilities={}
+         _PROBE=(probe,scene)
++        retained.save_fixture(scene,"fixture-before.casc",read_scene)
+         for modes in (["LINEAR","LINEAR"],["STEP","STEP"],["LINEAR","STEP"],["STEP","LINEAR"]):
+             for space in ("local","global"):
+                 for operation in _OPERATIONS:
+@@ -647,18 +656,25 @@
+                         "source_digest":guards.digest(source),"result":result,"effects":guards.effect_observations(),
+                         "observed_position_closure":[row for row in observed["data"] if row["id"] in ids],
+                         "observed_full_projection_digest":guards.digest(observed)})
++        retained.save_fixture(scene,"fixture-after.casc",read_scene)
+         evidence={"schema_version":1,"operations":list(_OPERATIONS),"native_build":probe.observed_build(),
+             "runtime_epoch":guards.RUNTIME_EPOCH,"runtime_fingerprint":guards.LOADED_FINGERPRINT,
+             "model_qualification_digest":guards.digest(model),"writer_contract":"existing_position_authoritative_local_graph_v4",
+             "failure_observation_contract":_FAILURE_CONTRACT,"failure_trials":[],
+             "closure_conditions":closure_conditions,"evaluation":"domain_modify_native_graph_observed",
+             "durable_interpolation_receipt":"separate_explicit_operation_required","trials":trials}
++    except Exception as error:
++        qualification_error=error
++        raise
+     finally:
+         _PROBE=None
+-        vars(guards._LOCAL).clear()
+-        vars(guards._LOCAL).update(saved_local)
+-        if scene is not None: release_disposable_scene(scene)
++        try:
++            retention=retained.finish(qualification_error)
++        finally:
++            vars(guards._LOCAL).clear()
++            vars(guards._LOCAL).update(saved_local)
++    evidence["retention"]=retention
+     _WRITER_BYTES=json.dumps(evidence,sort_keys=True,separators=(",",":"),ensure_ascii=False,allow_nan=False).encode()
+-    return {**register_independent_position_writer(),"trial_count":len(trials),
+-            "model_qualification_digest":guards.digest(model)}
+-
++    return retained.complete({**register_independent_position_writer(),"trial_count":len(trials),
++            "model_qualification_digest":guards.digest(model),"retention":retention})
++

@@ -119,6 +119,11 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
         postconditions=("evaluation_settled",))
     add("source_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     add("baseline_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
+    if spec.geometry_capture is not None:
+        add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
+            {"after": "baseline_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
+            postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
+            objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
     add("analyze", "motion_analysis", "motion.analyze", "host_compute", postconditions=("required_metric_eligibility",))
     insertion_budget = min(min(spec.budgets.generated_keys, int(envelope.get("added_keys", 0))) - unbaking_added,
                            8 * len(spec.cleanup))
@@ -146,10 +151,29 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
             "animation.rotation_keys_set" if rotations else "animation.position_keys_set", "scene_mutation",
             {"cleanup_index": index, "space": "local" if rotations else "global"}, ("rotation",) if rotations else ("position",),
             postconditions=("exact_driver_readback", "successor_binding"), objects=cleanup.object_ids, lowering="solver-candidate-v1")
+        if spec.geometry_capture is not None:
+            add("evaluation", "interpolation_refresh", "animation.interpolation_refresh", "evaluation",
+                {"cleanup_index": index}, ("evaluation",), postconditions=("evaluation_settled",))
         add("actual_readback", "transform_get", "motion.capture", "read", {"cleanup_index": index},
             postconditions=("complete_actual_capture",))
+        if spec.geometry_capture is not None:
+            add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
+                {"after": "actual_readback", "cleanup_index": index,
+                 "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
+                postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
+                objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
+            add("actual_verify", "motion_quality", "motion.quality", "host_compute", {"cleanup_index": index},
+                postconditions=("actual_required_metrics_pass",))
         add("checkpoint", "snapshot", "safety.checkpoint", "scene_mutation", {"after_cleanup_index": index}, ("scene", "file"),
             postconditions=("durable_successor_checkpoint",), lowering="checkpoint-v1", owned="run_workspace")
+    if spec.geometry_capture is not None:
+        add("evaluation", "interpolation_refresh", "animation.interpolation_refresh", "evaluation",
+            channels=("evaluation",), postconditions=("evaluation_settled",))
+        add("quality_capture", "transform_get", "motion.capture", "read", postconditions=("complete_actual_capture",))
+        add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
+            {"after": "quality_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
+            postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
+            objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
     add("quality", "motion_quality", "motion.quality", "host_compute", postconditions=("actual_required_metrics_pass",))
     add("checkpoint", "snapshot", "safety.checkpoint", "scene_mutation", channels=("scene", "file"),
         postconditions=("durable_successor_checkpoint",), lowering="checkpoint-v1", owned="run_workspace")

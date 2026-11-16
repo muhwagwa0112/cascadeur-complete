@@ -16,6 +16,30 @@ POLICY_FIELDS = frozenset({"allow_key_insertion", "allow_interpolation_change", 
 ARGUMENT_FIELDS = frozenset({"step", "object_ids", "layer_ids", "first_frame", "last_frame", "topology_policy"})
 
 
+def step_contract_status(step):
+    """Describe missing native proof; declarations cannot qualify an action.
+
+    The installed ActionManager entry points return None, and the published
+    editable-animation tool is a getter, not a completion-correlated executor.
+    There is currently no process-private qualified leaf for these steps.
+    """
+    if step not in STEPS:
+        raise ValueError("UNBAKING_STEP_INVALID")
+    return {"step": step, "qualified": False, "code": "UNBAKING_STEP_UNQUALIFIED",
+        "missing": ["exact_installed_callable_binding", "explicit_argument_lowering",
+                    "operation_correlated_completion", "private_step_qualification"],
+        "runtime_epoch": guards.RUNTIME_EPOCH, "runtime_fingerprint": guards.LOADED_FINGERPRINT}
+
+
+def require_step_contract(scene, step, *, source=None, arguments=None):
+    """Fail before selection/effects; no opaque action is a qualified leaf."""
+    guards.assert_loaded_package()
+    if source is not None:
+        guards.assert_source(scene, source, operation_name="generation.unbaking", arguments=arguments)
+    status = step_contract_status(step)
+    raise ValueError(status["code"] + ": " + step + ": " + ",".join(status["missing"]))
+
+
 def validate_arguments(arguments):
     if (not isinstance(arguments, dict) or set(arguments) != ARGUMENT_FIELDS
             or not isinstance(arguments["step"], str) or arguments["step"] not in STEPS):

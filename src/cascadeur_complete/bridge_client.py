@@ -62,11 +62,17 @@ class BridgeClient:
                         expected_revision=expected_revision, timeout=timeout,
                         safety_context=safety_context, request_id=request_id,
                         source_binding=source_binding, execution_context=execution_context)
-                unresolved = self.queue.ledger.unresolved_effects()
-                if unresolved and request_id not in unresolved and (
-                    effectful or any(op.name not in {"system.status", "system.logs"} for op in operations)
-                ):
-                    return self._unknown(feature_id, unresolved[0], "An earlier effect has no authoritative completion")
+                from .incident_admission import diagnostic_request
+                diagnostic = diagnostic_request({"operations": [op.model_dump(mode="json") for op in operations]})
+                if not diagnostic:
+                    capability = self.runtime_status.get("incident_admission_v1") or {}
+                    if (capability.get("available") is not True
+                            or capability.get("loaded_fingerprint") != self.expected_adapter_fingerprint
+                            or capability.get("runtime_epoch") != self.runtime_status.get("runtime_epoch")):
+                        return ResultEnvelope(ok=False, feature_id=feature_id, execution_mode=ExecutionMode.NATIVE,
+                            error_code=ErrorCode.UNSUPPORTED_VERSION, dispatched=False,
+                            outcome="rejected_pre_dispatch", execution="not_dispatched",
+                            error_message="INCIDENT_ADMISSION_HANDSHAKE_REQUIRED: inspect the matching runtime with incident_diagnostic")
                 if effectful and self.runtime_status.get("protocol_version") == "2.0":
                     return ResultEnvelope(ok=False, feature_id=feature_id, execution_mode=ExecutionMode.NATIVE,
                         error_code=ErrorCode.UNSUPPORTED_VERSION, error_message="PROTOCOL_MISMATCH: protocol 2 is read-only",
@@ -130,12 +136,18 @@ class BridgeClient:
             created_at=now,
             expires_at=now + timeout,
             host_instance_id=self.host_instance_id,
-            runtime_epoch=None if all(op.name in {"system.status", "system.logs"} for op in operations) else self.runtime_status.get("runtime_epoch"),
-            adapter_fingerprint=None if all(op.name in {"system.status", "system.logs"} for op in operations) else self.runtime_status.get("adapter_fingerprint"),
+            runtime_epoch=None if all(op.name in {"system.incident_diagnostic", "system.incident_observe_original"} for op in operations) else self.runtime_status.get("runtime_epoch"),
+            adapter_fingerprint=None if all(op.name in {"system.incident_diagnostic", "system.incident_observe_original"} for op in operations) else self.runtime_status.get("adapter_fingerprint"),
             source_binding=source_binding,
             execution_context=execution_context,
         )
-        request_path = self.queue.submit(request)
+        try:
+            request_path = self.queue.submit(request)
+        except (OSError, ValueError, RuntimeError) as exc:
+            return ResultEnvelope(ok=False, feature_id=feature_id, execution_mode=ExecutionMode.NATIVE,
+                request_id=request_id, error_code=ErrorCode.INVALID_REQUEST,
+                error_message=str(exc), dispatched=False, outcome="rejected_pre_dispatch", execution="not_dispatched",
+                result={"error_details": {"code": "INCIDENT_ADMISSION_REJECTED", "detail": str(exc)}})
         dispatch_attempts = 0
         lingering_until = self.lingering_until()
         if lingering_until is not None:

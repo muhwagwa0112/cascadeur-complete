@@ -31,6 +31,8 @@ _COMMON_IMPLEMENTATION = (
     "src/cascadeur_complete/queue_auth.py", "src/cascadeur_complete/package_fingerprint.py",
     "cascadeur_side/cascadeur_complete/handler_registry.py",
     "cascadeur_side/cascadeur_complete/runtime.py", "cascadeur_side/cascadeur_complete/guarded_runtime.py",
+    "cascadeur_side/cascadeur_complete/native_serialization.py",
+    "cascadeur_side/cascadeur_complete/serialization_equivalence.py",
 )
 _HANDLERS = {name: name for name in (
     "animation", "behaviours", "editing", "files", "generation", "io", "layers", "mesh",
@@ -42,6 +44,7 @@ _MOTION_DEPENDENCIES = tuple("src/cascadeur_complete/" + name + ".py" for name i
     "capture", "retargeting", "motion_styling", "cleanup_workflow",
     "export_models", "export_workflow", "fbx_validation", "export_publisher", "external",
     "blender_export_adapter",
+    "geometry_contract",
 ))
 _FIXTURE_RELATIVE = {
     "fixture.sample.cube": "samples/Cube.casc", "fixture.sample.cascy": "samples/Cascy.casc",
@@ -58,6 +61,11 @@ def _implementation_files(route: str | None) -> tuple[str, ...]:
     result = _COMMON_IMPLEMENTATION + ((f"cascadeur_side/cascadeur_complete/handlers/{handler}.py",) if handler else ())
     if prefix in {"animation", "physics", "rigging", "io", "files", "motion", "export"}:
         result += _MOTION_DEPENDENCIES
+    if route in {"system.observe_geometry_capture", "system.get_geometry_capture"}:
+        result += _MOTION_DEPENDENCIES + ("cascadeur_side/cascadeur_complete/native_geometry_capture.py",
+            "cascadeur_side/cascadeur_complete/geometry_policy.py", "cascadeur_side/cascadeur_complete/handlers/mesh.py")
+    if route == "generation.unbaking":
+        result += ("src/cascadeur_complete/unbaking_contract.py", "cascadeur_side/cascadeur_complete/native_unbaking.py")
     return result
 
 

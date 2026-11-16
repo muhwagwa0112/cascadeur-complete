@@ -1,0 +1,24 @@
+{
+  "base_commit": "fc0e98eaa30e819f98880a32dce30c6767a5cc64",
+  "status": "proposal_not_applied_not_executed",
+  "source_files": {
+    "scripts/verify-install.ps1": {
+      "sha256": "a3c72eaf75fc5036cc4ad23d079e9eaeb914832885474bd9d1ee753c780d8d7a"
+    },
+    "cascadeur_side/cascadeur_complete/native_adapters.py": {
+      "sha256": "fd36a0c954cf0fd9206c5a124e84c8ce305eb1fd2e5f6f813557cc9ea24d0eb7"
+    },
+    "cascadeur_side/cascadeur_complete/native_interpolation_qualification.py": {
+      "sha256": "a19018381a4e76682e2c75fba18dc3fd01ba290bfde78a27674c2f60cef7c233"
+    },
+    "cascadeur_side/cascadeur_complete/native_independent_position.py": {
+      "sha256": "354866efee7de7ca146a3260e75adba2b173d3df1b7335a22fed7d2bf734f1d5"
+    }
+  },
+  "added_source": "cascadeur_side/cascadeur_complete/native_probe_retention.py",
+  "patch_order": [
+    "01_exact_installation_profile.proposed.patch",
+    "02_retain_qualification_fixtures.proposed.patch"
+  ],
+  "verification": "No parser, AST, apply check, test, installation, app, or build was executed by this agent."
+}

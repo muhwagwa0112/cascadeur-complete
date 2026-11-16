@@ -449,7 +449,7 @@ class RecipeRunner:
             if step.stage == "preflight":
                 self._check_plan(plan, run)
                 return self._persist_result(run, pending, {"supported": True})
-            if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "insertion_readback", "refinement_correction", "analyze", "solve", "quality", "host_retarget"}:
+            if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "quality_capture", "actual_verify", "insertion_readback", "refinement_correction", "analyze", "solve", "quality", "host_retarget"}:
                 return self._host_step(run, pending, step, plan)
             if step.stage in {"export_validate", "publish"}:
                 return self._export_host_step(run, pending, step, plan)
@@ -543,6 +543,17 @@ class RecipeRunner:
         ref = records[-1].artifact_refs[-1]
         return self.store.read_artifact(run.run_id, ref)
 
+    def _actual_geometry(self,run,plan,actual):
+        if plan.spec.geometry_capture is None:
+            return None
+        from .motion_geometry import load_native_geometry
+        sealed = self._latest(run,"geometry_capture")
+        if sealed.get("manifest",{}).get("motion_capture_digest") != digest(actual["global"]):
+            raise RecipeConflict("GEOMETRY_MOTION_CAPTURE_MISMATCH")
+        return load_native_geometry(sealed, context=MotionContext.from_dict(actual["global"]["context"]),
+            semantics=plan.spec.quality.collision_semantics, verifier=self.service.verify_geometry_capture,
+            memory_budget_bytes=plan.spec.geometry_capture.max_array_bytes)
+
     def _cleanup_result(self, run, plan, stage, cleanup_index):
         permits = [item for item in plan.steps if item.stage == stage
                    and item.fixed_parameters.get("cleanup_index") == cleanup_index]
@@ -593,6 +604,23 @@ class RecipeRunner:
         plan = plan.model_copy(update={"spec": self.effective_spec(plan.spec, run)})
         validate_quality_policy(plan.spec.quality, self._profile(plan.spec), plan.spec.intent,
                                 self._include_mesh(plan.spec, self._profile(plan.spec)))
+        if step.stage == "actual_verify":
+            actual = self._cleanup_result(run, plan, "actual_readback", step.fixed_parameters["cleanup_index"])
+            verification = self._verify_actual(run, plan, actual, step)
+            policy = plan.spec.quality
+            if plan.spec.export is not None:
+                policy = policy.model_copy(update={"required_metrics":tuple(name for name in policy.required_metrics
+                    if name not in {"position_readback_m","rotation_readback_rad"})})
+            report = evaluate_actual_quality(_batch(self._latest(run,"baseline_capture")["global"]),
+                _batch(actual["global"]), self._profile(plan.spec), plan.spec.intent, policy,
+                supports=self._supports(plan.spec), geometry=self._actual_geometry(run,plan,actual),
+                capture_verifier=self.service.recipe_verify_capture,
+                geometry_verifier=self.service.verify_geometry_capture).as_dict()
+            if verification["status"] != "pass":
+                report["status"] = "fail"
+                report["reason_codes"].extend(verification["reason_codes"])
+            return self._persist_result(run, record, report, **({} if report["status"]=="pass" else
+                {"step_state":"failed", "state":"failed", "blocked_reason":"ACTUAL_READBACK_FAILED"}))
         if step.stage == "host_retarget":
             from .recipe_store import file_sha256
             source = plan.spec.motion.source
@@ -613,7 +641,7 @@ class RecipeRunner:
                 return self._persist_result(run, record, result, state="blocked", blocked_reason="HOST_RETARGET_UNVERIFIED")
             return self._persist_result(run, record, result)
         used = run.budgets_used.model_dump()
-        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "insertion_readback"}:
+        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "quality_capture", "insertion_readback"}:
             # Upper bound covers compact read chunks, rotation/local capture,
             # and source certification before entering the capture helper.
             n = plan.spec.clip.last_frame - plan.spec.clip.first_frame + 1
@@ -661,7 +689,7 @@ class RecipeRunner:
         # or host solver. Pure compute may be repeated after a crash, never writes.
         record = record.model_copy(update={"state": "ready"})
         run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
-        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "insertion_readback"}:
+        if step.stage in {"source_capture", "baseline_capture", "retarget_capture", "actual_readback", "quality_capture", "insertion_readback"}:
             value = self._capture(plan.spec, source=run.current_binding)
             binding = SourceBinding.model_validate(value["global"]["source_binding"])
             if not binding.complete:
@@ -694,7 +722,8 @@ class RecipeRunner:
                 if topology["completion_receipt_digest"] != digest(receipt):
                     raise RecipeConflict("KEY_INSERTION_RECEIPT_MISMATCH")
                 value.update(key_layout=observed.result, topology_verification=topology)
-            if step.stage in {"actual_readback", "insertion_readback"}:
+            if step.stage in {"actual_readback", "insertion_readback"} and not (
+                    step.stage == "actual_readback" and plan.spec.geometry_capture is not None):
                 verification = self._verify_actual(run, plan, value, step)
                 value["verification"] = verification
                 if verification["status"] != "pass":
@@ -721,6 +750,8 @@ class RecipeRunner:
         baseline = self._latest(run, "baseline_capture")
         actual = self._latest(run, "actual_readback") if any(
             item.step_id.endswith("-actual_readback") and item.result for item in run.steps) else baseline
+        if plan.spec.geometry_capture is not None and step.stage == "quality":
+            actual = self._latest(run,"quality_capture")
         if step.stage == "analyze":
             batch = _batch(baseline["global"])
             validate_samples(batch, {key: ("position",) for key in batch.object_ids})
@@ -773,7 +804,9 @@ class RecipeRunner:
         native_policy = full_policy.model_copy(update={
             "required_metrics": tuple(name for name in full_policy.required_metrics if name not in deferred)})
         report = evaluate_actual_quality(original, batch, rig, plan.spec.intent, native_policy,
-            supports=self._supports(plan.spec), capture_verifier=getattr(self.service, "recipe_verify_capture", None)).as_dict()
+            supports=self._supports(plan.spec), geometry=self._actual_geometry(run,plan,actual),
+            geometry_verifier=getattr(self.service,"verify_geometry_capture",None),
+            capture_verifier=getattr(self.service, "recipe_verify_capture", None)).as_dict()
         report.update(quality_scope="pre_export_native" if plan.spec.export is not None else "native",
             approved_quality_policy_digest=digest(full_policy),
             evaluated_required_metrics=list(native_policy.required_metrics),
@@ -845,7 +878,9 @@ class RecipeRunner:
             else:
                 report = evaluate_actual_quality(_batch(original["global"]), world, self._profile(plan.spec), plan.spec.intent,
                     policy, supports=self._supports(plan.spec), prediction=prediction,
-                    capture_verifier=self.service.recipe_verify_capture).as_dict()
+                    geometry=self._actual_geometry(run,plan,actual),
+                    capture_verifier=self.service.recipe_verify_capture,
+                    geometry_verifier=self.service.verify_geometry_capture).as_dict()
             from .motion_quality import compare_captures
             readback = compare_captures(_batch(candidate["predicted_target"]), local)
             for name, metric in readback.items():
@@ -867,7 +902,9 @@ class RecipeRunner:
             world = _batch(actual["global"])
             report = evaluate_actual_quality(_batch(original["global"]), world, self._profile(plan.spec), plan.spec.intent,
                 policy, supports=self._supports(plan.spec), prediction=prediction,
-                capture_verifier=self.service.recipe_verify_capture).as_dict()
+                geometry=self._actual_geometry(run,plan,actual),
+                capture_verifier=self.service.recipe_verify_capture,
+                geometry_verifier=self.service.verify_geometry_capture).as_dict()
             from .motion_quality import compare_captures
             readback = compare_captures(prediction, world)
             for name, metric in readback.items():
@@ -1008,6 +1045,21 @@ class RecipeRunner:
 
     def _prepare(self, run, record, step, plan):
         context = {}
+        if step.stage == "motion" and plan.spec.motion.mode == "native_unbaking":
+            from .unbaking_contract import require_unbaking_step
+            require_unbaking_step(self.service, plan.spec.motion.unbaking_step)
+        if step.stage == "geometry_capture":
+            spec = self.effective_spec(plan.spec,run)
+            capture = self._latest(run,step.fixed_parameters["after"])
+            batch = capture["global"]
+            origins = [item for item in run.steps if item.step_id.endswith("-evaluation")
+                       and item.execution_outcome=="succeeded" and item.request_id]
+            if not origins:
+                raise RecipeConflict("GEOMETRY_ORIGIN_EVALUATION_RECEIPT_REQUIRED")
+            context["geometry_arguments"] = {**spec.geometry_capture.model_dump(mode="json"),
+                "capture_id":str(uuid.uuid5(uuid.UUID(run.run_id),step.step_id)),
+                "motion_source_binding":batch["source_binding"], "motion_capture_digest":digest(batch),
+                "origin_request_id":origins[-1].request_id, "context":batch["context"]}
         topology_delta = None
         if step.stage == "correction":
             index = step.fixed_parameters["cleanup_index"]
@@ -1097,6 +1149,14 @@ class RecipeRunner:
             usage["written_keys"] += step.max_effect_from_baseline.maximum_written_keys
             usage["generated_keys"] += step.max_effect_from_baseline.maximum_added_keys
         usage["correction_passes"] += int(step.stage in {"correction", "key_insert"})
+        if step.stage == "geometry_capture":
+            policy = plan.spec.geometry_capture
+            count = (plan.spec.clip.last_frame-plan.spec.clip.first_frame+1)*len(policy.mesh_ids)
+            if count > policy.max_calculations:
+                raise RecipeConflict("GEOMETRY_CALCULATION_BUDGET_EXCEEDED")
+            usage["geometry_calculations"] += count
+            usage["memory_bytes"] = max(usage["memory_bytes"],policy.max_array_bytes)
+            usage["disk_bytes"] += policy.max_artifact_bytes
         usage = BudgetUsage.model_validate(usage)
         validate_usage(plan, usage, run.deadline)
         record = record.model_copy(update={"state": "preparing", "attempt_id": attempt_id, "request_id": request_id,
@@ -1233,7 +1293,7 @@ class RecipeRunner:
             if outcome == "succeeded":
                 host_result = (record.result or {}).get("host_commit_result")
                 repeatable_evidence = (record.stage_effect is not None and record.stage_effect.operation_name
-                                       in {"safety.bootstrap", "safety.checkpoint", "io.export_fbx", "motion.key_topology_insert"})
+                                       in {"safety.bootstrap", "safety.checkpoint", "io.export_fbx", "motion.key_topology_insert", "system.observe_geometry_capture"})
                 recoverable_observation = repeatable_evidence and (host_result is None or (
                     host_result.get("outcome") == "outcome_unknown" and host_result.get("error_code") != "POSTCONDITION_FAILED"))
                 if not recoverable_observation and (host_result is None or not host_result.get("ok")):
@@ -1300,6 +1360,26 @@ class RecipeRunner:
                      "before_export": record.stage_data["before_export"]}
             binding = effect.source_binding
             transition["export"] = "staged"
+        elif step.stage == "geometry_capture":
+            binding = self.service.recipe_successor_source(effect,receipt)
+            sealed = self.service.get_geometry_capture(effect.arguments["capture_id"])
+            if not sealed.ok:
+                raise RecipeConflict("GEOMETRY_TERMINAL_SEAL_UNAVAILABLE: "+str(sealed.error_message))
+            value = sealed.result
+            manifest = value.get("manifest",{})
+            if (manifest.get("completion_receipt_digest") != digest(receipt)
+                    or manifest.get("geometry_operation_source_digest") != digest(effect.source_binding)
+                    or manifest.get("geometry_operation_successor_digest") != digest(binding)):
+                raise RecipeConflict("GEOMETRY_RECEIPT_BINDING_MISMATCH")
+            checked = self.service.verify_geometry_capture(manifest,value.get("geometry_digest"))
+            if not checked.ok:
+                raise RecipeConflict("GEOMETRY_MANIFEST_UNVERIFIED")
+            paths = [window["path"] for windows in manifest.get("windows",{}).values() for window in windows]
+            directory = Path(effect.output_paths[0])
+            paths.extend(str(directory/name) for name in ("candidate.json","completion.json"))
+            if (any(Path(path).parent != directory for path in paths)
+                    or sum(Path(path).stat().st_size for path in paths) > plan.spec.geometry_capture.max_artifact_bytes):
+                raise RecipeConflict("GEOMETRY_RETAINED_ARTIFACT_BUDGET_EXCEEDED")
         else:
             binding = self.service.recipe_successor_source(effect, receipt)
             value = {"source_binding": binding.model_dump(mode="json"), "receipt_digest": digest(receipt)}

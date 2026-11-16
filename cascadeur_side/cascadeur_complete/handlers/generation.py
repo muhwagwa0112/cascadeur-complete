@@ -132,6 +132,7 @@ def unbaking(scene, arguments, request, context):
 
     source = request.get("source_binding")
     guards.assert_source(scene, source, operation_name="generation.unbaking", arguments=arguments)
+    native_unbaking.require_step_contract(scene, step, source=source, arguments=arguments)
     scope = source["scope"]
     object_ids, layer_ids = arguments["object_ids"], arguments["layer_ids"]
     first, last = arguments["first_frame"], arguments["last_frame"]

@@ -1,13 +1,35 @@
-# Cascadeur motion r4 구현 상태와 남은 문제
+# Cascadeur motion r5 구현 상태와 남은 문제
 
 작성일: 2026-11-15 / 갱신: 2026-11-16 (Asia/Seoul)  
-대상: `feat/cascadeur-motion-r3`, r3 구현 `c55981152f40afee24221d70aa972235754a105e` 이후 변경  
-읽은 원격 개선안: `origin/docs/cascadeur-motion-plan-r4`, `6a9338c`의 `ADDITIONAL_IMPLEMENTATION_PLAN.md`와 `implementation_tasks.json` 전체  
+대상: `feat/cascadeur-motion-r3`, r5 기준 구현 `fc0e98eaa30e819f98880a32dce30c6767a5cc64` 이후 변경  
+읽은 최신 원격 개선안: `origin/docs/cascadeur-motion-plan-r5`, `dffa8f9956a01c15e9db02cee33e490f3569cd05`의 26개 파일 전체(6,101행); 아래 r4 기록은 당시의 이력  
 고정 제품 목록: Cascadeur `2026.1.3.0.15619` / 실제 설치·실행: `2026.2.3.0.16863`
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: 설치 SDK의 실제 mesh 계산 경로 수정
+### 최신 추가: R5 전체 목표 재설정과 호스트·브리지 연결
+
+원격을 다시 fetch해 r5 최신 `dffa8f9`, 구현 branch의 기준 `fc0e98e`를 확인했다. 문서·참조 코드·patch·task 전체를 읽은 뒤 **R5-01~10 전체를 새 목표로 설정**했다. 목표는 원 unknown을 보존하면서 incident admission, 원 시도 완료 판정, 유한 setup 보존, geometry 파일 효과/품질, P0 직렬화와 unbaking 계약을 실제 entry point에 연결하는 것이다. 원격 제안 26개 파일은 `docs/implementation/cascadeur-motion-r5`에 원문으로 보관했으며, 제안 파일 내부의 `not_applied` 등은 작성 당시 상태다. 현재 구현 상태는 이 절을 따른다. 실앱 증거가 필요한 전체 목표는 아직 완료하지 않았다.
+
+- 별도 목적 키로 인증하는 incident journal/control과 고정 domain registry를 추가했다. 원 signed outbox·terminal의 canonical/raw digest, store UUID·물리 ID, journal seq/이전 hash/MAC/head를 검증한다. 실제 global/isolated 두 store를 새 registry에 등록하고 host-only inspect로 읽었다. 원 키와 요청/receipt는 변경하지 않았고 registry digest는 `f615836ace3cb61a91152b40d0f394504190c083cb7bd6f4ef08b26af552c89d`다. 원 두 요청 `ffb7fc8e-417c-454c-a669-48625a086eda`, `fcf3352a-483c-4f9c-bc18-8b61a58822eb`는 모두 **open**, journal seq 0이며 새 종료·격리 작업은 하지 않았다. 두 raw terminal hash는 각각 `f871806f1b62d7127a4316a160e83f6baa249fa7078024eb0b659d09b49a30fb`, `ac0afaf64891be8405acdf2c66c7d98789555f55acb2969904d851ba6f2e1138`로 원 기록과 같다.
+- 공개 incident inspect/observe/prepare/commit, bounded native metadata/original-observation reader, 별도 local operator 승인 명령을 연결했다. immutable outbox 뒤 발급하는 admission sidecar는 전체 domain snapshot, request/source/안전 인자, epoch/전체 loaded bytes, 만료와 한 번의 native claim을 묶는다. native는 scene routing 전과 각 쓰기 경계에서 다시 검증한다. sidecar 없는 이전 sender, 다른 root, stale peer incident로 새 source/setup/effect를 통과시키지 않는다. 원 request ID의 terminal 재조회는 기존 결과를 그대로 반환한다. 원 시도 private evidence를 잃으면 새 프로세스의 성공으로 대체하지 않는다.
+- 실패 완료 기록은 원 adapter attempt·실제 after·callback trace·effect closure와 결합하며 terminal 기록 직전 다시 확인한다. 원 terminal 뒤의 callback revocation은 receipt를 다시 쓰지 않고 epoch를 격리한다. 실패에서 `result=None`이어도 원 오류와 별도 post-source 오류를 보존한다. insertion source는 성공·실패 모두 소비한다. 성공-only trial을 실패 lifetime 증거로 사용하지 않는다.
+- `verify-install.ps1`에 catalog-2026.1과 independent-2026.2의 exact profile을 분리했다. setup은 별도 검토·승인한 유한 helper sequence만 dispatch하며 snapshot 하위의 새 계획 폴더/정확한 step 폴더와 tab/file 상한을 묶는다. 통합 중 계획의 중첩 경로와 보존기의 단일 경로 제한이 불일치하던 결함을 수정했다. helper 자체도 admission을 먼저 확인한다. 성공·실패의 탭/파일은 보존하고 자동 삭제·재실험하지 않는다. broad scene qualifier는 별도 lifecycle이 없어 거절한다.
+- geometry capture를 별도 file effect와 recipe stage로 연결했다. mesh/frame/계산·배열·파일 예산, read/compute/read, exclusive 파일과 목적별 completion sidecar, terminal 이후 메모리 봉인/원 manifest 조회, 같은 handle의 제한된 NPZ 검증을 추가했다. 기존 raw mesh sampler의 NPZ 생성도 readonly가 아닌 file effect로 분류하고 미자격 route를 gate했다. 실제 NPZ 재현에서 float64 frame grid가 정수와 같다는 이유로 통과하던 결함을 찾아 canonical little-endian int64 grid를 요구하도록 고쳤다.
+- checkpoint schema v2는 P1/P2/load/restored-save를 모두 하나의 불변 P0와 직접 비교한다. 원 anchor와 실제 복구 raw projection·작업 파일 hash·후속 source를 분리하고 기존 v1 exact 경로를 유지한다. unbaking 세 step은 공개 prepare/recipe 예약/native selection 전에 각 exact lowering·scope·완료 계약을 요구한다. 새 공개 MCP 도구 11개와 `recipe_plan` geometry policy schema를 등록하고 의도된 golden을 갱신했다.
+
+**실제 설치 확인:** 이번 재조회에서도 `C:\Program Files\Cascadeur\cascadeur.exe`의 ProductVersion/FileVersion은 `2026.2.3.0.16863`이며 PID `2328`, 시작 `2026-11-16 06:14:42.902727 +09:00`이다. 실행 파일/프로세스 확인이며 새 native 코드의 실앱 실행 확인은 아니다. 실행 중인 앱의 탭을 닫거나 설치 교체·hot reload·재시작하지 않았다. 이 새 source와 기존 loaded bridge의 자격은 서로 재사용할 수 없다.
+
+**현재 남은 구체적 작업과 한계:**
+
+- 두 legacy unknown에는 원 생산자·하위 작업·외부 consumer·리소스 범위를 닫는 독립 증거가 없다. 원 private completion도 소급 생성할 수 없다. 따라서 실제 executable retirement plan은 준비되지 않았고 operator 승인을 요청하거나 발급하지 않았다. Windows handle/file ID·정확한 PID/creation time·이미지 hash·termination wait·OS receipt·물리 분리 구현은 추가했으나, production의 원 scope/baseline/workspace lineage verifier enrollment와 producer-closure issuer 연결은 아직 없다. 이 hook을 실제 증거와 연결해야 종료·격리 및 새 workspace로 진행할 수 있으며 현재 OS executor는 실행하지 않았다. 임의 PID 목록이나 현재 PID `2328`로 원 생산자를 추정하지 않는다.
+- geometry의 설치 SDK 좌표/transform·동기 완료·dependency closure calibration registry는 비어 있다. mutation-origin successor rebind도 미지원이다. 경로는 실패 전에 gate되며 일반 rig geometry/최종 품질의 실앱 성공을 주장하지 않는다.
+- 직렬화 numeric field-role/tolerance의 실제 native qualification registry는 비어 있다. exact 비교는 유지하고 허용 오차를 임의로 늘리지 않았다. 비정확 저장 drift가 생기는 실앱 checkpoint/복구 성공은 미확인이다.
+- unbaking 세 step의 exact action/lowering/완료/topology·key 생성 상한 증거와 insertion 실패 lifetime issuer는 미자격이다. setup 경로를 추가한 것이 기능 자격이나 원 unknown 해결을 뜻하지 않는다. clean 설치/새 loaded epoch와 실제 recipe·consumer 납품도 미완료다.
+
+**실행한 한정 확인:** 최종 `tests/test_incident_admission.py tests/test_native_probe_retention.py`는 **`4 passed in 1.31s`**였다. 실제 queue/outbox/sidecar/native drain·signed receipt 연결, scene 접근 trap, 원 terminal 재조회, 이전 sender 거절, peer snapshot 변경/복제 키 거절, journal append/reload·변조 거절, exact setup 부모/step 폴더·단일 dispatch와 fixture 보존 경계를 확인했다. SDK helper는 double이며 실앱 자격 증거가 아니다. 별도 agent의 좁은 완료/원 증거 재현은 실제 guard/receipt 경로에 private adapter/producer double을 사용했고, NPZ 10사례는 실제 파일로 shape/dtype/frame/hash/길이·과대 header·중복 ZIP 거절을 확인했다. 새 MCP 도구는 in-process MCP Client의 실제 목록/스키마 조회로 등록을 확인했다(기존 도구 삭제 0, resource/template 변화 0). golden 생성 자체를 독립 검증으로 세지 않는다. 전체 suite/build/lint/CI, 새 Windows OS executor, 새 profile verifier와 실제 native qualification은 실행하지 않았다.
+
+### 이전 추가: 설치 SDK의 실제 mesh 계산 경로 수정
 
 현재 checkout의 원격 개선안은 앞 절과 같은 r4이며 전체 목표를 축소하지 않았다. 실제 앱 PID `2328`이 이번 CIM 조회에 다시 반환됐다. 앞선 빈 조회 결과는 종료 증거가 아니며, 현재 실행 중인 앱에 설치를 강행하거나 bridge를 hot reload하지 않았다.
 

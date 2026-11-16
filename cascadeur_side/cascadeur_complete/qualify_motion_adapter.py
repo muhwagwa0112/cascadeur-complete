@@ -6,13 +6,14 @@ def command_name():
 
 
 def command_description():
-    return "Observe finite interpolation and existing-position-key writes in owned disposable scenes; select an empty tab"
+    return "Authenticated setup only: observe finite interpolation and position writes; retain fixtures"
 
 
 def run(scene):
+    from .incident_admission import assert_current_setup_admission
+    assert_current_setup_admission()
     from .native_interpolation_qualification import ensure_independent_models
     from .native_independent_position import qualify_independent_position_writer
     models = ensure_independent_models()
     writer = qualify_independent_position_writer()
-    scene.success("Qualified independent position models and existing-key writer")
     return {"models": models, "writer": writer}

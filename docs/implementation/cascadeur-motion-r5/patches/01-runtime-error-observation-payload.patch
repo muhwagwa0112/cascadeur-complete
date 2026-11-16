@@ -1,0 +1,15 @@
+diff --git a/cascadeur_side/cascadeur_complete/runtime.py b/cascadeur_side/cascadeur_complete/runtime.py
+--- a/cascadeur_side/cascadeur_complete/runtime.py
++++ b/cascadeur_side/cascadeur_complete/runtime.py
+@@ -1552,6 +1552,11 @@
+         result = _error(request.get("feature_id", "request"), code, str(exc), started, state)
+         result["result"] = {"error_details": {"code": str(exc).split(":", 1)[0]}}
+     post_source = None
++    # Preserve failure observations and any exact post-source in the terminal
++    # result. _error() returns None; dropping these fields breaks recovery.
++    if dispatched and effect != "none" and result.get("ok") is False and result.get("result") is None:
++        result["result"] = {"error_details": {"code": result.get("error_code"),
++            "message": result.get("error_message")}}
+     if dispatched and effect != "none" and source is not None:
+         try:
+             supplied = (result.get("result") or {}).get("source_binding") if isinstance(result.get("result"), dict) else None

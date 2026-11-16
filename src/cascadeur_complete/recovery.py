@@ -246,15 +246,32 @@ def recovery_succeeded(result, permit):
     if observation is None and (manifest.get("native_completion") == "observed" or "authored_projection_digest" in manifest):
         return False
     if observation is not None:
+        if not isinstance(observation, dict) or not isinstance(saved, dict):
+            return False
         try:
             successor = SourceBinding.model_validate(data.get("post_source_binding"))
         except (TypeError, ValueError):
             return False
         projection = manifest.get("authored_projection_digest")
+        schema = manifest.get("schema_version", 1)
+        if schema == 2:
+            projection = data.get("restored_projection_digest")
+            serialization_digest = observation.get("serialization_observation_digest")
+            if (not isinstance(serialization_digest, str) or len(serialization_digest) != 64
+                    or any(c not in "0123456789abcdef" for c in serialization_digest)
+                    or observation.get("checkpoint_anchor_digest") != manifest.get("checkpoint_anchor_digest")
+                    or observation.get("reference_projection_digest") != manifest.get("reference_projection_digest")):
+                return False
+        elif schema != 1:
+            return False
         before_identity = {key: getattr(source.binding, key) for key in ("scene_instance_id", "document_lineage_id")}
         after_identity = {key: getattr(successor.binding, key) for key in ("scene_instance_id", "document_lineage_id")}
         successor_manifest = {**manifest, "working_path": expected_working,
                               "working_scene_instance_id": successor.binding.scene_instance_id}
+        if schema == 2:
+            successor_manifest.update(working_file_sha256=saved.get("sha256"), working_file_bytes=saved.get("length"),
+                working_projection_digest=projection, authored_projection_digest=projection,
+                serialization_observation_digest=serialization_digest)
         if (not isinstance(observation, dict) or not isinstance(saved, dict)
                 or not isinstance(projection, str) or len(projection) != 64
                 or any(character not in "0123456789abcdef" for character in projection)
@@ -273,7 +290,7 @@ def recovery_succeeded(result, permit):
                 or successor.sample_digest != projection or data.get("restored_projection_digest") != projection
                 or data.get("snapshot_manifest_digest") != canonical_digest(permit["snapshot_manifest"])
                 or observation.get("completion") != "native_observed"
-                or observation.get("schema_version") != 1 or saved.get("schema_version") != 1
+                or observation.get("schema_version") != schema or saved.get("schema_version") != 1
                 or observation.get("scene_before") != before_identity or observation.get("scene_after") != after_identity
                 or observation.get("dispatch_semantics") != "synchronous_no_yield"
                 or observation.get("runtime_epoch") != source.binding.runtime_epoch

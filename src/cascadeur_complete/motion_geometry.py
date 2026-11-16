@@ -10,6 +10,32 @@ import numpy as np
 from .motion_context import MotionInputError
 
 
+def load_native_geometry(sealed, *, context, semantics, verifier, memory_budget_bytes=256*1024*1024):
+    """Authenticate a sealed native manifest before constructing file tracks."""
+    from .capture import canonical_digest
+    manifest = sealed.get("manifest") if isinstance(sealed, dict) else None
+    key = sealed.get("geometry_digest") if isinstance(sealed, dict) else None
+    if (not isinstance(manifest, dict) or manifest.get("capture_kind") != "native_actual"
+            or canonical_digest(manifest) != key or manifest.get("context_digest") != canonical_digest(context.as_dict())
+            or manifest.get("frames") != list(map(int,context.frames))
+            or manifest.get("time_s") != context.time_s.tolist()
+            or manifest.get("space") != "global" or manifest.get("units") != "metres"):
+        raise MotionInputError("ACTUAL_MESH_PROVENANCE_UNVERIFIED","sealed native geometry/context differs")
+    checked = verifier(manifest, key) if callable(verifier) else None
+    if not getattr(checked,"ok",False) or (getattr(checked,"result",None) or {}).get("geometry_digest") != key:
+        raise MotionInputError("ACTUAL_MESH_PROVENANCE_UNVERIFIED","native private geometry verifier rejected manifest")
+    windows = manifest.get("windows")
+    if not isinstance(windows,dict) or not windows:
+        raise MotionInputError("INCOMPLETE_CAPTURE","native geometry windows are absent")
+    for values in windows.values():
+        if not values or any(item.get("position_field") != "canonical_positions_m"
+                or item.get("canonical_metres") is not True for item in values):
+            raise MotionInputError("ACTUAL_MESH_PROVENANCE_UNVERIFIED","canonical native windows required")
+    tracks = {key: WindowedSurfaceTrack(values, context.frames, context=context, semantics=semantics,
+                memory_budget_bytes=memory_budget_bytes) for key, values in windows.items()}
+    return {"manifest":manifest,"tracks":tracks}
+
+
 class ObservedSurfaceTrack:
     """Bounded in-memory evaluated geometry, normally decoded from a consumer.
 
@@ -83,20 +109,71 @@ class WindowedSurfaceTrack:
         from pathlib import Path
         if self._cached_index==index:
             return self._cached
+        # Release the previous window before allocating the next one. Keeping
+        # both would defeat the one-window resident-memory reservation.
+        self._cached=None; self._cached_index=None
         window=self.windows[index]; path=Path(window["path"])
         if not path.is_absolute() or not path.is_file():
             raise MotionInputError("INCOMPLETE_CAPTURE","immutable mesh window path does not exist")
         with path.open("rb") as stream:
             digest=hashlib.file_digest(stream,"sha256").hexdigest()
-        if digest!=window.get("sha256"):
-            raise MotionInputError("SOURCE_CHANGED","immutable mesh window digest differs")
-        with zipfile.ZipFile(path) as archive:
-            if sum(info.file_size for info in archive.infolist())>self.budget:
-                raise MotionInputError("RESOURCE_BUDGET_EXCEEDED","uncompressed mesh window exceeds memory budget")
-        with np.load(path,allow_pickle=False) as capture:
-            frames=np.asarray(capture["frames"])
-            positions=np.asarray(capture[window.get("position_field","positions")],dtype=float)
-            triangles=np.asarray(capture["triangles"])
+            if digest!=window.get("sha256"):
+                raise MotionInputError("SOURCE_CHANGED","immutable mesh window digest differs")
+            if window.get("bytes") is not None and stream.seek(0,2)!=window["bytes"]:
+                raise MotionInputError("SOURCE_CHANGED","immutable mesh window length differs")
+            stream.seek(0)
+            with zipfile.ZipFile(stream) as archive:
+                names=[info.filename for info in archive.infolist()]
+                if len(names)!=len(set(names)):
+                    raise MotionInputError("INCOMPLETE_CAPTURE","duplicate archive entries")
+                sizes=[info.file_size for info in archive.infolist()]
+                # NumPy's archive reader may hold a decoded byte chunk while
+                # filling the destination array; reserve one largest member.
+                if sum(sizes)+max(sizes,default=0)>self.budget:
+                    raise MotionInputError("RESOURCE_BUDGET_EXCEEDED","uncompressed mesh window exceeds memory budget")
+                # ZIP lengths alone do not bound an NPY allocation: a tiny
+                # malicious payload can declare an enormous array shape.
+                import math
+                for info in archive.infolist():
+                    if not info.filename.endswith(".npy"):
+                        raise MotionInputError("INCOMPLETE_CAPTURE","mesh archive contains a non-array entry")
+                    with archive.open(info) as array_stream:
+                        version=np.lib.format.read_magic(array_stream)
+                        if version==(1,0):
+                            shape,_,dtype=np.lib.format.read_array_header_1_0(array_stream,max_header_size=10000)
+                        elif version==(2,0):
+                            shape,_,dtype=np.lib.format.read_array_header_2_0(array_stream,max_header_size=10000)
+                        else:
+                            raise MotionInputError("INCOMPLETE_CAPTURE","unsupported mesh array header version")
+                        if (dtype.hasobject or len(shape)>4 or any(n<0 for n in shape)
+                                or math.prod(shape)*dtype.itemsize>self.budget
+                                or array_stream.tell()+math.prod(shape)*dtype.itemsize!=info.file_size):
+                            raise MotionInputError("INCOMPLETE_CAPTURE","mesh array header exceeds its exact bounded payload")
+            stream.seek(0)
+            with np.load(stream,allow_pickle=False) as capture:
+                frames=np.asarray(capture["frames"])
+                canonical=window.get("position_field")=="canonical_positions_m"
+                if (frames.ndim!=1 or frames.dtype.kind not in "iu"
+                        or (canonical and (frames.dtype.str!="<i8" or not frames.flags.c_contiguous))
+                        or not np.array_equal(frames,window["frames"])):
+                    raise MotionInputError("INCOMPLETE_CAPTURE","mesh window frame dtype/shape/grid differs")
+                positions=np.asarray(capture[window.get("position_field","positions")])
+                triangles=np.asarray(capture["triangles"])
+                if canonical:
+                    if (not window.get("canonical_metres") or positions.dtype.str!="<f8"
+                            or triangles.dtype.str!="<i8" or not positions.flags.c_contiguous
+                            or not triangles.flags.c_contiguous
+                            or list(positions.shape)!=window.get("vertices_shape")
+                            or list(triangles.shape)!=window.get("triangles_shape")
+                            or hashlib.sha256(memoryview(positions).cast("B")).hexdigest()!=window.get("canonical_vertices_sha256")
+                            or hashlib.sha256(memoryview(triangles).cast("B")).hexdigest()!=window.get("triangles_sha256")):
+                        raise MotionInputError("SOURCE_CHANGED","canonical array bytes/shape/dtype differ")
+                    raw=np.asarray(capture["raw_positions"])
+                    if (raw.dtype.str!="<f4" or raw.shape!=positions.shape or not raw.flags.c_contiguous
+                            or hashlib.sha256(memoryview(raw).cast("B")).hexdigest()!=window.get("raw_vertices_sha256")):
+                        raise MotionInputError("SOURCE_CHANGED","raw evaluated array bytes differ")
+                else:
+                    positions=np.asarray(positions,dtype=float)
             if (not np.array_equal(frames,window["frames"]) or positions.ndim!=3
                     or positions.shape[0]!=len(frames) or positions.shape[2]!=3 or not np.isfinite(positions).all()
                     or positions.nbytes+triangles.nbytes>self.budget):

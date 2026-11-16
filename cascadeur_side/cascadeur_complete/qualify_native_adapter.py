@@ -5,11 +5,12 @@ def command_name():
 
 
 def command_description():
-    return "Observe installed-SDK reader, existing-key writer and checkpoint clone in a disposable scene"
+    return "Authenticated setup only: observe finite native adapter and retain its qualification tabs"
 
 
 def run(scene):
+    from .incident_admission import assert_current_setup_admission
+    assert_current_setup_admission()
     from .native_adapters import qualify_disposable
     result = qualify_disposable()
-    scene.success("Qualified " + result["adapter_id"] + " on " + result["installed_build"])
     return result

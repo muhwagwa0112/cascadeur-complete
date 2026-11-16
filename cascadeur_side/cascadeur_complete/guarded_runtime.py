@@ -138,11 +138,49 @@ def assert_source(scene, source, *, operation_name=None, arguments=None):
 
 
 def begin_request(request):
+    from .native_completion import poll_revocations
+    poll_revocations()
     _LOCAL.request = request
     _LOCAL.write_phase = "not_started"
     _LOCAL.failure_kind = None
     _LOCAL.guard = None
     _LOCAL.effects = []
+    _LOCAL.adapter_attempt = None
+
+
+def begin_adapter_attempt(request, operation, adapter, scene):
+    from .native_completion import begin_adapter_attempt as begin
+    return begin(request, operation, adapter, scene)
+
+
+def current_adapter_attempt():
+    from .native_completion import current_adapter_attempt as current
+    return current()
+
+
+def adapter_attempt_identity(handle):
+    from .native_completion import adapter_attempt_identity as identity
+    return identity(handle)
+
+
+def bind_failure_observation(handle, record_ref):
+    from .native_completion import bind_failure_observation as bind
+    return bind(handle, record_ref)
+
+
+def lookup_failure_observation(handle, scene, request):
+    from .native_completion import lookup_failure_observation as lookup
+    return lookup(handle, scene, request)
+
+
+def selected_effect_for_request(request, scene):
+    from .native_completion import selected_effect_for_request as select
+    return select(request, scene)
+
+
+def revoke_adapter_observation(request, reason):
+    from .native_completion import revoke_adapter_observation as revoke
+    return revoke(request, reason)
 
 
 def assert_loaded_package():
@@ -168,9 +206,16 @@ def set_write_guard(guard):
 
 
 def before_write(source_guard=None):
+    from .native_completion import assert_epoch_usable
+    assert_epoch_usable()
     try:
-        source_guard = source_guard or getattr(_LOCAL, "guard", None)
-        if source_guard is not None:
+        # A supplied operation guard supplements admission; it cannot replace it.
+        from .incident_admission import assert_request_admission
+        assert_request_admission()
+        installed_guard = getattr(_LOCAL, "guard", None)
+        if installed_guard is not None:
+            installed_guard()
+        if source_guard is not None and source_guard is not installed_guard:
             source_guard()
     except Exception:
         _LOCAL.failure_kind = ("guard_rejected_before_first_write"
@@ -189,23 +234,37 @@ def write_observation():
 
 
 def previous_terminal(root, request):
-    from .runtime import _bridge_key, _sign_message
-    import hmac
+    from .runtime import _bridge_key
+    from .incident_store import read, verify_original
     directory = root / "state" / "request_records" / request["request_id"]
     original_path = directory / "request.json"
-    if original_path.is_file() and json.loads(original_path.read_text(encoding="utf-8")) != request:
-        raise ValueError("REQUEST_ID_CONFLICT")
+    if str(uuid.UUID(request["request_id"])) != request["request_id"]:
+        raise ValueError("INVALID_REQUEST_ID")
+    secret = _bridge_key(root)
+    if original_path.is_file():
+        original = read(original_path)
+        verify_original(original, secret)
+        if original != request:
+            raise ValueError("REQUEST_ID_CONFLICT")
+    terminal = None
     for index, path in enumerate(sorted((directory / "runtime_events").glob("*.json")), 1):
-        item = json.loads(path.read_text(encoding="utf-8"))
-        if (not hmac.compare_digest(item.get("mac", ""), _sign_message(item, _bridge_key(root)))
-                or item.get("request_digest") != digest(request) or item.get("seq") != index):
+        item = read(path)
+        verify_original(item, secret)
+        context = request.get("execution_context") or {}
+        if (terminal is not None or item.get("request_digest") != digest(request) or item.get("seq") != index
+                or item.get("operation_digest") != digest(request["operations"])
+                or item.get("request_id") != request["request_id"] or item.get("session_id") != request.get("session_id")
+                or item.get("host_instance_id", "") != request.get("host_instance_id", "")
+                or any(item.get(k) != context.get(k) for k in ("run_id", "step_id", "attempt_id", "lease_epoch"))
+                or item.get("dispatched") is True and request.get("runtime_epoch")
+                and item.get("runtime_epoch") != request["runtime_epoch"]):
             raise ValueError("INVALID_RECEIPT")
         if item["phase"] == "terminal":
             result = item.get("terminal_result")
             if not isinstance(result, dict) or digest(result) != item.get("result_digest"):
                 raise ValueError("INVALID_RECEIPT")
-            return result
-    return None
+            terminal = result
+    return terminal
 
 
 def canceled(root, request):

@@ -17,6 +17,7 @@ from .export_models import ExportProfile
 from .models import SceneBinding, SourceBinding
 from .motion_context import IntentConstraints
 from .motion_quality import QualityPolicy
+from .geometry_contract import GeometryCapturePolicy
 from .stage_contracts import BootstrapGrant, CheckpointObservation, DerivedTargetMapping, DerivedTargetRef, StageEffect
 from .unbaking_contract import UnbakingKeyLimits
 
@@ -253,6 +254,7 @@ class RunBudgets(RecipeModel):
     memory_bytes: PositiveInt = 536870912
     disk_bytes: PositiveInt = 2147483648
     output_bytes: PositiveInt = 1073741824
+    geometry_calculations: NonnegativeInt = 0
     per_step_seconds: PositiveFloat = 120
 
 
@@ -267,12 +269,21 @@ class RecipeSpec(RecipeModel):
     references: ReferenceInputs = Field(default_factory=ReferenceInputs)
     cleanup: tuple[CleanupPassSpec, ...] = ()
     quality: QualityPolicy
+    geometry_capture: "GeometryCapturePolicy | None" = None
     export: ExportProfile | None = None
     budgets: RunBudgets = Field(default_factory=RunBudgets)
 
     @model_validator(mode="after")
     def validate_permissions(self):
         scope = set(self.character.object_ids) if self.character.derived_target is None else set(self.character.derived_target.role_paths)
+        if self.geometry_capture is not None:
+            policy = self.geometry_capture
+            required_meshes = set(self.character.required_mesh_ids) | set(self.character.rig_profile.get("mesh_ids", []))
+            if (not required_meshes <= set(policy.mesh_ids)
+                    or policy.max_array_bytes > self.budgets.memory_bytes
+                    or policy.max_artifact_bytes > self.budgets.disk_bytes
+                    or policy.max_calculations > self.budgets.geometry_calculations):
+                raise ValueError("Geometry capture policy exceeds approved required-mesh/resource bounds")
         if tuple(self.intent.editable_frames) != (self.clip.first_frame, self.clip.last_frame):
             raise ValueError("Clip and editable intent range must match")
         if self.motion.mode == "native_unbaking":
@@ -316,7 +327,7 @@ class EffectBounds(RecipeModel):
     maximum_added_keys: NonnegativeInt = 0
     maximum_written_keys: PositiveInt = 60000
     output_paths: tuple[str, ...] = ()
-    owned_output_policy: Literal["none", "run_workspace", "export_stage"] = "none"
+    owned_output_policy: Literal["none", "run_workspace", "export_stage", "geometry_capture"] = "none"
 
 
 class StepPermit(RecipeModel):
@@ -398,6 +409,7 @@ class BudgetUsage(RecipeModel):
     memory_bytes: NonnegativeInt = 0
     disk_bytes: NonnegativeInt = 0
     output_bytes: NonnegativeInt = 0
+    geometry_calculations: NonnegativeInt = 0
 
 
 class StepRecord(RecipeModel):

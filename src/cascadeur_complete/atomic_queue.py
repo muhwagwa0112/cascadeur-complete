@@ -64,6 +64,16 @@ class AtomicQueue:
         self._outstanding[request.request_id] = request.nonce
         target = self.paths.requests / f"{request.created_at:.6f}-{request.request_id}.json"
         self.ledger.create(request.model_dump(mode="json"))
+        # Admission binds the final signed nonce/MAC payload, never a pre-sign
+        # approximation. Failed admission leaves the immutable outbox intact.
+        from .incident_admission import issue
+        try:
+            issue(self.paths.root, request.model_dump(mode="json"))
+        except Exception:
+            # The publication point has not been reached, so this NEW request
+            # is authoritatively unclaimed. Never use this for an old unknown.
+            self.ledger.record_unclaimed_cancel(request.request_id)
+            raise
         atomic_write_json(target, request.model_dump(mode="json"))
         return target
 

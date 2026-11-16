@@ -25,6 +25,76 @@ def _mesh_object(domain, arguments, context):
     return meshes[0]
 
 
+
+
+def _read_mesh_arrays(domain, object_id, context):
+    """Read typed raw topology/skin; this does not certify coordinate space."""
+    import numpy
+    viewer = domain.model_viewer()
+    behaviours = viewer.behaviour_viewer()
+    behaviour = behaviours.get_behaviour_by_name(object_id, "MeshObject")
+    manager = domain.assets_manager()
+    mesh = manager.at(behaviours.get_behaviour_asset(behaviour, "mesh"))
+    dependency = manager.at(behaviours.get_behaviour_asset(behaviour, "mesh_dependency"))
+    per_polygon = int(_value(mesh, "vertices_in_polygon"))
+    if per_polygon < 3:
+        raise ValueError("mesh polygons require at least three vertices")
+    corners = numpy.array([int(item.position_index) for item in _value(mesh, "vertices")], dtype=numpy.int32)
+    polygons = corners.reshape(-1, per_polygon)
+    # Fan-triangulate quads (or larger polygons) so the host always gets triangles.
+    triangles = numpy.concatenate(
+        [polygons[:, [0, corner, corner + 1]] for corner in range(1, per_polygon - 1)], axis=0
+    )
+    linked = list(behaviours.get_behaviour_objects_range(behaviour, "linked_objects"))
+    joints = [str(viewer.get_object_name(item)) for item in linked]
+    joint_ids = [str(item) for item in linked]
+    weights = _value(dependency, "vertices_weights")
+    weights = list(weights)
+    if not len(weights) or numpy.any(triangles < 0) or numpy.any(triangles >= len(weights)):
+        raise ValueError("mesh topology index is outside the vertex array")
+    dominant = numpy.full(len(weights), -1, dtype=numpy.int32)
+    offsets, weight_indices, weight_values = [0], [], []
+    for index, items in enumerate(weights):
+        best = None
+        seen = set()
+        for item in items:
+            joint, weight = int(item.index), float(item.weight)
+            if joint < 0 or joint >= len(joints) or joint in seen or not numpy.isfinite(weight) or weight < 0:
+                raise ValueError("invalid skin weight index/value or duplicate influence")
+            seen.add(joint)
+            weight_indices.append(joint)
+            weight_values.append(weight)
+            if weight > 0 and (best is None or weight > best[1]):
+                best = (joint, weight)
+        if best is not None:
+            dominant[index] = best[0]
+        offsets.append(len(weight_indices))
+    return {"triangles": triangles, "dominant": dominant, "joints": joints, "joint_ids": joint_ids,
+            "known_weights": dominant >= 0, "weight_offsets": numpy.asarray(offsets, dtype=numpy.int64),
+            "weight_indices": numpy.asarray(weight_indices, dtype=numpy.int32),
+            "weight_values": numpy.asarray(weight_values, dtype=numpy.float64)}
+
+
+def _sample_mesh_positions(domain, object_id, frames, vertex_count, context):
+    """Synchronously invoke the SDK reader; completion semantics need calibration."""
+    import numpy
+    csc = context["csc"]
+    positions = numpy.empty((len(frames), vertex_count, 3), dtype=numpy.float32)
+    for row, frame in enumerate(frames):
+        skinned = _value(csc.domain.calc_skinned_mesh(domain, object_id, frame), "positions")
+        values = numpy.asarray(skinned, dtype=numpy.float32)
+        # SkinnedMeshCalcResult.positions is declared as float32[3, 1]
+        # vectors. Retain the existing flat-vector payload contract as well.
+        if values.shape == (vertex_count, 3, 1):
+            values = values[:, :, 0]
+        if context.get("strict_geometry_shape") and values.shape != (vertex_count,3):
+            raise ValueError("INCOMPLETE_CAPTURE: exact typed evaluated mesh vector shape required")
+        if values.ndim != 2 or values.shape[0] != vertex_count or values.shape[1] < 3 or not numpy.isfinite(values[:, :3]).all():
+            raise ValueError("INCOMPLETE_CAPTURE: evaluated mesh vertex coverage is invalid")
+        positions[row] = values[:, :3]
+    return positions
+
+
 @handler("animation.mesh_sample", postconditions=("mesh_sample_written",))
 def mesh_sample(scene, arguments, _request, context):
     """Write a character's skinned mesh for a set of frames to an .npz file under the runtime state.
@@ -63,57 +133,13 @@ def mesh_sample(scene, arguments, _request, context):
     name = str(arguments.get("name", "mesh"))
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
         raise ValueError("name must be 1-64 characters of A-Z, a-z, 0-9, _ or -")
-    manager = domain.assets_manager()
-    mesh = manager.at(behaviours.get_behaviour_asset(behaviour, "mesh"))
-    dependency = manager.at(behaviours.get_behaviour_asset(behaviour, "mesh_dependency"))
-    per_polygon = int(_value(mesh, "vertices_in_polygon"))
-    if per_polygon < 3:
-        raise ValueError("mesh polygons require at least three vertices")
-    corners = numpy.array([int(item.position_index) for item in _value(mesh, "vertices")], dtype=numpy.int32)
-    polygons = corners.reshape(-1, per_polygon)
-    # Fan-triangulate quads (or larger polygons) so the host always gets triangles.
-    triangles = numpy.concatenate(
-        [polygons[:, [0, corner, corner + 1]] for corner in range(1, per_polygon - 1)], axis=0
-    )
-    linked = list(behaviours.get_behaviour_objects_range(behaviour, "linked_objects"))
-    joints = [str(viewer.get_object_name(item)) for item in linked]
-    joint_ids = [str(item) for item in linked]
-    weights = _value(dependency, "vertices_weights")
-    weights = list(weights)
-    if not len(weights) or numpy.any(triangles < 0) or numpy.any(triangles >= len(weights)):
-        raise ValueError("mesh topology index is outside the vertex array")
-    dominant = numpy.full(len(weights), -1, dtype=numpy.int32)
-    offsets, weight_indices, weight_values = [0], [], []
-    for index, items in enumerate(weights):
-        best = None
-        seen = set()
-        for item in items:
-            joint, weight = int(item.index), float(item.weight)
-            if joint < 0 or joint >= len(joints) or joint in seen or not numpy.isfinite(weight) or weight < 0:
-                raise ValueError("invalid skin weight index/value or duplicate influence")
-            seen.add(joint)
-            weight_indices.append(joint)
-            weight_values.append(weight)
-            if weight > 0 and (best is None or weight > best[1]):
-                best = (joint, weight)
-        if best is not None:
-            dominant[index] = best[0]
-        offsets.append(len(weight_indices))
-    estimated_bytes = len(frames) * len(weights) * 3 * 4
+    arrays = _read_mesh_arrays(domain, object_id, context)
+    vertex_count = len(arrays["dominant"])
+    estimated_bytes = len(frames) * vertex_count * 3 * 4
     max_bytes = arguments.get("max_bytes", 256 * 1024 * 1024)
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0 or estimated_bytes > max_bytes:
         raise ValueError("RESOURCE_BUDGET_EXCEEDED: mesh capture requires %s bytes" % estimated_bytes)
-    positions = numpy.empty((len(frames), len(weights), 3), dtype=numpy.float32)
-    for row, frame in enumerate(frames):
-        skinned = _value(csc.domain.calc_skinned_mesh(domain, object_id, frame), "positions")
-        values = numpy.asarray(skinned, dtype=numpy.float32)
-        # SkinnedMeshCalcResult.positions is declared as float32[3, 1]
-        # vectors. Retain the existing flat-vector payload contract as well.
-        if values.shape == (len(weights), 3, 1):
-            values = values[:, :, 0]
-        if values.ndim != 2 or values.shape[0] != len(weights) or values.shape[1] < 3 or not numpy.isfinite(values[:, :3]).all():
-            raise ValueError("INCOMPLETE_CAPTURE: evaluated mesh vertex coverage is invalid")
-        positions[row] = values[:, :3]
+    positions = _sample_mesh_positions(domain, object_id, frames, vertex_count, context)
     directory = runtime_root() / "state" / "mesh"
     directory.mkdir(parents=True, exist_ok=True)
     capture_id = uuid.uuid4().hex
@@ -121,14 +147,8 @@ def mesh_sample(scene, arguments, _request, context):
     numpy.savez(
         str(path),
         positions=positions,
-        triangles=triangles.astype(numpy.int32),
-        dominant=dominant,
-        joints=numpy.array(joints),
-        joint_ids=numpy.array(joint_ids),
-        known_weights=(dominant >= 0),
-        weight_offsets=numpy.asarray(offsets, dtype=numpy.int64),
-        weight_indices=numpy.asarray(weight_indices, dtype=numpy.int32),
-        weight_values=numpy.asarray(weight_values, dtype=numpy.float64),
+        triangles=arrays["triangles"].astype(numpy.int32),
+        **{key: numpy.asarray(value) for key,value in arrays.items() if key != "triangles"},
         frames=numpy.array(frames, dtype=numpy.int32),
     )
     if not path.is_file() or path.stat().st_size == 0:
@@ -140,6 +160,6 @@ def mesh_sample(scene, arguments, _request, context):
         "bytes": int(path.stat().st_size),
         "frame_count": len(frames),
         "vertex_count": int(positions.shape[1]),
-        "triangle_count": int(len(triangles)),
-        "joint_count": len(joints),
+        "triangle_count": int(len(arrays["triangles"])),
+        "joint_count": len(arrays["joints"]),
     }, []

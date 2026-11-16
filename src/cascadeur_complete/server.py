@@ -18,7 +18,8 @@ mcp = MCPServer(
     instructions=(
         f"Cascadeur baseline {SUPPORTED_BUILD}; build 2026.2.3.0.16863 permits only its live-qualified native subset. "
         "Read capabilities first. Every scene or file change is "
-        "prepared by a *_prepare tool (or change_prepare) and runs only through change_commit. "
+        "prepared by a *_prepare tool (or change_prepare) and runs through change_commit, "
+        "except separately approved finite setup and incident retirement, which use their exact *_commit tools. "
         "Never assume a gated feature ran."
     ),
 )
@@ -27,6 +28,84 @@ mcp = MCPServer(
 @lru_cache(maxsize=1)
 def service() -> CascadeurService:
     return CascadeurService()
+
+
+@mcp.tool()
+def incident_inspect(request_ref: dict | None = None) -> dict:
+    """Inspect all enrolled original incident domains without touching the app."""
+    try:
+        return service().incident_inspect(request_ref)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def incident_observe(request_ref: dict, expected_incident_head: dict, evidence_ref: str) -> dict:
+    """Append independently verified original-attempt evidence; preserve terminal bytes."""
+    try:
+        return service().incident_observe(request_ref, expected_incident_head, evidence_ref)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def incident_retirement_prepare(request_refs: list[dict], baseline_ref: dict, new_workspace: str) -> dict:
+    """Prepare a concrete containment plan or name missing evidence; execute nothing."""
+    try:
+        return service().incident_retirement_prepare(request_refs, baseline_ref, new_workspace)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def incident_retirement_commit(plan_digest: str, operator_authorization: dict) -> dict:
+    """Execute only an exact independently verified and separately approved retirement."""
+    try:
+        return service().incident_retirement_commit(plan_digest, operator_authorization)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def incident_diagnostic() -> dict:
+    """Read code-owned bridge/epoch/admission metadata, without querying a scene."""
+    from .models import Operation
+    return service().client.execute("incident_diagnostic", [Operation(name="system.incident_diagnostic", arguments={})]).model_dump(mode="json")
+
+
+@mcp.tool()
+def incident_observe_original(request_ref: dict) -> dict:
+    """Ask only the original attempt's private producer for bounded closure evidence."""
+    from .models import Operation
+    return service().client.execute("incident_observe_original", [Operation(name="system.incident_observe_original",
+        arguments={"original": request_ref})]).model_dump(mode="json")
+
+
+@mcp.tool()
+def setup_prepare(steps: list[str], workspace: str) -> dict:
+    """Prepare a finite qualification sequence; operator approval is separate."""
+    from .incident_setup import prepare
+    client = service().client
+    try:
+        return prepare(service().paths.root, steps, client.runtime_status.get("runtime_epoch"),
+                       client.runtime_status.get("adapter_fingerprint"), workspace)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def setup_commit(plan_digest: str, operator_authorization: dict) -> dict:
+    """Dispatch the exact approved finite setup once; never replay its invocation."""
+    from . import incident_store as store
+    from .models import Operation
+    try:
+        active = store.IncidentStore(service().paths.root)
+        plan = store.read(active.directory / "setup-plans" / (store.policy._digest_string(plan_digest, "plan digest")+".json"))
+        return service().client.execute("explicit_setup", [Operation(name=plan["steps"][0]["operation"],
+            arguments={"plan_digest": plan_digest, "operator_authorization": operator_authorization})],
+            request_id=plan["plan_id"]).model_dump(mode="json")
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
 
 
 def _invalid(message: str) -> dict[str, Any]:
@@ -744,6 +823,40 @@ def inbetweening_prepare(ttl: float=300, source_binding: SourceBinding | None=No
 
 
 @mcp.tool()
+def geometry_capture_prepare(arguments: dict[str, Any], source_binding: SourceBinding, ttl: float=300) -> dict[str, Any]:
+    """Prepare finite native geometry file effects, then run change_commit.
+
+    Arguments declare capture/origin IDs, exact motion source/capture/context,
+    meshes/pairs and three finite budgets. Native calibration is required;
+    declared coordinate policy is never physical metadata certification.
+    """
+    try:
+        from .geometry_contract import GeometryCaptureArguments
+        args = GeometryCaptureArguments.model_validate(arguments).model_dump(mode="json")
+        return _prepare('geometry_capture', 'system.observe_geometry_capture', args, ttl, source_binding)
+    except (ValueError, TypeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def geometry_capture_get(capture_id: str) -> dict[str, Any]:
+    """Read terminal-sealed geometry; creates no directories, files or native effects."""
+    try:
+        return service().get_geometry_capture(capture_id).model_dump(mode="json")
+    except (ValueError, TypeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def geometry_capture_verify(manifest: dict[str, Any], geometry_digest: str) -> dict[str, Any]:
+    """Authenticate current private geometry provenance and immutable window bytes."""
+    try:
+        return service().verify_geometry_capture(manifest, geometry_digest).model_dump(mode="json")
+    except (ValueError, TypeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
 def animation_unbaking_prepare(object_ids: list[str], layer_ids: list[str], first_frame: int, last_frame: int, topology_policy: UnbakingTopologyPolicy, step: Literal['prepare_keys_by_fulcrums', 'adjust_keys_and_interpolation', 'adjust_autoposing_lock_state']='adjust_keys_and_interpolation', ttl: float=300, source_binding: SourceBinding | None=None) -> dict[str, Any]:
     """Prepare an exact unbaking scope with explicit topology permissions and finite key limits.
 
@@ -753,6 +866,11 @@ def animation_unbaking_prepare(object_ids: list[str], layer_ids: list[str], firs
     if (not object_ids or not layer_ids or len(set(object_ids)) != len(object_ids)
             or len(set(layer_ids)) != len(layer_ids) or not 0 <= first_frame < last_frame):
         return _invalid('Unique explicit objects/layers and an increasing frame interval are required')
+    try:
+        from .unbaking_contract import require_unbaking_step
+        require_unbaking_step(service(), step)
+    except ValueError as exc:
+        return _invalid(str(exc))
     return _prepare('unbaking', 'generation.unbaking', {'step': step, 'object_ids': object_ids,
         'layer_ids': layer_ids, 'first_frame': first_frame, 'last_frame': last_frame,
         'topology_policy': topology_policy.model_dump(mode='json')}, ttl, source_binding)

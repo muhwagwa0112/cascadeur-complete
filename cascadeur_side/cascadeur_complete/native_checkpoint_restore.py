@@ -12,6 +12,7 @@ import json
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import csc
@@ -20,6 +21,7 @@ from . import guarded_runtime as guards
 from .native_scene_reader import read_scene
 
 _CHECKPOINTS = {}
+_CHECKPOINT_ANCHORS = {}
 _RESTORED = {}
 _COMPLETED = {}
 _ARGUMENTS = {"path", "snapshot_id", "snapshot_manifest_digest", "post_source_digest",
@@ -58,7 +60,8 @@ def _owned_path(path, run_id=None):
     return value
 
 
-def remember_checkpoint(scene, manifest, projection, *, run_id=None):
+def remember_checkpoint(scene, manifest, projection, *, run_id=None, immutable_anchor=None,
+                        checkpoint_projection=None, checkpoint_observation=None, serialization_observation=None):
     """Anchor a native-completed checkpoint immediately after its observed save.
 
     The checkpoint executor must first install the exact manifest in
@@ -88,8 +91,41 @@ def remember_checkpoint(scene, manifest, projection, *, run_id=None):
     raw = json.dumps(projection, ensure_ascii=False, allow_nan=False).encode()
     if len(raw) > 64 * 1024**2:
         raise ValueError("RECOVERY_PROJECTION_BUDGET_EXCEEDED")
+    fixed = None
+    if manifest.get("schema_version") == 2:
+        from .native_serialization import require_anchor, verify_serialization_observation
+        require_anchor(immutable_anchor)
+        verify_serialization_observation(checkpoint_observation, anchor=immutable_anchor,
+                                         projection=checkpoint_projection)
+        verify_serialization_observation(serialization_observation, anchor=immutable_anchor, projection=projection)
+        fixed_fields = {"reference_projection_digest": immutable_anchor.reference_projection_digest,
+            "checkpoint_observed_projection_digest": guards.digest(checkpoint_projection),
+            "checkpoint_file": {"schema_version": 1, "path": manifest["path"], "sha256": manifest["sha256"],
+                                "length": manifest["bytes"]},
+            "serialization_policy_digest": checkpoint_observation["serialization_policy_digest"],
+            "runtime_epoch": guards.RUNTIME_EPOCH, "adapter_fingerprint": guards.LOADED_FINGERPRINT}
+        anchor_digest = guards.digest(fixed_fields)
+        if (manifest.get("checkpoint_anchor_digest") != anchor_digest
+                or manifest.get("reference_projection_digest") != immutable_anchor.reference_projection_digest
+                or manifest.get("checkpoint_observed_projection_digest") != guards.digest(checkpoint_projection)
+                or manifest.get("working_projection_digest") != guards.digest(projection)
+                or manifest.get("serialization_observation_digest") != guards.digest(serialization_observation)):
+            raise ValueError("RECOVERY_IMMUTABLE_ANCHOR_CHANGED")
+        fixed = {"fields": fixed_fields, "immutable_anchor": immutable_anchor,
+                 "checkpoint_projection": _copy(checkpoint_projection),
+                 "checkpoint_observation": _copy(checkpoint_observation)}
+        prior = _CHECKPOINT_ANCHORS.get(anchor_digest)
+        if prior is not None and prior != fixed:
+            raise ValueError("RECOVERY_IMMUTABLE_ANCHOR_CONFLICT")
+        if prior is not None:
+            fixed = prior
+        _CHECKPOINT_ANCHORS[anchor_digest] = fixed
+    elif manifest.get("schema_version") != 1:
+        raise ValueError("RECOVERY_MANIFEST_SCHEMA_UNSUPPORTED")
     record = {"manifest": _copy(manifest), "projection": _copy(projection),
               "projection_digest": guards.digest(projection), "run_id": run_id}
+    if fixed is not None:
+        record["fixed_anchor"] = fixed
     key = guards.digest(manifest)
     prior = _CHECKPOINTS.get(key)
     if prior is not None and prior != record:
@@ -107,6 +143,10 @@ def _anchor(arguments):
     if record is None:
         raise ValueError("RECOVERY_CHECKPOINT_ANCHOR_UNAVAILABLE")
     manifest = record["manifest"]
+    if manifest.get("schema_version") == 2:
+        fixed = record.get("fixed_anchor")
+        if fixed is None or _CHECKPOINT_ANCHORS.get(manifest.get("checkpoint_anchor_digest")) is not fixed:
+            raise ValueError("RECOVERY_IMMUTABLE_ANCHOR_UNAVAILABLE")
     if (arguments["path"] != manifest["path"] or arguments["snapshot_id"] != manifest["snapshot_id"]
             or manifest["runtime_epoch"] != guards.RUNTIME_EPOCH
             or manifest["adapter_fingerprint"] != guards.LOADED_FINGERPRINT):
@@ -265,24 +305,58 @@ def _permit(request, arguments):
     return permit, receipt
 
 
+@dataclass(frozen=True)
+class NativeRestoreResult:
+    target: object
+    before: dict
+    after: dict
+    saved: dict
+    failed_digest: str
+    project_load: dict
+    restored_projection: dict
+    serialization_observation: dict | None
+    successor_manifest: dict
+
+    def __iter__(self):
+        # Retain the previous six-value diagnostic API; actual projection is
+        # explicit and is never inferred from the checkpoint's reference hash.
+        return iter((self.target, self.before, self.after, self.saved, self.failed_digest, self.project_load))
+
+
 def _restore_native(scene, anchor, working):
     """The same complete native primitive is used by qualification and dispatch."""
     from .native_adapters import _WORKSPACES, _save_observed
     from .native_project_io import load_project_copy
     original_projection, original_path = read_scene(scene), str(scene.get_path_name())
+    def original_unchanged():
+        if read_scene(scene) != original_projection or str(scene.get_path_name()) != original_path:
+            raise ValueError("RECOVERY_FAILED_SCENE_CHANGED")
     before = dict(guards.scene_instance(scene))
     manager = csc.app.get_application().get_scene_manager()
     if manager.current_scene() is not scene or working.exists():
         raise ValueError("RECOVERY_CURRENT_SCENE_OR_TARGET_CHANGED")
     path = Path(anchor["manifest"]["path"])
+    fixed = anchor.get("fixed_anchor")
+    serialization = None
     try:
         target, load_observation = load_project_copy(path, working,
-            expected_sha256=anchor["manifest"]["sha256"], expected_length=anchor["manifest"]["bytes"])
-        if read_scene(target) != anchor["projection"]:
+            expected_sha256=anchor["manifest"]["sha256"], expected_length=anchor["manifest"]["bytes"],
+            source_guard=original_unchanged)
+        if fixed is not None:
+            from .native_serialization import compare_with_private_policy
+            compare_with_private_policy(target, fixed["immutable_anchor"], phase="project_load")
+        elif read_scene(target) != anchor["projection"]:
             raise ValueError("RECOVERY_NATIVE_READBACK_DIFFERS")
+        from .incident_admission import assert_request_admission
+        assert_request_admission()
+        original_unchanged()
         saved = _save_observed(target, working)
+        if fixed is not None:
+            serialization = compare_with_private_policy(target, fixed["immutable_anchor"], phase="restored_save")
+        restored_projection = read_scene(target)
         actual_path = str(target.get_path_name())
-        if (read_scene(target) != anchor["projection"] or not actual_path
+        if ((fixed is None and restored_projection != anchor["projection"])
+                or (serialization is not None and restored_projection != serialization.projection) or not actual_path
                 or Path(actual_path).resolve() != working.resolve()):
             raise ValueError("RECOVERY_NATIVE_SAVE_READBACK_DIFFERS")
     finally:
@@ -297,9 +371,18 @@ def _restore_native(scene, anchor, working):
         raise ValueError("RECOVERY_SUCCESSOR_IDENTITY_INVALID")
     successor_manifest = {**anchor["manifest"], "working_path": str(working),
                           "working_scene_instance_id": after["scene_instance_id"]}
+    if fixed is not None:
+        successor_manifest.update(working_file_sha256=saved["sha256"], working_file_bytes=saved["length"],
+            working_projection_digest=guards.digest(restored_projection),
+            authored_projection_digest=guards.digest(restored_projection),
+            serialization_observation_digest=guards.digest(serialization.as_dict()))
     _WORKSPACES[after["scene_instance_id"]] = successor_manifest
-    remember_checkpoint(target, successor_manifest, anchor["projection"], run_id=anchor["run_id"])
-    return target, before, after, saved, guards.digest(original_projection), load_observation
+    kwargs = {} if fixed is None else {"immutable_anchor": fixed["immutable_anchor"],
+        "checkpoint_projection": fixed["checkpoint_projection"],
+        "checkpoint_observation": fixed["checkpoint_observation"], "serialization_observation": serialization.as_dict()}
+    remember_checkpoint(target, successor_manifest, restored_projection, run_id=anchor["run_id"], **kwargs)
+    return NativeRestoreResult(target, before, after, saved, guards.digest(original_projection), load_observation,
+        restored_projection, None if serialization is None else serialization.as_dict(), successor_manifest)
 
 
 def qualify_restore(scene, manifest, *, run_id=None):
@@ -324,11 +407,12 @@ def qualify_restore(scene, manifest, *, run_id=None):
                 or _WORKSPACES.get(guards.scene_instance(scene)["scene_instance_id"]) != manifest):
             raise ValueError("RECOVERY_QUALIFICATION_SOURCE_CHANGED")
     guards.before_write(unchanged)
-    target, before, after, saved, failed_digest, load_observation = _restore_native(scene, anchor, working)
+    restored = _restore_native(scene, anchor, working)
+    target, before, after, saved, failed_digest, load_observation = restored
     manager = csc.app.get_application().get_scene_manager()
     try:
         manager.set_current_scene(target)
-        if manager.current_scene() is not target or read_scene(target) != anchor["projection"]:
+        if manager.current_scene() is not target or read_scene(target) != restored.restored_projection:
             raise ValueError("RECOVERY_SUCCESSOR_ACTIVATION_UNOBSERVED")
     finally:
         manager.set_current_scene(scene)
@@ -338,9 +422,13 @@ def qualify_restore(scene, manifest, *, run_id=None):
         "installed_build": NativeCheckpointRestoreAdapter.observed_build(),
         "runtime_fingerprint": guards.LOADED_FINGERPRINT, "runtime_epoch": guards.RUNTIME_EPOCH,
         "dispatch_semantics": "synchronous_no_yield", "completion": "native_observed",
-        "snapshot_manifest_digest": guards.digest(manifest), "restored_projection_digest": anchor["projection_digest"],
+        "snapshot_manifest_digest": guards.digest(manifest), "restored_projection_digest": guards.digest(restored.restored_projection),
         "failed_projection_digest": failed_digest, "scene_before": before, "scene_after": after,
         "working_file": saved, "project_load": load_observation}
+    if restored.serialization_observation is not None:
+        observation.update(checkpoint_anchor_digest=manifest["checkpoint_anchor_digest"],
+            reference_projection_digest=manifest["reference_projection_digest"],
+            serialization_observation_digest=guards.digest(restored.serialization_observation))
     _COMPLETED[guards.digest(observation)] = _copy(observation)
     guards.finish_write()
     guards.observe_effect("safety.rollback", "completed", scene_before=before, scene_after=after, detail=observation)
@@ -434,6 +522,18 @@ class NativeCheckpointRestoreAdapter:
         before_identity = {key: before.get(key) for key in ("scene_instance_id", "document_lineage_id")}
         after_identity = {key: after.get(key) for key in ("scene_instance_id", "document_lineage_id")}
         manifest = source.get("scope", {}).get("snapshot_manifest")
+        if isinstance(manifest, dict) and manifest.get("schema_version") == 2:
+            next_manifest = successor.get("scope", {}).get("snapshot_manifest")
+            next_anchor = _CHECKPOINTS.get(guards.digest(next_manifest))
+            original_anchor = _CHECKPOINTS.get(guards.digest(manifest))
+            if (not next_anchor or not original_anchor
+                    or next_anchor.get("fixed_anchor") is not original_anchor.get("fixed_anchor")
+                    or observation.get("checkpoint_anchor_digest") != manifest.get("checkpoint_anchor_digest")
+                    or observation.get("reference_projection_digest") != manifest.get("reference_projection_digest")
+                    or observation.get("restored_projection_digest") != next_anchor["projection_digest"]
+                    or observation.get("serialization_observation_digest") != next_manifest.get("serialization_observation_digest")
+                    or next_manifest.get("working_projection_digest") != next_anchor["projection_digest"]):
+                return False
         return bool(
             _COMPLETED.get(guards.digest(observation)) == observation
             and effect.get("completion") == "completed"
@@ -481,12 +581,13 @@ class NativeCheckpointRestoreAdapter:
         guards.before_write(lambda: self._assert_source(scene, source, arguments))
         target = None
         try:
-            target, before, after, saved, failed_digest, load_observation = _restore_native(scene, anchor, working)
+            restored = _restore_native(scene, anchor, working)
+            target, before, after, saved, failed_digest, load_observation = restored
             _RESTORED[after["scene_instance_id"]] = guards.digest(arguments)
             scope = self.required_scope(target, source["scope"])
-            successor = guards._capture_with_adapter(target, scope, source["inputs_digest"], anchor["projection_digest"], None, self)
+            successor = guards._capture_with_adapter(target, scope, source["inputs_digest"], guards.digest(restored.restored_projection), None, self)
             manager.set_current_scene(target)
-            if manager.current_scene() is not target or read_scene(target) != anchor["projection"]:
+            if manager.current_scene() is not target or read_scene(target) != restored.restored_projection:
                 raise ValueError("RECOVERY_SUCCESSOR_ACTIVATION_UNOBSERVED")
         except Exception:
             # Never reload or modify the failed scene, remove unknown effects,
@@ -500,14 +601,18 @@ class NativeCheckpointRestoreAdapter:
             "original_request_id": arguments["failed_request_id"], "recovery_request_id": request["request_id"],
             "original_receipt_digest": guards.digest(receipt), "permit_digest": guards.digest(permit),
             "snapshot_manifest_digest": guards.digest(anchor["manifest"]),
-            "restored_projection_digest": anchor["projection_digest"], "failed_projection_digest": failed_digest,
+            "restored_projection_digest": guards.digest(restored.restored_projection), "failed_projection_digest": failed_digest,
             "scene_before": before, "scene_after": after, "working_file": saved, "project_load": load_observation,
             "source_before_digest": guards.digest(source), "source_after_digest": guards.digest(successor)}
+        if restored.serialization_observation is not None:
+            observation.update(schema_version=2, checkpoint_anchor_digest=anchor["manifest"]["checkpoint_anchor_digest"],
+                reference_projection_digest=anchor["manifest"]["reference_projection_digest"],
+                serialization_observation_digest=guards.digest(restored.serialization_observation))
         _COMPLETED[guards.digest(observation)] = _copy(observation)
         self._observed = _copy(observation)
         guards.finish_write()
         guards.observe_effect("safety.rollback", "completed", scene_before=before, scene_after=after, detail=observation)
         return {"native_completion": "observed", "restored_from": str(path), "working_path": str(working),
-                "working_file": saved, "restored_projection_digest": anchor["projection_digest"],
+                "working_file": saved, "restored_projection_digest": guards.digest(restored.restored_projection),
                 "snapshot_manifest_digest": guards.digest(anchor["manifest"]), "recovery_observation": observation,
                 "source_binding": successor, "post_source_binding": successor}, []

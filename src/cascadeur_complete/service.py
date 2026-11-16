@@ -15,6 +15,7 @@ from .bridge_client import BridgeClient
 from .build_profile import DEVELOPER_BUILD
 from .change_flow import ChangeFlowMixin
 from .recipe_native_service import RecipeNativeServiceMixin
+from .incident_control import IncidentControlMixin
 from .discovery import BASELINE_TOOLS, discover_commands, discover_installation, load_csc_schema
 from .external import available_dependencies
 from .feature_registry import build_registry, registry_json
@@ -76,7 +77,7 @@ MUTATION_VERBS = (
 )
 
 
-class CascadeurService(RecipeNativeServiceMixin, ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin):
+class CascadeurService(IncidentControlMixin, RecipeNativeServiceMixin, ChangeFlowMixin, UiFileFlowMixin, HostPostconditionsMixin):
     def __init__(self, paths: RuntimePaths | None = None, client: BridgeClient | None = None):
         self.paths = paths or RuntimePaths.discover()
         self.paths.ensure()
@@ -218,6 +219,13 @@ class CascadeurService(RecipeNativeServiceMixin, ChangeFlowMixin, UiFileFlowMixi
                     "status", "logs", "object_search", "scene_summary", "scene_list", "transform_get", "timeline_get", "key_list", "layer_list"}:
                 feature.state = CapabilityState.UNSUPPORTED_VERSION
                 feature.execution_mode = ExecutionMode.GATED
+            if feature.operation_id == "animation.mesh_sample":
+                # Its legacy NPZ output is a file effect. A raw reader result
+                # does not qualify an unguarded file-producing runtime route.
+                feature.mutation = True
+                if feature.operation_id not in operations:
+                    feature.state = CapabilityState.UNHEALTHY
+                    feature.execution_mode = ExecutionMode.GATED
             feature.runtime_available = (host_only or connected) and feature.state == CapabilityState.AVAILABLE and (not feature.mutation or feature.operation_id in operations)
             feature.execution_observed = feature.verification.value == "verified_live"
         # This is a bridge safety capability, not a feature in the pinned
@@ -258,6 +266,9 @@ class CascadeurService(RecipeNativeServiceMixin, ChangeFlowMixin, UiFileFlowMixi
             postconditions=["Exact full native projection", "Successor source binding"],
             contract_status="bound", truth_layer="discovered",
         ))
+
+        from .feature_registry import geometry_capture_feature
+        self._features.append(geometry_capture_feature(connected=connected, operations=operations))
 
     def _observed_runtime_context(self) -> dict:
         live = getattr(self.client, "runtime_status", {})

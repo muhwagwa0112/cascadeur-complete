@@ -23,6 +23,7 @@ from .handler_registry import dispatch as dispatch_registered
 
 PROTOCOL_VERSION = "3.0"
 READ_ONLY_OPERATIONS = {
+    "system.incident_diagnostic", "system.incident_observe_original", "system.get_geometry_capture",
     "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
     "system.observe_motion_inputs", "system.observe_key_layout", "system.observe_motion_capture", "system.observe_recipe_target",
     "system.observe_retarget_inputs", "system.observe_controller_targets",
@@ -44,7 +45,6 @@ READ_ONLY_OPERATIONS = {
     "timeline.get",
     "timeline.range",
     "animation.transform_get",
-    "animation.mesh_sample",
     "animation.key_list",
     "animation.graph_query",
     "animation.cycle_query",
@@ -996,20 +996,32 @@ def _run_operation(scene, operation, request):
     adapter = guards._ADAPTERS.get(name)
     if _operation_is_mutating(operation) and adapter is not None:
         before = dict(guards.scene_instance(scene))
+        handle = guards.begin_adapter_attempt(request, operation, adapter, scene)
         try:
             return adapter.execute(scene, operation.get("arguments") or {}, request)
         except Exception as exc:
-            phase, _failure = guards.write_observation()
-            guards.observe_effect(name, "no_effect" if phase == "not_started" else "unknown",
-                scene_before=before, scene_after=dict(guards.scene_instance(_scene_view() or scene)),
-                detail={"error": str(exc)[:500]})
+            try:
+                observation = guards.lookup_failure_observation(handle, _scene_view() or scene, request)
+            except Exception:
+                observation = None
+            if observation is None:
+                guards.observe_effect(name, "unknown", scene_before=before, scene_after=None,
+                    detail={"error": str(exc)[:500], "reason": "PRIVATE_FAILURE_COMPLETION_UNAVAILABLE"})
             raise
+        finally:
+            from .native_completion import close_adapter_attempt
+            close_adapter_attempt(handle)
     return _run_operation_legacy(scene, operation, request)
 
 
 def _run_operation_legacy(scene, operation, request):
     name = operation.get("name")
     args = operation.get("arguments") or {}
+    if name == "system.observe_geometry_capture":
+        raise ValueError("GEOMETRY_COUPLED_ADAPTER_REQUIRED: no legacy observation fallback")
+    if name == "system.get_geometry_capture":
+        from .native_geometry_capture import get_geometry_capture
+        return get_geometry_capture(args["capture_id"]), []
     if name == "system.native_adapter_status":
         from .native_adapters import status
         return status(), []
@@ -1092,6 +1104,8 @@ def _run_operation_legacy(scene, operation, request):
             state["runtime_epoch"] = guards.RUNTIME_EPOCH
             state["adapter_fingerprint"] = guards.LOADED_FINGERPRINT
             state["guarded_capabilities"] = guards.capabilities(scene)
+            from .incident_admission import capability
+            state["incident_admission_v1"] = capability(runtime_root(), guards.RUNTIME_EPOCH, guards.LOADED_FINGERPRINT)
             from .native_adapters import status as native_status
             state["native_adapter"] = native_status()
             state["bridge_python"] = tuple(__import__("sys").version_info[:3])
@@ -1472,7 +1486,7 @@ def _request_effect(request):
         if not isinstance(op, dict) or not isinstance(op.get("name"), str) or not isinstance(op.get("arguments") or {}, dict):
             return "mixed"
         name, args = op["name"], op.get("arguments") or {}
-        if name.startswith("io.export_") or name == "scene.save":
+        if name.startswith("io.export_") or name in {"scene.save", "system.observe_geometry_capture", "animation.mesh_sample"}:
             effects.append("file")
         elif name.startswith("io.import_") or name.startswith("safety."):
             effects.append("mixed")
@@ -1508,6 +1522,73 @@ def _verified_rollback_adapter():
 
 
 def execute_request(scene, request):
+    """Authenticate and claim independent admission before querying a scene."""
+    from . import incident_admission as admission
+    started = time.monotonic()
+    root = runtime_root()
+    admitted = False
+    try:
+        _verify_message(request, _bridge_key(root))
+        terminal = guards.previous_terminal(root, request)
+        if terminal is not None:
+            return terminal
+        with admission.admitted_request(root, request) as sidecar:
+            admitted = True
+            if admission.diagnostic_request(request):
+                return _execute_control_request(request, sidecar, diagnostic=True)
+            if sidecar["work_kind"] == "explicit_setup":
+                return _execute_control_request(request, sidecar, diagnostic=False)
+            return _execute_admitted_request(scene, request)
+    except (OSError, ValueError, RuntimeError) as exc:
+        if admitted:
+            # An I/O failure after dispatch/terminal publication cannot become
+            # a false rejected_pre_dispatch receipt.
+            raise
+        result = _error(request.get("feature_id", "request"), "INVALID_REQUEST", str(exc), started, {})
+        result.update(dispatched=False, outcome="rejected_pre_dispatch", execution="not_dispatched")
+        result["result"] = {"error_details": {"code": "INCIDENT_ADMISSION_REJECTED", "detail": str(exc)}}
+        return result
+
+
+def _execute_control_request(request, sidecar, *, diagnostic):
+    """Bounded metadata or an exact approved finite setup, never ordinary dispatch."""
+    from . import incident_admission as admission
+    from .native_completion import epoch_status
+    guards.begin_request(request)
+    started = time.monotonic()
+    effect = "none" if diagnostic else "mixed"
+    guards.receipt_event(runtime_root(), request, "dispatch_started", effect_class=effect, dispatched=True)
+    try:
+        if diagnostic:
+            if request["operations"][0]["name"] == "system.incident_observe_original":
+                from .native_incident_observation import observe_original
+                value = observe_original(runtime_root(), request["operations"][0]["arguments"]["original"], request)
+            else:
+                value = {"protocol_version": PROTOCOL_VERSION, "runtime_epoch": guards.RUNTIME_EPOCH,
+                "adapter_fingerprint": guards.LOADED_FINGERPRINT,
+                "incident_admission_v1": admission.capability(runtime_root(), guards.RUNTIME_EPOCH, guards.LOADED_FINGERPRINT),
+                "native_completion_epoch": epoch_status(), "diagnostic_scope": "bridge_metadata_only"}
+        else:
+            value = {"setup_invocation_ref": request["request_id"],
+                     "steps": admission.dispatch_setup(request, sidecar)}
+        result = _error(request["feature_id"], None, "", started, {})
+        result.update(ok=True, result=value, error_code=None, error_message=None, evidence=[], status="succeeded")
+        outcome = "succeeded"
+    except Exception as exc:
+        result = _error(request["feature_id"], "POSTCONDITION_FAILED", str(exc), started, {})
+        # A setup experiment can leave retained native resources on failure.
+        # Its exception is not a native completion certificate.
+        outcome = "failed_after_dispatch" if diagnostic else "outcome_unknown"
+    phase, failure = guards.write_observation()
+    result.update(receipt_id=request["request_id"], phase="terminal", outcome=outcome,
+                  dispatched=True, execution=outcome, write_phase=phase, failure_kind=failure,
+                  recovery_eligible=False)
+    guards.receipt_event(runtime_root(), request, "terminal", outcome=outcome, result=result,
+                         effect_class=effect, dispatched=True)
+    return result
+
+
+def _execute_admitted_request(scene, request):
     """Guard the original request and durably record its observed outcome."""
     scene = _scene_view() or scene
     started = time.monotonic()
@@ -1528,6 +1609,8 @@ def execute_request(scene, request):
         if source is not None and effect == "none":
             guards.assert_source(scene, source)
         if effect != "none":
+            from .native_completion import assert_epoch_usable
+            assert_epoch_usable()
             guards.assert_loaded_package()
             if len(request.get("operations", ())) != 1:
                 raise ValueError("RIG_ADAPTER_UNVERIFIED: guarded native effects require one exact executor")
@@ -1552,6 +1635,9 @@ def execute_request(scene, request):
         result = _error(request.get("feature_id", "request"), code, str(exc), started, state)
         result["result"] = {"error_details": {"code": str(exc).split(":", 1)[0]}}
     post_source = None
+    if dispatched and effect != "none" and result.get("ok") is False and result.get("result") is None:
+        result["result"] = {"error_details": {"code": result.get("error_code"),
+            "message": result.get("error_message")}}
     if dispatched and effect != "none" and source is not None:
         try:
             supplied = (result.get("result") or {}).get("source_binding") if isinstance(result.get("result"), dict) else None
@@ -1560,22 +1646,29 @@ def execute_request(scene, request):
                 result["result"]["post_source_binding"] = post_source
                 result["result"]["source_binding"] = post_source
         except Exception as exc:
-            result["ok"] = False
-            result["error_code"] = "POSTCONDITION_FAILED"
-            result["error_message"] = "Applied state could not be captured: " + str(exc)
+            result.setdefault("warnings", []).append("Post-source capture is unavailable: " + str(exc)[:500])
+            if isinstance(result.get("result"), dict):
+                result["result"]["post_source_error"] = {"type": type(exc).__name__, "message": str(exc)[:2000]}
+            if result.get("ok"):
+                result["ok"] = False
+                result["error_code"] = "POSTCONDITION_FAILED"
+                result["error_message"] = "Applied state could not be captured: " + str(exc)
     phase, failure = guards.write_observation()
     outcome = ("succeeded" if result["ok"] else "failed_after_dispatch") if dispatched else "rejected_pre_dispatch"
     effects = guards.effect_observations()
     if dispatched and effect != "none":
         name = request["operations"][0]["name"]
-        observation = effects[-1] if effects and effects[-1]["operation_name"] == name else None
-        if observation is None or observation["completion"] == "unknown":
+        observation = guards.selected_effect_for_request(request, _scene_view() or scene)
+        if (observation is None or observation["completion"] == "unknown"
+                or (not result["ok"] and not observation.get("private_failure_observation"))):
             # A Python return or exception says nothing about asynchronous native
             # completion. Keep the original claim unresolved and never replay it.
             outcome = "outcome_unknown"
+            if result.get("ok"):
+                result["error_code"] = "POSTCONDITION_FAILED"
+                result["error_message"] = "NATIVE_COMPLETION_UNKNOWN: reconcile the original request; do not redispatch"
             result["ok"] = False
-            result["error_code"] = "POSTCONDITION_FAILED"
-            result["error_message"] = "NATIVE_COMPLETION_UNKNOWN: reconcile the original request; do not redispatch"
+            result.setdefault("warnings", []).append("NATIVE_COMPLETION_UNKNOWN: reconcile the original request; do not redispatch")
         elif observation["completion"] == "no_effect":
             outcome = "failed_after_dispatch"
             result["ok"] = False
@@ -1595,7 +1688,11 @@ def execute_request(scene, request):
                 result["ok"] = False
                 result["error_message"] = "SCENE_CHANGED: unapproved native successor"
         if isinstance(result.get("result"), dict):
-            result["result"]["native_effect_observations"] = effects
+            # Diagnostic observations retain live callback references inside
+            # the guard. The terminal payload owns an immutable JSON snapshot.
+            result["result"]["native_effect_observations"] = json.loads(json.dumps(effects, allow_nan=False))
+            if observation is not None and observation.get("private_failure_observation"):
+                result["result"]["failed_after_observation"] = observation
     result.update({"receipt_id": request["request_id"], "phase": "terminal", "outcome": outcome,
                    "dispatched": dispatched, "execution": outcome, "write_phase": phase,
                    "failure_kind": failure, "recovery_eligible": False,
@@ -1605,6 +1702,8 @@ def execute_request(scene, request):
     # Eligibility is code-owned and source-bound. A failure flag or snapshot on
     # the wire cannot create an adapter, an attestation or a recovery source.
     if (outcome == "failed_after_dispatch" and dispatched and effect in ("scene", "mixed")
+            and observation is not None and observation.get("completion") == "completed"
+            and observation.get("private_failure_observation")
             and phase in ("started", "completed") and failure != "guard_rejected_before_first_write"
             and post_source is not None and len(request.get("operations", ())) == 1
             and request["operations"][0]["name"] not in {"safety.rollback", "safety.rollback_internal"}):
@@ -1646,15 +1745,29 @@ def execute_request(scene, request):
                 result["recovery_eligible"] = True
         except Exception as exc:
             result.setdefault("warnings", []).append("Recovery is unavailable: " + str(exc)[:500])
+    if dispatched and effect != "none":
+        final_observation = guards.selected_effect_for_request(request, _scene_view() or scene)
+        if (final_observation is None or final_observation.get("completion") == "unknown"
+                or guards.digest(final_observation) != guards.digest(observation)):
+            outcome = "outcome_unknown"
+            result.update(ok=False, outcome=outcome, execution=outcome, recovery_eligible=False)
+            if isinstance(result.get("result"), dict):
+                result["result"].pop("recovery_source_binding", None)
+                result["result"]["native_completion_error"] = "NATIVE_OBSERVATION_REVOKED_BEFORE_TERMINAL"
+            result.setdefault("warnings", []).append("Native completion observation changed before terminal sealing")
     result["scene_revision_before"] = state.get("revision")
     # Terminal durability precedes response publication. Failure propagates and
     # leaves the claim unresolved; a later host must never redispatch it.
     receipt = guards.receipt_event(runtime_root(), request, "terminal", outcome=outcome, result=result,
                                   effect_class=effect, dispatched=dispatched)
+    from .native_completion import finalize_failure_observation
+    finalize_failure_observation(request, result, receipt)
     from .native_scene_adapter import finalize_evaluation
     finalize_evaluation(_scene_view() or scene, request, result, receipt)
     from .native_key_insertion_evidence import finalize_insertion
     finalize_insertion(_scene_view() or scene, request, result, receipt)
+    from .native_geometry_capture import finalize_geometry_capture
+    finalize_geometry_capture(_scene_view() or scene, request, result, receipt)
     return result
 
 
@@ -1897,7 +2010,6 @@ def _request_shape_error(request):
 def _drain_once(scene, *, matching_scene_only=False):
     # Event and command callbacks can carry a stale per-tab scene argument.
     # Queue routing must follow the document that is actually active now.
-    scene = _scene_view() or scene
     root = ensure_dirs()
     try:
         bridge_secret = _bridge_key(root)
@@ -1907,7 +2019,7 @@ def _drain_once(scene, *, matching_scene_only=False):
     responses = root / "state" / "responses"
     processed = 0
     must_yield = False
-    active_scene_id = scene_state(scene).get("scene_id") if matching_scene_only else None
+    active_scene_id = None
     for path in sorted(requests.glob("*.json")):
         if must_yield:
             break
@@ -1918,6 +2030,18 @@ def _drain_once(scene, *, matching_scene_only=False):
             except Exception:
                 preview = {}
             target_scene_id = preview.get("scene_id")
+            if target_scene_id:
+                try:
+                    from .incident_admission import validate_unclaimed
+                    if guards.previous_terminal(root, preview) is not None:
+                        target_scene_id = None
+                    else:
+                        validate_unclaimed(root, preview)
+                        active_scene_id = scene_state(_scene_view() or scene).get("scene_id")
+                except (OSError, ValueError, RuntimeError):
+                    # Claim and return an authenticated rejection below. An
+                    # invalid sidecar cannot authorize scene-routing reads.
+                    target_scene_id = None
             if target_scene_id and target_scene_id != active_scene_id:
                 # Leave the request unclaimed. A host tab nudge activates a
                 # different scene first and then returns to the target scene;
@@ -1949,20 +2073,20 @@ def _drain_once(scene, *, matching_scene_only=False):
                     guards.receipt_event(root, request, "claimed", effect_class=_request_effect(request), dispatched=False)
             except (BridgeAuthenticationError, ValueError) as exc:
                 authenticated = False
-                result = _error("authentication", "INVALID_REQUEST", str(exc), time.monotonic(), scene_state(scene))
+                result = _error("authentication", "INVALID_REQUEST", str(exc), time.monotonic(), {})
             shape_error = _request_shape_error(request) if authenticated else None
             if terminal is not None:
                 result = terminal
             elif authenticated and (request.get("protocol_version") not in (PROTOCOL_VERSION, "2.0") or (request.get("protocol_version") == "2.0" and _request_effect(request) != "none")):
-                result = _error("protocol", "UNSUPPORTED_VERSION", "Bridge protocol mismatch", time.monotonic(), scene_state(scene))
+                result = _error("protocol", "UNSUPPORTED_VERSION", "Bridge protocol mismatch", time.monotonic(), {})
                 result["result"] = {"error_details": {"code": "PROTOCOL_MISMATCH"}}
             elif shape_error:
-                result = _error("request", "INVALID_REQUEST", shape_error, time.monotonic(), scene_state(scene))
+                result = _error("request", "INVALID_REQUEST", shape_error, time.monotonic(), {})
             elif authenticated and (float(request.get("expires_at", 0)) < time.time() or guards.canceled(root, request)):
-                result = _error("timeout", "TIMEOUT", "Expired or canceled before dispatch", time.monotonic(), scene_state(scene))
+                result = _error("timeout", "TIMEOUT", "Expired or canceled before dispatch", time.monotonic(), {})
                 result.update({"outcome": "canceled_pre_dispatch", "execution": "canceled_pre_dispatch"})
             elif authenticated:
-                result = execute_request(_scene_view() or scene, request)
+                result = execute_request(scene, request)
             if authenticated and terminal is None and result.get("phase") != "terminal":
                 outcome = result.get("outcome", "rejected_pre_dispatch")
                 result.update({"receipt_id": request_id, "phase": "terminal", "outcome": outcome,
@@ -1998,9 +2122,11 @@ def _drain_once(scene, *, matching_scene_only=False):
                 must_yield = True
             # A request may change the active scene (open/new/rollback), so the
             # scene filter is re-evaluated for the remaining queue entries.
-            scene = _scene_view() or scene
-            if matching_scene_only:
-                active_scene_id = scene_state(scene).get("scene_id")
+            from .incident_admission import diagnostic_request
+            if result.get("dispatched") is True and not diagnostic_request(request):
+                scene = _scene_view() or scene
+                if matching_scene_only:
+                    active_scene_id = scene_state(scene).get("scene_id")
         finally:
             claimed.unlink(missing_ok=True)
     return processed, must_yield

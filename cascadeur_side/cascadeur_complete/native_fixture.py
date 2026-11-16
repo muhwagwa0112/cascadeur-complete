@@ -10,6 +10,8 @@ SUPPORTED_BUILD = "2026.2.3.0.16863"
 
 
 def create_disposable_scene(*, retain_on_failure=False):
+    from .incident_admission import assert_current_setup_admission
+    assert_current_setup_admission()
     import csc
     from . import guarded_runtime as guards
     from .native_adapters import installed_build
@@ -18,6 +20,7 @@ def create_disposable_scene(*, retain_on_failure=False):
         raise ValueError("UNSUPPORTED_VERSION: independent fixture requires " + SUPPORTED_BUILD)
     manager = csc.app.get_application().get_scene_manager()
     previous = manager.current_scene()
+    assert_current_setup_admission()
     scene = manager.create_application_scene()
     _OWNED[id(scene)] = {"scene": scene, "previous": previous, "objects": set()}
     try:
@@ -32,6 +35,8 @@ def create_disposable_scene(*, retain_on_failure=False):
 
 
 def _owned(scene):
+    from .incident_admission import assert_current_setup_admission
+    assert_current_setup_admission()
     import csc
     from . import guarded_runtime as guards
     from . import runtime as rt
@@ -48,12 +53,14 @@ def _owned(scene):
 
 
 def _modify(method, label, callback):
+    from .incident_admission import assert_current_setup_admission
     errors, completed = [], []
     active, entered = [True], [False]
     def enter(*args):
         try:
             if not active[0] or entered[0]:
                 raise ValueError("FIXTURE_CALLBACK_REPLAYED")
+            assert_current_setup_admission()
             entered[0] = True
             callback(*args)
             completed.append(True)
@@ -61,6 +68,7 @@ def _modify(method, label, callback):
             errors.append(exc)
             raise
     try:
+        assert_current_setup_admission()
         result = method(label, enter)
     finally:
         active[0] = False

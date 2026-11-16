@@ -3285,6 +3285,193 @@
         "type": "object"
       }
     },
+    "geometry_capture_get": {
+      "description": "Read terminal-sealed geometry; creates no directories, files or native effects.",
+      "input_schema": {
+        "properties": {
+          "capture_id": {
+            "title": "Capture Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capture_id"
+        ],
+        "title": "geometry_capture_getArguments",
+        "type": "object"
+      },
+      "name": "geometry_capture_get",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "geometry_capture_getDictOutput",
+        "type": "object"
+      }
+    },
+    "geometry_capture_prepare": {
+      "description": "Prepare finite native geometry file effects, then run change_commit.\n\n    Arguments declare capture/origin IDs, exact motion source/capture/context,\n    meshes/pairs and three finite budgets. Native calibration is required;\n    declared coordinate policy is never physical metadata certification.\n    ",
+      "input_schema": {
+        "$defs": {
+          "SceneBinding": {
+            "additionalProperties": false,
+            "properties": {
+              "content_revision": {
+                "title": "Content Revision",
+                "type": "string"
+              },
+              "document_lineage_id": {
+                "title": "Document Lineage Id",
+                "type": "string"
+              },
+              "revision_kind": {
+                "const": "scope_digest",
+                "default": "scope_digest",
+                "title": "Revision Kind",
+                "type": "string"
+              },
+              "runtime_epoch": {
+                "title": "Runtime Epoch",
+                "type": "string"
+              },
+              "scene_instance_id": {
+                "title": "Scene Instance Id",
+                "type": "string"
+              },
+              "schema_version": {
+                "const": 1,
+                "default": 1,
+                "title": "Schema Version",
+                "type": "integer"
+              },
+              "scope_digest": {
+                "title": "Scope Digest",
+                "type": "string"
+              },
+              "selection_digest": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Selection Digest"
+              }
+            },
+            "required": [
+              "runtime_epoch",
+              "scene_instance_id",
+              "document_lineage_id",
+              "scope_digest",
+              "content_revision"
+            ],
+            "title": "SceneBinding",
+            "type": "object"
+          },
+          "SourceBinding": {
+            "additionalProperties": false,
+            "properties": {
+              "adapter_fingerprint": {
+                "title": "Adapter Fingerprint",
+                "type": "string"
+              },
+              "binding": {
+                "$ref": "#/$defs/SceneBinding"
+              },
+              "complete": {
+                "default": false,
+                "title": "Complete",
+                "type": "boolean"
+              },
+              "inputs_digest": {
+                "title": "Inputs Digest",
+                "type": "string"
+              },
+              "sample_digest": {
+                "title": "Sample Digest",
+                "type": "string"
+              },
+              "schema_version": {
+                "const": 1,
+                "default": 1,
+                "title": "Schema Version",
+                "type": "integer"
+              },
+              "scope": {
+                "additionalProperties": true,
+                "title": "Scope",
+                "type": "object"
+              }
+            },
+            "required": [
+              "binding",
+              "scope",
+              "sample_digest",
+              "inputs_digest",
+              "adapter_fingerprint"
+            ],
+            "title": "SourceBinding",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "source_binding": {
+            "$ref": "#/$defs/SourceBinding"
+          },
+          "ttl": {
+            "default": 300,
+            "title": "Ttl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "arguments",
+          "source_binding"
+        ],
+        "title": "geometry_capture_prepareArguments",
+        "type": "object"
+      },
+      "name": "geometry_capture_prepare",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "geometry_capture_prepareDictOutput",
+        "type": "object"
+      }
+    },
+    "geometry_capture_verify": {
+      "description": "Authenticate current private geometry provenance and immutable window bytes.",
+      "input_schema": {
+        "properties": {
+          "geometry_digest": {
+            "title": "Geometry Digest",
+            "type": "string"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "title": "Manifest",
+            "type": "object"
+          }
+        },
+        "required": [
+          "manifest",
+          "geometry_digest"
+        ],
+        "title": "geometry_capture_verifyArguments",
+        "type": "object"
+      },
+      "name": "geometry_capture_verify",
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "geometry_capture_verifyDictOutput",
+        "type": "object"
+      }
+    },
     "ik_chain_create_prepare": {
       "description": "Snapshot and prepare IK with explicit main end, middle links, and secondary end order.",
       "input_schema": {
@@ -3566,6 +3753,140 @@
         "title": "inbetweening_prepareDictOutput",
         "type": "object"
       }
+    },
+    "incident_diagnostic": {
+      "description": "Read code-owned bridge/epoch/admission metadata, without querying a scene.",
+      "input_schema": {
+        "properties": {},
+        "title": "incident_diagnosticArguments",
+        "type": "object"
+      },
+      "name": "incident_diagnostic"
+    },
+    "incident_inspect": {
+      "description": "Inspect all enrolled original incident domains without touching the app.",
+      "input_schema": {
+        "properties": {
+          "request_ref": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Ref"
+          }
+        },
+        "title": "incident_inspectArguments",
+        "type": "object"
+      },
+      "name": "incident_inspect"
+    },
+    "incident_observe": {
+      "description": "Append independently verified original-attempt evidence; preserve terminal bytes.",
+      "input_schema": {
+        "properties": {
+          "evidence_ref": {
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "expected_incident_head": {
+            "additionalProperties": true,
+            "title": "Expected Incident Head",
+            "type": "object"
+          },
+          "request_ref": {
+            "additionalProperties": true,
+            "title": "Request Ref",
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_ref",
+          "expected_incident_head",
+          "evidence_ref"
+        ],
+        "title": "incident_observeArguments",
+        "type": "object"
+      },
+      "name": "incident_observe"
+    },
+    "incident_observe_original": {
+      "description": "Ask only the original attempt's private producer for bounded closure evidence.",
+      "input_schema": {
+        "properties": {
+          "request_ref": {
+            "additionalProperties": true,
+            "title": "Request Ref",
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_ref"
+        ],
+        "title": "incident_observe_originalArguments",
+        "type": "object"
+      },
+      "name": "incident_observe_original"
+    },
+    "incident_retirement_commit": {
+      "description": "Execute only an exact independently verified and separately approved retirement.",
+      "input_schema": {
+        "properties": {
+          "operator_authorization": {
+            "additionalProperties": true,
+            "title": "Operator Authorization",
+            "type": "object"
+          },
+          "plan_digest": {
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest",
+          "operator_authorization"
+        ],
+        "title": "incident_retirement_commitArguments",
+        "type": "object"
+      },
+      "name": "incident_retirement_commit"
+    },
+    "incident_retirement_prepare": {
+      "description": "Prepare a concrete containment plan or name missing evidence; execute nothing.",
+      "input_schema": {
+        "properties": {
+          "baseline_ref": {
+            "additionalProperties": true,
+            "title": "Baseline Ref",
+            "type": "object"
+          },
+          "new_workspace": {
+            "title": "New Workspace",
+            "type": "string"
+          },
+          "request_refs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Request Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "request_refs",
+          "baseline_ref",
+          "new_workspace"
+        ],
+        "title": "incident_retirement_prepareArguments",
+        "type": "object"
+      },
+      "name": "incident_retirement_prepare"
     },
     "inspect_motion_inputs": {
       "description": "Read native rig/context metadata into a provenance-bound input draft.",
@@ -7742,6 +8063,62 @@
             "title": "ExportTolerances",
             "type": "object"
           },
+          "GeometryCapturePolicy": {
+            "additionalProperties": false,
+            "properties": {
+              "max_array_bytes": {
+                "exclusiveMinimum": 0,
+                "maximum": 1073741824,
+                "title": "Max Array Bytes",
+                "type": "integer"
+              },
+              "max_artifact_bytes": {
+                "exclusiveMinimum": 0,
+                "maximum": 2147483648,
+                "title": "Max Artifact Bytes",
+                "type": "integer"
+              },
+              "max_calculations": {
+                "exclusiveMinimum": 0,
+                "maximum": 32768,
+                "title": "Max Calculations",
+                "type": "integer"
+              },
+              "mesh_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Mesh Ids",
+                "type": "array"
+              },
+              "pairs": {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "title": "Pairs",
+                "type": "array"
+              }
+            },
+            "required": [
+              "mesh_ids",
+              "pairs",
+              "max_calculations",
+              "max_array_bytes",
+              "max_artifact_bytes"
+            ],
+            "title": "GeometryCapturePolicy",
+            "type": "object"
+          },
           "InputSpec": {
             "additionalProperties": false,
             "properties": {
@@ -8210,6 +8587,17 @@
                 ],
                 "default": null
               },
+              "geometry_capture": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/GeometryCapturePolicy"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
               "input": {
                 "$ref": "#/$defs/InputSpec"
               },
@@ -8390,6 +8778,12 @@
                 "default": 0,
                 "minimum": 0,
                 "title": "Generated Keys",
+                "type": "integer"
+              },
+              "geometry_calculations": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Geometry Calculations",
                 "type": "integer"
               },
               "max_correction_passes": {
@@ -10889,6 +11283,54 @@
         "title": "selection_edit_prepareDictOutput",
         "type": "object"
       }
+    },
+    "setup_commit": {
+      "description": "Dispatch the exact approved finite setup once; never replay its invocation.",
+      "input_schema": {
+        "properties": {
+          "operator_authorization": {
+            "additionalProperties": true,
+            "title": "Operator Authorization",
+            "type": "object"
+          },
+          "plan_digest": {
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest",
+          "operator_authorization"
+        ],
+        "title": "setup_commitArguments",
+        "type": "object"
+      },
+      "name": "setup_commit"
+    },
+    "setup_prepare": {
+      "description": "Prepare a finite qualification sequence; operator approval is separate.",
+      "input_schema": {
+        "properties": {
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "workspace": {
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "steps",
+          "workspace"
+        ],
+        "title": "setup_prepareArguments",
+        "type": "object"
+      },
+      "name": "setup_prepare"
     },
     "source_capture": {
       "description": "Issue a source binding only when the loaded native adapter proves exact dependency coverage.",

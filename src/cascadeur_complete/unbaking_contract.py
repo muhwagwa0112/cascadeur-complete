@@ -43,3 +43,22 @@ def unbaking_topology_policy(limits: UnbakingKeyLimits, *, allow_key_insertion: 
     """Lower typed counts together with the original intent's exact flags."""
     return UnbakingTopologyPolicy.model_validate({**limits.model_dump(mode="json"),
         "allow_key_insertion": allow_key_insertion, "allow_interpolation_change": allow_interpolation_change})
+
+
+def require_unbaking_step(service, step):
+    """Ask the native process before minting a token or reserving a recipe."""
+    from .models import Operation
+    result = service.client.execute("capture_source", [Operation(
+        name="system.native_adapter_status", arguments={})])
+    statuses = (result.result or {}).get("unbaking_steps", {}) if result.ok else {}
+    status = statuses.get(step) if isinstance(statuses, dict) else None
+    # No native adapter currently implements the complete step contract. A
+    # generic operation capability cannot substitute for step-specific proof.
+    if not isinstance(status, dict) or status.get("qualified") is not True:
+        missing = status.get("missing", []) if isinstance(status, dict) else ["private_step_qualification"]
+        raise ValueError("UNBAKING_STEP_UNQUALIFIED: " + str(step) + ": " + ",".join(missing))
+    required = ("installed_callable_digest", "lowering_digest", "completion_contract_digest",
+                "qualification_digest", "runtime_epoch", "runtime_fingerprint")
+    if status.get("step") != step or any(not isinstance(status.get(key), str) or not status[key] for key in required):
+        raise ValueError("UNBAKING_STEP_UNQUALIFIED: incomplete native step contract")
+    return status

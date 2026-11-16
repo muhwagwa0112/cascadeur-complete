@@ -59,10 +59,12 @@ truth; neither tool count nor discovered Python symbols imply support.
 
 ### Installed 2026.2 native subset
 
-On `2026.2.3.0.16863`, run the installed command
-`Cascadeur Complete.Qualify native adapter` explicitly. It creates disposable
-scenes and new checkpoint files, observes SDK callbacks, save completion and clone
-equivalence, then restores the previous tab. Qualification is local to the current
+On `2026.2.3.0.16863`, qualification now requires the finite, separately approved
+`setup_prepare` / `setup_commit` flow described below. A direct menu invocation
+without that admitted context is refused. Qualification creates owned scenes and
+new checkpoint files, observes SDK callbacks, save completion and clone
+equivalence, then restores the previous tab. All created tabs and files are
+retained on success and failure. Qualification is local to the current
 runtime epoch and loaded bridge fingerprint; changing bridge bytes requires a
 clean application restart and qualification again.
 
@@ -78,6 +80,72 @@ The installed app was directly observed cloning a disposable source, committing
 position `[3.25, -1.5, 0.75]`, reading it back, saving a successor checkpoint and
 returning the original receipt on duplicate commit. The source file hash remained
 unchanged. This observation does not expand the pinned 2026.1 product inventory.
+
+### R5 incident admission and finite setup
+
+The [R5 source proposal](docs/implementation/cascadeur-motion-r5/IMPLEMENTATION_PLAN.md)
+is retained unchanged as design input. Current implementation and remaining live
+evidence gaps are recorded in [the issue memo](docs/KNOWN_ISSUES_2026-11-15.md).
+New host and bridge bytes must be installed together; an older bridge cannot
+admit new work through this host. Existing request IDs remain observation-only.
+
+Incident admission covers every explicitly enrolled original authentication/store
+domain. It preserves original keys, outboxes, receipts and unresolved history.
+The canonical Local AppData store is mandatory; selecting a new runtime root does
+not discard an enrolled incident. Enroll all known original stores once with the
+source environment's Python, for example:
+
+```powershell
+.\.venv\Scripts\python.exe -m cascadeur_complete.incident_cli enroll --store "$env:LOCALAPPDATA\CascadeurMCP\cascadeur-complete" --store "D:\CS_MCP\artifacts\native-r4\isolated-runtime"
+.\.venv\Scripts\python.exe -m cascadeur_complete.incident_cli inspect
+```
+
+`incident_inspect` is host-only. `incident_diagnostic` is the initial native
+handshake and reads only bridge/epoch/admission metadata; it does not read a scene
+or issue a source. `incident_observe_original` asks the exact original producer
+for private completion evidence. Pass that diagnostic request ID to
+`incident_observe` with the exact original reference and expected incident head.
+Missing, revoked or lost original evidence leaves the incident open.
+
+`incident_retirement_prepare` describes exact producer/process/resource operations
+only when independently verified scope, pre-incident baseline and physical
+separation are available. Missing evidence returns a non-executable draft.
+Preparing a plan never approves or executes it. A ready plan requires the
+operator's separate exact approval before `incident_retirement_commit`; retirement
+preserves the original unknown outcome and still requires new-workspace lineage.
+The currently retained legacy incidents lack the required producer closure.
+
+When all enrolled incidents permit new work, `setup_prepare` accepts only these
+finite helper IDs: `setup.qualify_native_adapter`,
+`setup.qualify_independent_models`, and
+`setup.qualify_independent_position_writer`. Models must precede the writer in
+the approved sequence. The plan binds current epoch/full bridge bytes, all domain
+heads, a fresh direct child of the runtime `snapshots` directory, and per-step
+tab/file limits. After reviewing and
+separately approving that exact plan, the operator can issue its local token:
+
+```powershell
+.\.venv\Scripts\python.exe -m cascadeur_complete.incident_cli approve-setup --plan-digest <reviewed-plan-digest> --output <new-approval-json-path>
+```
+
+Supply that JSON to `setup_commit`; the plan ID is its single-use request ID.
+Use `approve-retirement` instead only for a separately reviewed, executable
+retirement plan. These local commands are approval issuers, not automatic setup
+or recovery steps. The current legacy incidents block setup admission.
+
+`verify-install.ps1 -InstallationProfile independent-2026.2` checks the exact
+installed `2026.2.3.0.16863` profile separately from the default
+`catalog-2026.1` / `2026.1.3.0.15619` profile. Disk/registration/stdio checks do
+not qualify native operations or a running epoch.
+
+Geometry capture is a file effect with explicit approved mesh/frame/byte budgets,
+terminal-bound manifests and guarded NPZ reads. Actual coordinate, synchronization
+and dependency calibration is still unqualified, so its native contract stays
+closed. The older raw mesh sampler also requires file-effect admission.
+Checkpoint schema v2 compares every serialization phase to one immutable P0
+anchor and preserves actual restored raw projections; no numeric tolerance policy
+is qualified. All three unbaking steps remain gated before preparation and native
+selection until their exact lowering/completion contracts are qualified.
 
 `inspect_motion_inputs` reads native stable IDs, channels, layer/key metadata and
 available rig metadata into an authenticated draft. `resolve_motion_inputs`
