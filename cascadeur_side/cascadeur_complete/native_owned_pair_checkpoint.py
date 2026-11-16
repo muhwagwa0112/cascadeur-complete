@@ -6,6 +6,8 @@ This observation does not qualify arbitrary rigs or retire an open incident.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from . import guarded_runtime as guards
 
 
@@ -37,9 +39,12 @@ def observe_pair_checkpoint(scene, retained):
     if manifest["schema_version"] != 2:
         raise ValueError("PAIR_CHECKPOINT_IMMUTABLE_ANCHOR_REQUIRED")
     retained.before_new_tab()
+    source_path = str(scene.get_path_name())
+    if not source_path or Path(source_path).resolve() != working.resolve():
+        raise ValueError("PAIR_CHECKPOINT_WORKING_PATH_DIFFERS")
     def source_unchanged():
         retained.before_effect()
-        if read_scene(scene) != projection or str(scene.get_path_name()) != str(working):
+        if read_scene(scene) != projection or str(scene.get_path_name()) != source_path:
             raise ValueError("PAIR_CHECKPOINT_SOURCE_CHANGED_BEFORE_LOAD")
     guards.before_write(source_unchanged)
     # Track only the actual loader's returned/partially created native wrapper;

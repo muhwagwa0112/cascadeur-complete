@@ -7,7 +7,7 @@
 
 ## 이번 변경과 관찰 범위
 
-**현재 최신 결과:** 이 머신의 Cascadeur `2026.2.3.0.16863`에서 v5 두 메시·세 프레임 setup 및 위치 변경을 포함한 12단계 continuation이 실제 성공했다. Update 수집·Joint/identity bind·callback 안의 종속 채널 갱신 결함을 수정했다. 아래 실패 기록은 각 시점의 이력이며 열 open unknown은 종결하지 않았다. 성공 범위는 소유 유한 fixture다. checkpoint 재로드·unbaking·일반 rig·전체 recipe/FBX consumer는 이 실행으로 검증되지 않았다.
+**현재 최신 결과:** 이 머신의 Cascadeur `2026.2.3.0.16863`에서 v5 두 메시·세 프레임 setup 및 immutable-P0 기반 저장·새 탭 재로드·복원 저장이 실제 성공했다. 같은 새 runtime에서 위치 변경을 포함한 12단계 continuation도 실제 성공했다. Update 수집·Joint/identity bind·callback 안의 종속 채널 갱신과 native/Windows 경로 비교 결함을 수정했다. 아래 실패 기록은 각 시점의 이력이며 열한 open unknown은 종결하지 않았다. 성공 범위는 소유 유한 fixture다. unbaking·일반 rig·실패 후 조건부 recovery·전체 recipe/FBX consumer는 검증되지 않았다.
 
 ### 추가 구현: immutable-P0 저장·재로드 경로
 
@@ -15,7 +15,23 @@ owned-pair setup 완료 전에 checkpoint roundtrip을 연결했다. 실제 chec
 
 새 계획의 명시 상한은 **새 탭 2개 / `.casc` 파일 5개 / Update capture 7회**다. 기존 geometry 계산 10회·evaluation 2회·driver perturbation 1회는 그대로다. host/bridge의 setup 계획·admission·retention 한도를 함께 수정했다. 원 helper bytes에 묶인 이전 계획으로 변경한 효과 범위를 실행할 수 없다. 이 roundtrip 관찰만으로 일반 rig·rollback adapter 자격이나 원 unknown의 종결을 발급하지 않는다.
 
-**새 경로 실앱 실행은 아직 미실행이다.** 11월 16일 18:31 관측에서 PID `29032`는 `MainWindowHandle:0`, pump `busy:false/processed:15`였고 CUA 창 목록에는 Cascadeur가 없었다. 공식 script server `127.0.0.1:8765`도 연결 거부였으며 정상 앱 실행으로 창 재열기도 실패했다. 실행 중인 코드를 교체하지 않도록 설치기의 idle 조건을 유지했다. 강제 종료는 수행하지 않았고 필요한 확인을 사용자에게 요청했다. 자동저장 `.casc` 세 파일은 ignored 로컬 `artifacts/native-r6/windowless-autosave-20261116-1834`에 별도 복사했다. 이 백업이 모든 미저장 상태와 같다고 주장하지 않는다. 변경 Python 11개 파일의 3.11 AST 파싱과 공유 setup/admission 파일의 host/bridge byte 일치를 확인했다. 이는 native 실행 검증이 아니다.
+**18:31 최초 대기 시점(이력):** 11월 16일 18:31 관측에서 PID `29032`는 `MainWindowHandle:0`, pump `busy:false/processed:15`였고 CUA 창 목록에는 Cascadeur가 없었다. 공식 script server `127.0.0.1:8765`도 연결 거부였으며 정상 앱 실행으로 창 재열기도 실패했다. 실행 중인 코드를 교체하지 않도록 설치기의 idle 조건을 유지했다. 강제 종료는 수행하지 않았고 필요한 확인을 사용자에게 요청했다. 자동저장 `.casc` 세 파일은 ignored 로컬 `artifacts/native-r6/windowless-autosave-20261116-1834`에 별도 복사했다. 이 백업이 모든 미저장 상태와 같다고 주장하지 않는다. 변경 Python 11개 파일의 3.11 AST 파싱과 공유 setup/admission 파일의 host/bridge byte 일치를 확인했다. 이는 native 실행 검증이 아니다.
+
+위 문단은 최초 실행 대기 시점의 기록이다. 이후 사용자가 직접 종료·진행을 명시해 PID `29032`를 종료하고 수정본을 설치했다(`20261116-183827-source-install`, hook backup `20261116-183944-installer`). 새 PID `43012`, epoch `cb0eb5df-a22a-477f-ad45-90383b2b2b8e`, fingerprint `1eccf2346e3ce509d7d13ccbb7754953df20479563dd5a6a672c995f58e6c18a`에서 setup plan `409a3dbcb4c16150d19ba7e620ab93860f7389fe0f2247722d772a95a99c4dec`를 실제 실행했다. 요청 `408f5f44-ff48-4af7-b2a2-8f7dd500c635`는 **69,782 ms / outcome_unknown / write_phase:completed**로 보존했다. geometry 단계와 P0 초기화, checkpoint/working 저장·각 exact 비교를 통과했지만 로드 전 source guard에서 `PAIR_CHECKPOINT_SOURCE_CHANGED_BEFORE_LOAD`로 중단됐다. native path가 `C:/.../checkpoint-working.casc`, 계획의 Windows Path 문자열이 `C:\...\checkpoint-working.casc`여서 같은 파일을 다르게 판단한 결함이다. `Path.resolve()`로 계획 경로와 동일한지 먼저 검증하고, 이후에는 실제 관측한 native path 문자열 자체가 변하지 않는지 확인하도록 수정했다. projection exact 검사는 유지한다.
+
+`snapshots/r6-local-checkpoint-20261116-1842/0/retention.json`은 원 active projection·inventory 보존과 새 fixture 한 탭 보존을 관측했다. before/after/checkpoint/working 파일 네 개를 남겼고 restored 파일·새 clone은 만들지 않았다. 기존 열 unknown과 이 실패는 종결하거나 replay하지 않는다. 수정본은 새 설치·epoch·workspace와 전체 open set을 고정한 새 요청으로만 실행한다. 강제 종료의 사용자 지시는 이 후속 작업에도 적용하며 별도 확인을 반복하지 않는다.
+
+### 경로 수정 후 실제 immutable-P0 roundtrip 성공
+
+사용자 지시대로 PID `43012`도 직접 종료한 뒤 경로 수정본을 설치하고 PID `3552`로 다시 실행했다. source backup `20261116-184340-source-install`, hook backup `20261116-184455-installer`다. 설치 로그는 최종 성공 JSON과 staged/final 127-tool smoke를 남겼으나 외부 PowerShell wrapper는 exit 1이었다. 설치된 checkpoint 모듈과 작업 소스의 SHA256 `d15088a0bfea9ce66de443c27bd76b26617f5c52556eac24899ad0c65a884774` 일치와 실제 새 runtime 응답을 별도로 확인했다. 설치 중 diagnostic 한 번은 maintenance lease의 `INSTALLATION_BUSY`로 거절됐고, 설치 완료 후 정상 조회했다. 실행 중인 코드 교체나 lease 우회는 하지 않았다.
+
+새 epoch `8b6d90a1-5d12-41ab-a6a3-31003d9bac59`, fingerprint `b6de383d54f0cdaaf286c2bb32ab237e6f3c553be386aa7649456461ac3247b9`에서 전체 열한 open 요청을 포함한 plan `25245ae74decdcff78c763634e76c32e4041f941951214f8633b93586bd6438f`를 준비했다. 에이전트가 사용자의 직접 처리 위임에 따라 기존 TTY CLI에 exact digest를 입력했다. 별도 인간 operator가 입력했다고 주장하지 않는다. 새 요청 `84699609-615b-43b4-bbd6-21b6adbebd34`는 **87,531 ms / succeeded / write_phase:completed**다. 인증된 원 terminal bytes SHA256은 `d26252ecc1fd7652d6a0c85eef0369646030163c2ffc466f3bb30e0e2e442f91`이다.
+
+네 phase `checkpoint_save`, `working_save`, `project_load`, `restored_save`는 모두 최초 P0 digest `2e01a9fb5ff55becd92c0af0be055e5b7ae681da8f7d68437317050d1bb15f1a`에 직접 **exact** 일치했다. 이 fixture에서는 tolerance policy를 발급하거나 사용하지 않았다. 실제 `DataSourceManager.load_scene`의 시작·완료 event와 동기 반환, 원 탭 보존을 관찰했다. fixture instance `0f533c47-35a6-4bcc-adc4-c0f1be62b6d9`와 새 clone `536b4486-37b9-4858-bde0-2589f47e8b2d`는 다르고, 성공 후 lineage `c722ef7f-9ac3-47c4-a935-5f03bd442a0f`를 공유한다. checkpoint bytes SHA256은 `ff8167bc8ac4a4ca541eca2ad0ccbcfb6751db55adfb1287ded102fb87155df0`, 복원 저장본은 `83654a8f3335ed667bcfba01f28d3833c91adb4cc02ef8bd0e3980c577abba6f`다.
+
+`snapshots/r6-local-checkpoint-path-fixed-20261116-1851/0`에 계획한 다섯 `.casc` 파일과 retention을 보존했고, 새 두 탭 모두 확인됐다. 원 active projection·tab inventory 보존, qualification error 없음, retention `observed`를 반환했다. ignored 로컬 결과는 `artifacts/native-r6/checkpoint-fixed-setup-result.json`이다. 원 열한 unknown·journal은 변경하지 않았다. 이 성공은 유한 pair roundtrip이며 일반 rig, 실패 후 permit 기반 recovery 또는 전체 recipe 성공을 뜻하지 않는다.
+
+같은 epoch/fingerprint에서 실제 succeeded setup에만 결합한 continuation plan `5b1569bd9558fd45d76ddb93e5faf634c63bc650ac38c85eb4600036b24cb7b6`도 기존 TTY CLI로 검토·승인해 실행했다. run `9babacb7-3126-4cbb-bdbc-78ec57d53144`는 **12단계 전부 authenticated succeeded / complete:true / original_scene_restored:true**다. 첫 메시의 frame 1 위치 `[2.5,1.25,0.5]`를 실제 변경·평가·motion readback했고, 두 메시·세 프레임의 실제 geometry 계산 여섯 회와 manifest readback을 완료했다. motion capture digest `0e5d6542a4a526bafe79079a17a4bba3420cb8ea93f17eb6de62bbf5e7ec138a`, geometry capture `d2645b10-b651-5772-b119-24ac038c3c42`, geometry digest `32bb6bd363e7e8ecc5d139cc3bd2783055b19124392e0ee3d48d754c8aee636a`다. 각 메시 NPZ 2,224 bytes, vertices `[3,8,3]`, triangles `[12,3]`를 반환했다. FPS 30·metres-per-unit 1·identity basis는 명시된 fixture 변환 정책이며 native physical metadata 검증이 아니다. 결과는 ignored `artifacts/native-r6/checkpoint-fixed-continuation-result.json`에 보존했다. CUA 화면에서도 원 `untitled` 탭으로 돌아왔고 checkpoint-working/restored 두 탭을 유지한 상태를 확인했다. broad suite/build/CI는 실행하지 않았다.
 
 ### 현재 머신 실앱 테스트와 Update 수집기 수정 (11월 16일 후속)
 

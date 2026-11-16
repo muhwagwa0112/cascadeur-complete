@@ -130,18 +130,25 @@ After adding same-callback `SceneUpdater.run_update` to the position writer,
 the 12-step continuation also completed: activation, position mutation,
 evaluation, motion sampling, six actual mesh calculations, geometry manifest
 readback and return to the original tab. FPS, unit and basis conversion remain
-explicit fixture policy. Native checkpoint reload, unbaking and the complete
-recipe/FBX consumer path are not qualified by this run.
-The next owned-pair setup now also executes the immutable-P0 roundtrip using
+explicit fixture policy. Unbaking and the complete recipe/FBX consumer path
+remain unqualified.
+The owned-pair setup also executes the immutable-P0 roundtrip using
 the same save and restore primitives as native checkpoint dispatch: checkpoint
 save, working save, one actual project-copy load and restored save. Its reviewed
 plan declares at most two new tabs, five `.casc` files and seven Update captures.
 All four phases compare directly with the original P0 and re-observe typed graph
 facts; unclassified fields remain exact. The loaded clone retains its own
 observed identity and only inherits lineage after comparisons succeed. This
-does not issue a rollback permit. This extension still needs a fresh-runtime
-native run; the last observed Cascadeur process has no accessible window and
-the installer refuses to replace its live code.
+does not issue a rollback permit. A fresh-runtime local run on installed
+2026.2.3.0.16863 completed all four phases with exact P0 equality, retained
+both new tabs and all five files, and restored the original active tab.
+The actual Windows/native path-separator mismatch found in the first run was
+fixed without weakening projection or path identity checks. Earlier unknown
+requests remain open; this finite observation does not qualify general rigs
+or failure-triggered recovery.
+The same loaded runtime then completed the 12-step position/motion/geometry
+continuation and returned to the original tab; reload qualification did not
+break the finite adapter's live continuation.
 See the [current issue memo](docs/KNOWN_ISSUES_2026-11-15.md) for continuation
 results and remaining limits.
 
