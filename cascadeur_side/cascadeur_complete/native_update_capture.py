@@ -225,8 +225,12 @@ def bind_native_update_runner(scene, extract_installed_update_facts: Callable,
     def invoke(callback):
         assert_admitted_effect()
         guards.before_write(assert_admitted_effect)
-        transact(domain.modify_update, "Cascadeur Complete: bounded typed graph capture",
-                 callback, before_write=assert_admitted_effect)
+        accepted = transact(domain.modify_update, "Cascadeur Complete: bounded typed graph capture",
+                            callback, before_write=assert_admitted_effect)
+        # The installed DomainScene contract returns bool. A completed callback
+        # alone does not establish that the enclosing native modify accepted it.
+        if accepted is not True:
+            raise ValueError("UPDATE_NATIVE_TRANSACTION_ACCEPTANCE_UNOBSERVED")
     observed = context()
     store_key = (observed["installed_build"], observed["runtime_epoch"], observed["runtime_fingerprint"])
     snapshot_store = _NATIVE_SNAPSHOT_STORES.setdefault(store_key, {})

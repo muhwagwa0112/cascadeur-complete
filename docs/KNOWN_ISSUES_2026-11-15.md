@@ -7,6 +7,14 @@
 
 ## 이번 변경과 관찰 범위
 
+### 후속 보완: native Update 반환 확인과 unbaking 설치 위치 구체화
+
+설치 `csc/domain/__init__.pyi:293`의 `Scene.modify_update(...)->bool` 계약과 실제 binding을 대조해, `bind_native_update_runner.invoke`가 기존 `handler_registry.transact`의 반환을 버리던 연결을 수정했다. 이제 literal `True` 반환이 없으면 `UPDATE_NATIVE_TRANSACTION_ACCEPTANCE_UNOBSERVED`로 private snapshot 발급 전에 거절한다. 콜백이 끝났다는 사실만으로 native transaction acceptance를 대신하지 않는다. `False/None`의 rollback·완료 의미는 선언만으로 확정하지 않았다. 그룹/interface/typed Data 접근의 이번 한정 대조에서는 추가 method/signature 불일치가 발견되지 않았지만 실제 callback 인자·no-yield·반환 후 안정성 및 authored/derived storage는 여전히 실앱 근거가 필요하다.
+
+실제 `bind_native_update_runner`→기존 `handler_registry.transact`를 로컬 Domain double에 연결한 단일 inline 재현은 **exit 0 / 1.09s**였다. 동일 callback을 동기 완료시키되 native 반환만 True/False/None으로 달리하여 True만 private snapshot 1개, False/None은 예외와 runner/shared store 발급 0개를 확인했다. modify 진입 전 첫 effect guard도 확인했다. imports/admission/context는 fixture이며 SDK·앱·운영 store·설치·종료는 실행하지 않았다.
+
+비실행 문자열 조사는 설치 `tool_auto_interpolation.dll`의 UTF-16 UI metadata에서 세 exact ID를 추가로 찾았다. 파일 길이 **89,088 bytes**, SHA256 **b3c9b608c958d3a8658f04778b93ce0d7286a64cb0fd00e11f614ec8922b635b**이며 raw file offset은 `View.Animation unbaking` **65772**, `View.AutoInterpolation_Keys` **65828**, `AutoPosingTool.AutoUnlock` **65972**다. 인접 metadata에는 `unbakingButton`, `onPressed`, `toolManager`, `editableAnimation`과 세 UI label이 있다. `cascadeur.exe`에도 `AutoPosingTool.AutoUnlock` ASCII 참조가 있다. 이는 compiled UI/소비 참조의 위치를 좁힌 결과이며 action 등록 owner/callable/인자/완료 callback의 증거가 아니다. 선택한 다섯 binary만 읽었고 로드·호출·patch하지 않았다. 이 위치의 실제 등록/실행 source 또는 operation-correlated trace가 확보되면 `native_unbaking.require_step_contract`와 `handlers/generation.unbaking`에서 qualified leaf를 연결해야 하며, 현재는 gate를 유지한다. `auto_interpolation.pyi`도 빈 `__all__` 선언뿐이다.
+
 ### 후속 보완: terminal 저장 후 중단된 producer archive 재개
 
 native terminal을 durable 저장한 뒤 producer archive를 기록하기 전 또는 prefix 도중 중단되면, 새 host의 원 요청 조회가 archive를 완성하지 못하던 연결 공백을 수정했다. `BridgeClient.reconcile_request`는 먼저 원 request/terminal을 인증한 뒤 기존 prospective host/claim chain에 한해서 `reconcile_terminal_if_prospective`를 호출한다. 같은 writer lock 아래 정확히 일치하는 연속 raw prefix만 이어 쓰며, 이미 index가 있으면 사라진 prefix를 재생성하지 않는다. 기존 record의 MAC·request/digest·관측 epoch, index의 outcome·원 terminal raw hash를 다시 대조한다. 원 operation 재실행·process 재관측·SDK 호출·새 claim/first-effect 생성은 없다. legacy 두 요청에는 소급 기록하지 않는다.

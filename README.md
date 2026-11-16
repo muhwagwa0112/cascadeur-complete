@@ -119,7 +119,9 @@ This is not permission to replace a live bridge or close application tabs.
 
 Owned-pair native code now includes an installed Update graph/type extractor,
 same-callback source checks, full projection checks and immutable-P0 checkpoint
-comparison. It must qualify in a fresh loaded runtime; source code and SDK
+comparison. Snapshot issuance also requires an explicit `True` native
+`modify_update` return; callback completion alone is insufficient. It must
+qualify in a fresh loaded runtime; source code and SDK
 declarations alone do not establish native success. Unbaking remains gated:
 the selected installed action sources do not establish the three exact action
 bindings, their arguments and operation-correlated completion.
