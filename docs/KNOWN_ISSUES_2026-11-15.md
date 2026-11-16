@@ -7,13 +7,26 @@
 
 ## 이번 변경과 관찰 범위
 
-### 실앱 전환 대기: 열린 원 탭과 새 코드의 loaded epoch
+### 최신: 직접 백업·정상 종료·설치와 실제 pair 실패 수정
 
-Computer Use로 실제 Cascadeur 창을 읽기 전용 확인했다. 창 제목은 `artifacts/native-r4/isolated-runtime/snapshots/guarded-spaced-key-insertion-8e409ec0-0054-4982-a654-ce04d572c37c/working.casc`이며 `trial-2`, `trial-3`, `source`, `untitled (1)`, `evaluated-working`, `source`, `working` 등 여러 탭이 보인다. 제목이나 화면만으로 각 탭의 저장 여부를 확정하지 않았다. 창을 전면에 표시한 것 외에 클릭·저장·탭 전환·닫기·재시작은 수행하지 않았다.
+사용자의 직접 처리 지시에 따라 원 탭 열 개를 실제 `csc.view.Scene.save`로 `artifacts/native-r6/pre-upgrade-tabs-20261116-163419`에 보존하고 `saved-tabs.json`에 파일 길이·SHA256을 남겼다. 원 source 파일은 덮어쓰지 않았다. 유지보수 초기에 잘못 누른 `Alt+F`가 키를 변경한 탭은 실제 Undo 후 `09-working-restored.casc`로 보존했고, 기존 파일의 `scene/scene.json`과 정확히 일치함을 확인했다. 카메라/layout/저장 날짜의 동일성까지 주장하지 않는다. PID 2328은 창 닫기로 정상 종료했으며 강제 종료하지 않았다.
 
-isolated runtime의 실제 pump PID **2328**과 CIM의 `cascadeur.exe` creation **2026-11-16T06:14:42.902727+09:00**가 일치했다. 조회 당시 heartbeat age는 **0.30초**, `busy:false`, `last_error:"package changed: clean Cascadeur restart required"`였다. 살아 있는 이전 runtime이 코드 변경을 감지한 상태이므로 새 bytes의 native qualification을 추가 queue 요청이나 hot reload로 대신하지 않는다. 기본 runtime root에는 현재 state/snapshots/logs만 있고 source installer의 최종 `src/.venv` 설치는 아직 없다. 기존 Python 설정의 Path는 빈 목록이다. 이는 현재 실행 중인 bridge의 정확한 import 경로 전체를 증명하지 않는다.
+`scripts/install.ps1 -SkipCodexRegistration`를 실제 실행해 기본 runtime의 `src/.venv/bridge-package.json` 및 user-script bridge를 설치했다. 의존성 준비와 staged/final stdio smoke는 성공했고 127개 도구를 노출했다. 전역 Codex 등록은 변경하지 않았다. 실행 중 파일 교체나 hot reload 대신 매번 정상 종료·설치·새 프로세스 시작을 사용했다. 실제 설치 중 발견한 두 결함을 수정했다.
 
-실제 전환 순서는 **사용자가 원 탭의 저장 위치/보존을 결정하고 앱 정상 종료 → source `scripts/install.ps1 -SkipCodexRegistration`로 기본 runtime 및 두 user-script code target 교체 → 앱 정상 시작 및 새 fingerprint/epoch metadata 확인 → 정확한 유한 fixture 계획 prepare → 별도 로컬 operator 검토·승인 → bounded setup/continuation**이다. 설치는 runtime/state/snapshots/logs의 기존 물리 ID와 인증 상태를 보존하며 전역 Codex 등록을 변경하지 않는 경로를 사용한다. 정상 종료 자체나 이 순서의 열람은 legacy unknown의 위험 수용 승인, 종료/격리/비간섭 증거를 뜻하지 않는다. 별도 독립 환경의 실제 supervisor/transport/custody 근거도 아직 제공되지 않았다. 이 전제 변화 전에는 남은 실앱 qualification을 진행할 수 없으며 전체 완료로 처리하지 않는다.
+- **host/embedded의 물리 ID 불일치:** Python 3.12 host의 전체 64-bit volume ID와 embedded 3.11의 구형 `stat.st_dev` 표현 차이로 native가 `ACTIVE_INCIDENT_STORE_DIFFERS`를 반환했다. 양쪽 IncidentStore가 Win32 `GetFileInformationByHandleEx(FileIdInfo)`의 전체 volume/file ID를 사용하도록 수정했다. 기존 signed marker/registry를 다시 쓰지 않고 실제 두 root의 기존 ID와 일치시켰다. 이후 새 runtime의 인증 metadata admission이 성공했다.
+- **vendor event dispatcher 누락:** 설치가 기본 Events를 덮어써 공식 script server는 살아 있지만 queued script가 실행되지 않았다. 새 명시 설정은 vendor `events`를 유지하며, 이전 installer 소유의 단일 `cascadeur_complete_events` 설정만 보정한다. 누락된 Commands의 vendor 기본값도 유지한다. 실제 설정은 `Commands=[commands,cascadeur_complete]`, `Events=[events,cascadeur_complete_events]`이며 공식 `/run`에서 실제 SDK 읽기가 약 1초 안에 실행됐다. custom 명시 event 목록은 임의 확장하지 않는다.
+
+설치 후 PID **17052**, epoch **5b849ef2-bf61-4956-9c3f-74d680b1df01**, fingerprint **411e64fc28ff81842665f0abb8c053ba978bb5c178128f8696f34313c5e4e785**에서 정확한 유한 setup 계획을 준비했다. plan digest **d757fac89038fcdadbf67e9340e42a4d718447ed6ae8eabd50f8fa4bb25e8ee2**의 전체 효과 상한·네 legacy residual을 검토하고, 직접 처리 위임 범위에서 에이전트가 기존 TTY local CLI에 exact digest를 입력했다. 별도 인간이 직접 승인했다고 기록하지 않는다. 승인/TTY/admission 검사를 제거하거나 모의 처리하지 않았다.
+
+새 요청 **dabf5f17-110f-421c-99c4-0f8e184f826e**는 실제 새 탭·Transform 두 개·self-bound mesh 두 개·3프레임을 생성한 뒤 `POSTCONDITION_FAILED / PAIR_FIXTURE_KEY_GRID_OR_INTERPOLATION_DIFFERS`로 끝났고 **outcome_unknown**으로 보존됐다. 원 active projection과 tab inventory 보존은 retention에 관찰됐으나 새 fixture의 보간 조건이 맞지 않았다. receipt의 `write_phase:not_started`는 실제 효과 부재를 뜻하지 않는다. 새 raw terminal SHA256은 **1706d71aa899fafb22a06655021651f7a184450c7e51c2e29d1d12667787024d**다. `snapshots/r6-owned-pair-20261116-1656/0/retention.json`과 생성 탭을 유지했고, 후속 유지보수 백업 `artifacts/native-r6/pre-final-upgrade-20261116/1-retained.casc`도 남겼다.
+
+실제 두 layer 모두 key grid `[0,1,2]`, section/interval `STEP`이었다. [공식 Graph Editor 문서](https://cascadeur.com/help/tools/animation_tools/graph_editor)는 붙어 있는 키에 STEP을 적용한다고 명시한다. 조밀한 세 키에 LINEAR를 요구한 제품 helper가 잘못됐다. 새 profile **owned_two_self_bound_dense_translation_meshes_v2**는 STEP을 명시해 author하고, 모든 section의 STEP·같은 세 키를 엄격히 확인한다. 위치 closure 모델과 host/native continuation도 이 새 profile로 결합했다. LINEAR 또는 임의 mode를 허용하도록 조건을 삭제하지 않았고, sparse/fractional-frame 보간 자격을 주장하지 않는다. 원격 제안 원문은 수정하지 않았다.
+
+필요한 한정 확인은 실제 실패 장면의 읽기 결과에 수정한 순수 위치 예측 함수를 적용했다. 지정 객체의 네 채널만 바뀌고 다른 객체·0/2프레임·layer/assets는 보존하며 LINEAR section 변조는 거절했다. 앞뒤 실제 native scene readback도 동일했다. 먼저 host Python에서 같은 함수를 import하려던 시도는 SDK `csc` 부재로 실패했고, 실제 embedded SDK의 별도 namespace에서 수정 함수만 평가했다. 실행 중 모듈·registry를 reload/등록하거나 장면 setter를 호출한 검증이 아니다. **새 v2 helper 전체 native 실행 성공의 증거는 아니다.**
+
+기존 두 unknown의 raw terminal hash는 각각 `f871806f1b62d7127a4316a160e83f6baa249fa7078024eb0b659d09b49a30fb`, `ac0afaf64891be8405acdf2c66c7d98789555f55acb2969904d851ba6f2e1138`로 같다. registry digest **f615836ace3cb61a91152b40d0f394504190c083cb7bd6f4ef08b26af552c89d**, 두 journal head seq 0도 보존했다. 현재는 추가된 요청까지 **세 unknown이 open**이다. exact-two-legacy manual route는 새 setup을 거절하므로 실패 요청 재실행·allowlist 확대·상태 삭제로 우회하지 않는다. 새 요청의 권위 있는 native completion/effect closure 발급과 기존 legacy의 producer/consumer closure는 여전히 미완료이며, pair continuation·unbaking·전체 native recipe/consumer 납품을 완료 처리하지 않는다. 아래의 이전 '설치/종료/승인 미실행' 문구는 각 기록 당시의 이력이다.
+
+최종 STEP profile까지 실제 source installer로 다시 설치했다. backup은 `%LOCALAPPDATA%/CascadeurMCP/backups/20261116-170626-source-install` 및 `20261116-170745-installer`다. 새 Cascadeur PID **28288**, epoch **9156aef6-50df-462d-a974-94362570b033**, loaded fingerprint **fc00c5a1e56695a89f99fcb52ad7b31475bd8a8e5d5452efc62ca86e2c6bfdef**에서 `system.incident_diagnostic`가 **succeeded**했고 host manifest와 fingerprint가 일치했다. scope는 **bridge_metadata_only**이며 scene qualification이 아니다. 마지막 설치 뒤에도 세 원 terminal hash·registry·head는 위와 같다. 첫 열 탭과 실패 fixture는 명시된 백업에 남겼으며 새 프로세스에서 자동으로 다시 열지 않았다. 최신 원격 개선안도 다시 fetch해 `d31bdf3` 이후 추가안이 없음을 확인했다.
 
 ### 후속 보완: native Update 반환 확인과 unbaking 설치 위치 구체화
 

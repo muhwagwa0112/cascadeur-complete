@@ -13,7 +13,7 @@ import json
 
 from . import guarded_runtime as guards
 from .native_owned_pair_geometry import (
-    PairGeometryPositivePath, PROFILE, SETUP_OPERATION, LIMITS,
+    PairGeometryPositivePath, PROFILE, SETUP_OPERATION, LIMITS, INTERPOLATION,
     MutationEvaluationRebind, bind_native_authenticated_terminal_lookup,
     native_read_pair_inputs, _expected,
 )
@@ -275,12 +275,12 @@ def expected_pair_position(projection, fixture, frame, value):
             or layers[0]["object_ids"] != [identifier] or layers[0]["locked"]
             or layers[0]["keys"] != [0, 1, 2]
             or [row["frame"] for row in layers[0]["sections"]] != [0, 1, 2]
-            or any(row["interpolation"] != "LINEAR" for row in layers[0]["sections"])
+            or any(row["interpolation"] != INTERPOLATION for row in layers[0]["sections"])
             or frame not in (0, 1, 2)):
         raise ValueError("PAIR_POSITION_EXISTING_INDEPENDENT_KEY_SCOPE_DIFFERS")
     view = {**projection, "objects": objects}
     driver = {"data_id": fixture["position_data_ids"]["local"], "frames": [0, 1, 2],
-              "segment_modes": ["LINEAR", "LINEAR"]}
+              "segment_modes": [INTERPOLATION, INTERPOLATION]}
     driver["position_closure"] = _position_closure(view, driver)
     return _expected_projection(projection, driver,
         [{"frame": frame, "position": np.asarray(value, dtype=np.float32).reshape(3).tolist()}])

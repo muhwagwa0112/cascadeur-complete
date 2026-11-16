@@ -108,6 +108,38 @@ def replace_head(path, value):
         temporary.unlink(missing_ok=True)
 
 
+def _windows_file_identity(path):
+    """Use the same full volume/file IDs across host and embedded Python.
+
+    CPython before 3.12 exposes the legacy 32-bit volume serial in st_dev;
+    newer versions expose FILE_ID_INFO's 64-bit serial. Never repin a signed
+    store just because the two interpreters report different stat formats.
+    """
+    import ctypes
+    from ctypes import wintypes as w
+
+    class FileIdInfo(ctypes.Structure):
+        _fields_ = [("volume", ctypes.c_ulonglong), ("identifier", ctypes.c_ubyte * 16)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [w.LPCWSTR, w.DWORD, w.DWORD, w.LPVOID, w.DWORD, w.DWORD, w.HANDLE]
+    kernel.CreateFileW.restype = w.HANDLE
+    kernel.GetFileInformationByHandleEx.argtypes = [w.HANDLE, ctypes.c_int, w.LPVOID, w.DWORD]
+    kernel.GetFileInformationByHandleEx.restype = w.BOOL
+    kernel.CloseHandle.argtypes = [w.HANDLE]
+    kernel.CloseHandle.restype = w.BOOL
+    handle = kernel.CreateFileW(str(path), 0, 7, None, 3, 0x02000000, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        raise policy.EvidenceUnavailable("PHYSICAL_FILE_HANDLE_UNAVAILABLE")
+    try:
+        identity = FileIdInfo()
+        if not kernel.GetFileInformationByHandleEx(handle, 18, ctypes.byref(identity), ctypes.sizeof(identity)):
+            raise policy.EvidenceUnavailable("PHYSICAL_FILE_ID_UNAVAILABLE")
+        return int(identity.volume), int.from_bytes(bytes(identity.identifier), "little")
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def physical_identity(path):
     """Pin existing file identities; aliases with unknown coverage are rejected."""
     path = Path(path).absolute()
@@ -119,7 +151,8 @@ def physical_identity(path):
     info = resolved.stat()
     if not info.st_ino or (resolved.is_file() and info.st_nlink != 1):
         raise policy.EvidenceUnavailable("PHYSICAL_ALIAS_COVERAGE_UNAVAILABLE")
-    return {"path": os.path.normcase(str(resolved)), "device": info.st_dev, "file_id": info.st_ino}
+    device, file_id = _windows_file_identity(resolved) if os.name == "nt" else (info.st_dev, info.st_ino)
+    return {"path": os.path.normcase(str(resolved)), "device": device, "file_id": file_id}
 
 
 def canonical_root():

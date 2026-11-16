@@ -15,7 +15,11 @@ from typing import Any, Callable
 from .serialization_equivalence import canonical_digest
 from .native_update_capture import UpdateCaptureRunner, UpdateSnapshot, frozen_json
 
-PROFILE = "owned_two_self_bound_translation_meshes_v1"
+PROFILE = "owned_two_self_bound_dense_translation_meshes_v2"
+# Cascadeur canonicalizes adjacent keys to STEP (there is no in-between
+# frame). This fixture owns every frame, so author and model that exact mode;
+# it does not qualify LINEAR interpolation or fractional-frame sampling.
+INTERPOLATION = "STEP"
 SETUP_OPERATION = "setup.qualify_owned_pair_geometry"
 KEYS = (
     ((0, (0., 0., 0.)), (1, (2., 1., 0.)), (2, (0., 2., 1.))),
@@ -85,7 +89,7 @@ def native_create_owned_pair(scene, retained) -> tuple[dict[str, Any], ...]:
             sections = {}
             for frame in range(3):
                 section = csc.layers.layer.Section()
-                section.interval.interpolation = csc.layers.layer.Interpolation.LINEAR
+                section.interval.interpolation = getattr(csc.layers.layer.Interpolation, INTERPOLATION)
                 section.interval.common.fixation = csc.layers.layer.Fixation.Free
                 section.interval.common.ik_fk = csc.layers.layer.IkFk.FK
                 section.key.common.fixation = csc.layers.layer.Fixation.Free
@@ -114,7 +118,7 @@ def native_create_owned_pair(scene, retained) -> tuple[dict[str, Any], ...]:
         obj = actual[fixture["object_id"]]
         layer = domain.layers_viewer().layer(domain.layers_viewer().layer_id_by_obj_id_or_null(obj))
         if (list(map(int, layer.key_frame_indices())) != [0, 1, 2]
-                or any(layer.interval(f).interpolation.name != "LINEAR" for f in (0, 1))):
+                or any(layer.interval(f).interpolation.name != INTERPOLATION for f in range(3))):
             raise ValueError("PAIR_FIXTURE_KEY_GRID_OR_INTERPOLATION_DIFFERS")
     return tuple(fixtures)
 

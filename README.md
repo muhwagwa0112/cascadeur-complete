@@ -104,6 +104,17 @@ R6 adds these concrete entry points:
   archive. These are **partial observations**, not proof of complete producer,
   descendant, consumer or resource closure. They cannot repair old unknowns.
 
+The owned-pair helper now uses the versioned
+`owned_two_self_bound_dense_translation_meshes_v2` profile: two self-bound meshes,
+three dense keys at frames 0/1/2, and exact STEP sections. Cascadeur normalizes
+adjacent keys to STEP; requiring LINEAR on that grid made the first actual setup
+fail. Authoring, whole-position prediction and continuation all require the new
+profile. This does not qualify sparse LINEAR or fractional-frame interpolation.
+The failed v1 request is retained as `outcome_unknown`; its actual fixture and
+readback were preserved. The exact-two-legacy route therefore refuses another
+setup while that additional incident is open. No native v2 setup or continuation
+success is claimed. See the [current issue memo](docs/KNOWN_ISSUES_2026-11-15.md).
+
 Observing an authenticated terminal through `BridgeClient.reconcile_request`
 also resumes an interrupted prospective archive from its exact retained prefix.
 This uses existing signed records and original receipt bytes, including after a
@@ -550,22 +561,29 @@ exclusive handle through activation, hooks and rollback. The gate remains valid
 when the runtime directory moves; its existence alone never blocks startup.
 Verification uses disposable state and the shared source/frozen stdio smoke client.
 Windows subprocess checks and a clean restart of the installed Cascadeur build
-confirmed handle exclusion; full source/frozen installer replacement has not been
-observed. Older clients without the gate still require the process idle scan.
+confirmed handle exclusion. Actual source installation and subsequent native
+metadata admission were observed on 2026-11-16; full frozen installer replacement
+has not been observed. Older clients without the gate still require the process idle scan.
 Source installation now also cleans staging after dependency/fingerprint/smoke
 failure and restores `CASCADEUR_MCP_ROOT` if the staged smoke raises an exception.
 Installation verification compares every installed bridge Python file with the
 host's exact `bridge-package.json` map and fingerprint, reports missing, changed
 and unexpected files, and checks Cascadeur's command/event import path. These
 disk checks do not establish the bytes already loaded in a running app or grant
-native capabilities. A source upgrade attempt on 2026-11-16 was refused before
-replacement because Cascadeur PID `2328` was still running; all 59 existing
-persistent files remained byte-identical. The installed build is
-`2026.2.3.0.16863`; the verifier's pinned baseline remains `2026.1.3.0.15619`.
-The subsequent installed-file diagnostic returned failure: the global runtime
-has no `bridge-package.json`, Cascadeur command/event/Python-path registration
-and Codex registration were absent, and stdio smoke did not run. This is an
-incomplete global MCP installation, distinct from the running test bridge.
+native capabilities. After backing up all ten open tabs and normally closing
+Cascadeur, source installation populated the canonical runtime and user-script
+bridge, including `bridge-package.json`, dependencies, Python path, Commands and
+Events. Staged/final stdio smoke exposed 127 tools. Codex registration was
+deliberately skipped. The installed build is `2026.2.3.0.16863`; the default
+verifier's catalog baseline remains `2026.1.3.0.15619` (use the explicit
+`independent-2026.2` profile for installation checks on this build).
+IncidentStore now obtains full Win32 volume/file IDs through `FILE_ID_INFO` in
+both host Python 3.12 and embedded Python 3.11, preserving the existing signed
+store identity. Installer hooks retain Cascadeur's vendor `commands`/`events`
+defaults when making omitted settings explicit, and repair the earlier
+installer-owned event-only list. Actual vendor script-server dispatch resumed
+after this fix. Installation and metadata connectivity do not qualify the
+remaining native recipe or close unknown outcomes.
 Native restore/cleanup and exit probes encountered `Qt6Core.dll` access
 violations and an interpolator `bad allocation` fatal exit. The qualifier now
 retains its restored tab and verifies it on a later source idle; that bounded

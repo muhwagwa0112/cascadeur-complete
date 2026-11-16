@@ -54,7 +54,7 @@ if (-not (Test-Path -LiteralPath $SettingsPath)) {
     New-Item -ItemType Directory -Path (Split-Path -Parent $SettingsPath) -Force | Out-Null
     $SettingsTouched = $true
     [pscustomobject]@{
-        Python = [pscustomobject]@{ Commands = @(); Events = @() }
+        Python = [pscustomobject]@{ Commands = @('commands'); Events = @('events') }
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $SettingsPath -Encoding utf8
 }
 if (Test-Path -LiteralPath $SettingsPath) {
@@ -66,10 +66,18 @@ if (Test-Path -LiteralPath $SettingsPath) {
         $settings | Add-Member -NotePropertyName Python -NotePropertyValue ([pscustomobject]@{})
     }
     if ($null -eq $settings.Python.PSObject.Properties['Commands']) {
-        $settings.Python | Add-Member -NotePropertyName Commands -NotePropertyValue @()
+        $settings.Python | Add-Member -NotePropertyName Commands -NotePropertyValue @('commands')
     }
     if ($null -eq $settings.Python.PSObject.Properties['Events']) {
-        $settings.Python | Add-Member -NotePropertyName Events -NotePropertyValue @()
+        # An omitted Events setting uses Cascadeur's vendor event dispatchers.
+        # Making it explicit must retain scene_idle/event_message and friends.
+        $settings.Python | Add-Member -NotePropertyName Events -NotePropertyValue @('events')
+    } elseif ($ActiveOwnership -and -not $ExistingOwnership.event_preexisting -and
+        @($settings.Python.Events).Count -eq 1 -and
+        @($settings.Python.Events)[0] -eq 'cascadeur_complete_events') {
+        # Repair installs made by the earlier hooks with only our empty event
+        # package. Preserve any explicit custom event configuration unchanged.
+        $settings.Python.Events = @('events', 'cascadeur_complete_events')
     }
     if ($null -eq $settings.Python.PSObject.Properties['Path']) {
         $settings.Python | Add-Member -NotePropertyName Path -NotePropertyValue @()

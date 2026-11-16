@@ -21,7 +21,7 @@ from . import incident_store as store
 from . import incident_manual_setup as manual
 
 ROUTE = "manual_legacy_pair_continuation_v1"
-PROFILE = "owned_two_self_bound_translation_meshes_v1"
+PROFILE = "owned_two_self_bound_dense_translation_meshes_v2"
 PLAN_PURPOSE = b"cascadeur-complete/owned-pair-continuation-plan/v1\0"
 APPROVAL_PURPOSE = b"cascadeur-complete/owned-pair-continuation-approval/v1\0"
 CLAIM_PURPOSE = b"cascadeur-complete/owned-pair-continuation-claim/v1\0"
