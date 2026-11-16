@@ -27,11 +27,11 @@ KEYS = (
     ((0, (8., 0., 0.)), (1, (9., 1., 0.)), (2, (10., 2., 1.))),
 )
 CALIBRATION_FRAMES = (0, 2, 1, 0)
-LIMITS = {"tabs": 1, "casc_files": 2, "mesh_calculations": 10,
+LIMITS = {"tabs": 2, "casc_files": 5, "mesh_calculations": 10,
           "evaluations": 2, "driver_mutations": 1, "objects": 2,
           "maximum_vertices_per_mesh": 64, "maximum_frames": 3,
           "maximum_projection_bytes": 2 * 1024**2,
-          "graph_capture_callbacks": 2}
+          "graph_capture_callbacks": 7}
 
 
 def native_create_owned_pair(scene, retained) -> tuple[dict[str, Any], ...]:

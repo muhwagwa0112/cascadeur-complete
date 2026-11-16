@@ -296,7 +296,7 @@ def qualify_owned_pair_geometry():
     if getattr(guards._LOCAL, "request", {}).get("request_id") != setup_request_id:
         raise ValueError("PAIR_SETUP_REQUEST_ID_DIFFERS")
     limits = {"maximum_geometry_calculations": 10, "maximum_evaluations": 2,
-              "maximum_driver_mutations": 1, "maximum_update_graph_captures": 2}
+              "maximum_driver_mutations": 1, "maximum_update_graph_captures": 7}
     if any(getattr(grant, key, None) != value for key, value in limits.items()):
         raise ValueError("PAIR_SETUP_SEMANTIC_LIMITS_DIFFER")
     # Resolve the real leaf before a tab or file can be created.
@@ -324,6 +324,8 @@ def qualify_owned_pair_geometry():
         def finish(evidence):
             from .handlers.scene import _tab_identity
             from .native_scene_reader import read_scene
+            from .native_owned_pair_checkpoint import observe_pair_checkpoint
+            checkpoint_roundtrip = observe_pair_checkpoint(scene, retained)
             fixture_projection_digest = guards.digest(read_scene(scene))
             retention = retained.finish(None)
             completed.append(retained.complete({"profile": PROFILE, "limits": LIMITS,
@@ -332,6 +334,7 @@ def qualify_owned_pair_geometry():
                 "setup_request_id": setup_request_id, "fixture_projection_digest": fixture_projection_digest,
                 "fixture_tab_id": _tab_identity(scene), "original_tab_id": _tab_identity(original_scene),
                 "original_scene": dict(guards.scene_instance(original_scene)),
+                "checkpoint_roundtrip": checkpoint_roundtrip,
                 "layer_ids": [row["layer_id"] for row in path._fixtures],
                 "general_rig_supported": False, "geometry_evidence_digest": guards.digest(evidence)}))
         contract = path.initialize(finish)

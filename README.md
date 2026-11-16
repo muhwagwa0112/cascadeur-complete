@@ -132,6 +132,16 @@ evaluation, motion sampling, six actual mesh calculations, geometry manifest
 readback and return to the original tab. FPS, unit and basis conversion remain
 explicit fixture policy. Native checkpoint reload, unbaking and the complete
 recipe/FBX consumer path are not qualified by this run.
+The next owned-pair setup now also executes the immutable-P0 roundtrip using
+the same save and restore primitives as native checkpoint dispatch: checkpoint
+save, working save, one actual project-copy load and restored save. Its reviewed
+plan declares at most two new tabs, five `.casc` files and seven Update captures.
+All four phases compare directly with the original P0 and re-observe typed graph
+facts; unclassified fields remain exact. The loaded clone retains its own
+observed identity and only inherits lineage after comparisons succeed. This
+does not issue a rollback permit. This extension still needs a fresh-runtime
+native run; the last observed Cascadeur process has no accessible window and
+the installer refuses to replace its live code.
 See the [current issue memo](docs/KNOWN_ISSUES_2026-11-15.md) for continuation
 results and remaining limits.
 

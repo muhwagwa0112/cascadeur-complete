@@ -26,7 +26,7 @@ SETUP_IDS = {"setup.qualify_native_adapter": (2, 5),
              "setup.qualify_independent_models": (1, 2),
              "setup.qualify_independent_position_writer": (1, 2),
              "setup.qualify_geometry_calculation": (1, 2),
-             "setup.qualify_owned_pair_geometry": (1, 2)}
+             "setup.qualify_owned_pair_geometry": (2, 5)}
 
 
 class PersistedEvidence:

@@ -316,6 +316,7 @@ class NativeRestoreResult:
     restored_projection: dict
     serialization_observation: dict | None
     successor_manifest: dict
+    project_load_serialization_observation: dict | None = None
 
     def __iter__(self):
         # Retain the previous six-value diagnostic API; actual projection is
@@ -323,7 +324,7 @@ class NativeRestoreResult:
         return iter((self.target, self.before, self.after, self.saved, self.failed_digest, self.project_load))
 
 
-def _restore_native(scene, anchor, working):
+def _restore_native(scene, anchor, working, *, on_loaded=None):
     """The same complete native primitive is used by qualification and dispatch."""
     from .native_adapters import _WORKSPACES, _save_observed
     from .native_serialization_binding import load_checkpoint_copy, bind_completed_clone
@@ -337,12 +338,20 @@ def _restore_native(scene, anchor, working):
         raise ValueError("RECOVERY_CURRENT_SCENE_OR_TARGET_CHANGED")
     path = Path(anchor["manifest"]["path"])
     fixed = anchor.get("fixed_anchor")
-    serialization = None
+    serialization = load_serialization = None
     try:
-        target, load_observation = load_checkpoint_copy(anchor, scene, working, source_guard=original_unchanged)
+        from .native_project_io import ProjectCopyLoadError
+        try:
+            target, load_observation = load_checkpoint_copy(anchor, scene, working, source_guard=original_unchanged)
+        except ProjectCopyLoadError as error:
+            if on_loaded is not None and error.target_scene is not None:
+                on_loaded(error.target_scene)
+            raise
+        if on_loaded is not None:
+            on_loaded(target)
         if fixed is not None:
             from .native_serialization import compare_with_private_policy
-            compare_with_private_policy(target, fixed["immutable_anchor"], phase="project_load", phase_guard=original_unchanged)
+            load_serialization = compare_with_private_policy(target, fixed["immutable_anchor"], phase="project_load", phase_guard=original_unchanged)
         elif read_scene(target) != anchor["projection"]:
             raise ValueError("RECOVERY_NATIVE_READBACK_DIFFERS")
         from .incident_admission import assert_request_admission
@@ -382,7 +391,8 @@ def _restore_native(scene, anchor, working):
         "checkpoint_observation": fixed["checkpoint_observation"], "serialization_observation": serialization.as_dict()}
     remember_checkpoint(target, successor_manifest, restored_projection, run_id=anchor["run_id"], **kwargs)
     return NativeRestoreResult(target, before, after, saved, guards.digest(original_projection), load_observation,
-        restored_projection, None if serialization is None else serialization.as_dict(), successor_manifest)
+        restored_projection, None if serialization is None else serialization.as_dict(), successor_manifest,
+        None if load_serialization is None else load_serialization.as_dict())
 
 
 def qualify_restore(scene, manifest, *, run_id=None):

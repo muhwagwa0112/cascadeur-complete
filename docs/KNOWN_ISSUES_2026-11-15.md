@@ -9,6 +9,14 @@
 
 **현재 최신 결과:** 이 머신의 Cascadeur `2026.2.3.0.16863`에서 v5 두 메시·세 프레임 setup 및 위치 변경을 포함한 12단계 continuation이 실제 성공했다. Update 수집·Joint/identity bind·callback 안의 종속 채널 갱신 결함을 수정했다. 아래 실패 기록은 각 시점의 이력이며 열 open unknown은 종결하지 않았다. 성공 범위는 소유 유한 fixture다. checkpoint 재로드·unbaking·일반 rig·전체 recipe/FBX consumer는 이 실행으로 검증되지 않았다.
 
+### 추가 구현: immutable-P0 저장·재로드 경로
+
+owned-pair setup 완료 전에 checkpoint roundtrip을 연결했다. 실제 checkpoint executor의 P0 고정·두 native save·schema 2 manifest 등록을 공통 함수로 추출해 재사용하고, 기존 `_restore_native`가 같은 checkpoint 파일을 새 탭으로 실제 복사·로드·복원 저장한다. 네 phase(`checkpoint_save`, `working_save`, `project_load`, `restored_save`)를 처음 P0와 직접 비교한다. 각 phase의 새 Update graph/dtype/owner/producer 관측과 exact authored/unclassified 비교는 유지한다. setup의 실제 TLS 요청·invocation UUID·private admission을 확인하며 가짜 safety 요청이나 실패 요청·복구 permit을 만들지 않는다. 성공 후에만 clone lineage를 확정한다. 실제 loader가 반환한 tab wrapper는 phase 실패 시에도 retained 대상으로 추적하고, 무관한 새 탭을 소유 fixture로 분류하지 않는다.
+
+새 계획의 명시 상한은 **새 탭 2개 / `.casc` 파일 5개 / Update capture 7회**다. 기존 geometry 계산 10회·evaluation 2회·driver perturbation 1회는 그대로다. host/bridge의 setup 계획·admission·retention 한도를 함께 수정했다. 원 helper bytes에 묶인 이전 계획으로 변경한 효과 범위를 실행할 수 없다. 이 roundtrip 관찰만으로 일반 rig·rollback adapter 자격이나 원 unknown의 종결을 발급하지 않는다.
+
+**새 경로 실앱 실행은 아직 미실행이다.** 11월 16일 18:31 관측에서 PID `29032`는 `MainWindowHandle:0`, pump `busy:false/processed:15`였고 CUA 창 목록에는 Cascadeur가 없었다. 공식 script server `127.0.0.1:8765`도 연결 거부였으며 정상 앱 실행으로 창 재열기도 실패했다. 실행 중인 코드를 교체하지 않도록 설치기의 idle 조건을 유지했다. 강제 종료는 수행하지 않았고 필요한 확인을 사용자에게 요청했다. 자동저장 `.casc` 세 파일은 ignored 로컬 `artifacts/native-r6/windowless-autosave-20261116-1834`에 별도 복사했다. 이 백업이 모든 미저장 상태와 같다고 주장하지 않는다. 변경 Python 11개 파일의 3.11 AST 파싱과 공유 setup/admission 파일의 host/bridge byte 일치를 확인했다. 이는 native 실행 검증이 아니다.
+
 ### 현재 머신 실앱 테스트와 Update 수집기 수정 (11월 16일 후속)
 
 사용자의 "그냥 이 머신 내에서 테스트해" 지시에 따라 Hyper-V 대신 현재 설치의 새 Cascadeur 프로세스로 테스트했다. 기존 결과 불명 요청을 종결하거나 재실행하지 않았다. 기본 exact-two 경로는 유지하고 CLI에 반복 `--review-open-incident UUID`를 추가했다. schema 2 계획은 현재 모든 open incident의 인증된 원 요청·raw terminal·journal head, helper bytes, 새 epoch/workspace를 함께 고정하며 하나라도 추가/변경되면 승인·dispatch·효과 전에 거절한다. 이는 현재 머신에서의 명시된 잔여 위험 수용이며 과거 종료·비간섭 또는 격리 증명이 아니다. 전체 계획을 출력하는 기존 TTY 검토 명령은 사용자 지시 범위에서 에이전트가 직접 수행했다. 별도의 사람이 검토했다고 기록하지 않는다.

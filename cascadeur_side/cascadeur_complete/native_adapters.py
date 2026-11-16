@@ -194,6 +194,59 @@ def _save_observed(scene, path):
     return {"schema_version": 1, **manifest}
 
 
+def _save_checkpoint_files(target, backup, working, *, expected_projection, phase_guard,
+                           reader, run_id=None, typed=True):
+    """Shared native save boundary; callers own admission, paths and tab scope.
+
+    Keep the same immutable P0 across both files and every later restore. This
+    function neither constructs a request nor installs an adapter capability.
+    """
+    serialization_anchor = None
+    if typed:
+        from .native_serialization import pin_reference, compare_with_private_policy
+        serialization_anchor = pin_reference(target, phase_guard=phase_guard, expected_projection=expected_projection)
+    phase_guard()
+    checkpoint_file = _save_observed(target, backup)
+    checkpoint_observation = (compare_with_private_policy(target, serialization_anchor, phase="checkpoint_save", phase_guard=phase_guard)
+                              if serialization_anchor is not None else None)
+    phase_guard()
+    working_file = _save_observed(target, working)
+    working_observation = (compare_with_private_policy(target, serialization_anchor, phase="working_save", phase_guard=phase_guard)
+                           if serialization_anchor is not None else None)
+    saved_projection = reader(target)
+    phase_guard()
+    if ((serialization_anchor is None and saved_projection != expected_projection)
+            or (working_observation is not None and saved_projection != working_observation.projection)):
+        raise ValueError("NATIVE_COMPLETION_UNKNOWN: source changed during checkpoint")
+    identity = dict(guards.scene_instance(target))
+    snapshot = {"schema_version": 1, "snapshot_id": str(uuid.uuid4()), "path": str(backup),
+        "sha256": checkpoint_file["sha256"], "bytes": checkpoint_file["length"],
+        "working_path": str(working), "working_scene_instance_id": identity["scene_instance_id"],
+        "document_lineage_id": identity["document_lineage_id"], "runtime_epoch": guards.RUNTIME_EPOCH,
+        "adapter_fingerprint": guards.LOADED_FINGERPRINT, "native_completion": "observed",
+        "authored_projection_digest": guards.digest(saved_projection)}
+    if serialization_anchor is not None:
+        fixed = {"reference_projection_digest": serialization_anchor.reference_projection_digest,
+            "checkpoint_observed_projection_digest": guards.digest(checkpoint_observation.projection),
+            "checkpoint_file": checkpoint_file,
+            "serialization_policy_digest": checkpoint_observation.as_dict()["serialization_policy_digest"],
+            "runtime_epoch": guards.RUNTIME_EPOCH, "adapter_fingerprint": guards.LOADED_FINGERPRINT}
+        snapshot.update(schema_version=2, checkpoint_anchor_digest=guards.digest(fixed),
+            reference_projection_digest=fixed["reference_projection_digest"],
+            checkpoint_observed_projection_digest=fixed["checkpoint_observed_projection_digest"],
+            working_projection_digest=guards.digest(saved_projection), working_file_sha256=working_file["sha256"],
+            working_file_bytes=working_file["length"], serialization_policy_digest=fixed["serialization_policy_digest"],
+            serialization_observation_digest=guards.digest(working_observation.as_dict()))
+    _WORKSPACES[identity["scene_instance_id"]] = snapshot
+    if typed:
+        from .native_checkpoint_restore import remember_checkpoint
+        remember_checkpoint(target, snapshot, saved_projection, run_id=run_id,
+            immutable_anchor=serialization_anchor, checkpoint_projection=checkpoint_observation.projection,
+            checkpoint_observation=checkpoint_observation.as_dict(),
+            serialization_observation=working_observation.as_dict())
+    return snapshot, checkpoint_file, working_file, checkpoint_observation, working_observation
+
+
 def checkpoint(scene, arguments, request, adapter):
     from . import runtime as rt
     def current_admission():
@@ -267,53 +320,16 @@ def checkpoint(scene, arguments, request, adapter):
     current_admission()
     working.parent.mkdir(parents=True, exist_ok=True)
     from .native_scene_adapter import NativeSceneAdapter
-    serialization_anchor = None
     def phase_guard():
         current_admission()
         if target is not scene:
             original_unchanged()
-    if isinstance(adapter, NativeSceneAdapter):
-        from .native_serialization import pin_reference, compare_with_private_policy
-        serialization_anchor = pin_reference(target, phase_guard=phase_guard, expected_projection=expected_target)
-    current_admission()
-    checkpoint_file = _save_observed(target, backup)
-    checkpoint_observation = (compare_with_private_policy(target, serialization_anchor, phase="checkpoint_save", phase_guard=phase_guard)
-                              if serialization_anchor is not None else None)
-    current_admission()
-    working_file = _save_observed(target, working)
-    working_observation = (compare_with_private_policy(target, serialization_anchor, phase="working_save", phase_guard=phase_guard)
-                           if serialization_anchor is not None else None)
-    saved_projection = reader(target)
-    if ((serialization_anchor is None and saved_projection != expected_target)
-            or (working_observation is not None and saved_projection != working_observation.projection)
-            or (target is not scene and (reader(scene) != original or str(scene.get_path_name()) != original_path))):
+    _snapshot, checkpoint_file, working_file, _, _ = _save_checkpoint_files(target, backup, working,
+        expected_projection=expected_target, phase_guard=phase_guard, run_id=run_id,
+        typed=isinstance(adapter, NativeSceneAdapter), reader=reader)
+    if target is not scene and (reader(scene) != original or str(scene.get_path_name()) != original_path):
         raise ValueError("NATIVE_COMPLETION_UNKNOWN: clone or source changed during checkpoint")
     identity = dict(guards.scene_instance(target))
-    snapshot = {"schema_version": 1, "snapshot_id": str(uuid.uuid4()), "path": str(backup),
-        "sha256": checkpoint_file["sha256"], "bytes": checkpoint_file["length"],
-        "working_path": str(working), "working_scene_instance_id": identity["scene_instance_id"],
-        "document_lineage_id": identity["document_lineage_id"], "runtime_epoch": guards.RUNTIME_EPOCH,
-        "adapter_fingerprint": guards.LOADED_FINGERPRINT, "native_completion": "observed",
-        "authored_projection_digest": guards.digest(saved_projection)}
-    if serialization_anchor is not None:
-        fixed = {"reference_projection_digest": serialization_anchor.reference_projection_digest,
-            "checkpoint_observed_projection_digest": guards.digest(checkpoint_observation.projection),
-            "checkpoint_file": checkpoint_file,
-            "serialization_policy_digest": checkpoint_observation.as_dict()["serialization_policy_digest"],
-            "runtime_epoch": guards.RUNTIME_EPOCH, "adapter_fingerprint": guards.LOADED_FINGERPRINT}
-        snapshot.update(schema_version=2, checkpoint_anchor_digest=guards.digest(fixed),
-            reference_projection_digest=fixed["reference_projection_digest"],
-            checkpoint_observed_projection_digest=fixed["checkpoint_observed_projection_digest"],
-            working_projection_digest=guards.digest(saved_projection), working_file_sha256=working_file["sha256"],
-            working_file_bytes=working_file["length"], serialization_policy_digest=fixed["serialization_policy_digest"],
-            serialization_observation_digest=guards.digest(working_observation.as_dict()))
-    _WORKSPACES[identity["scene_instance_id"]] = snapshot
-    if isinstance(adapter, NativeSceneAdapter):
-        from .native_checkpoint_restore import remember_checkpoint
-        remember_checkpoint(target, snapshot, saved_projection, run_id=run_id,
-            immutable_anchor=serialization_anchor, checkpoint_projection=checkpoint_observation.projection,
-            checkpoint_observation=checkpoint_observation.as_dict(),
-            serialization_observation=working_observation.as_dict())
     scope = adapter.required_scope(target, source["scope"])
     successor = guards._capture_with_adapter(target, scope, source["inputs_digest"], None, None, adapter)
     observation = {"schema_version": 1, "completion": "native_observed", "checkpoint": checkpoint_file,

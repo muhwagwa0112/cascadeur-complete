@@ -26,15 +26,28 @@ def _phase_window(scene, phase_guard):
     raw state is frozen before Update and compared to private P0 afterwards.
     No scope, approval, or request is changed and no caller flag issues proof.
     """
-    from .incident_admission import assert_request_admission
+    from .incident_admission import assert_request_admission, SETUP_IDS
     if not callable(phase_guard):
         raise ValueError("SERIALIZATION_CURRENT_PHASE_GUARD_REQUIRED")
     request = getattr(guards._LOCAL, "request", None)
     if request is None:
         raise ValueError("SERIALIZATION_CURRENT_REQUEST_REQUIRED")
     operations = request.get("operations") or []
-    if len(operations) != 1 or operations[0]["name"] not in (
-            "safety.bootstrap", "safety.checkpoint", "safety.rollback"):
+    if len(operations) != 1:
+        raise ValueError("SERIALIZATION_PHASE_OPERATION_UNSUPPORTED")
+    operation = operations[0]["name"]
+    setup_guard = None
+    if operation in SETUP_IDS:
+        from .incident_admission import assert_setup_admission, _LOCAL as admission_local
+        def setup_guard():
+            # A multi-step setup keeps its original first operation in TLS;
+            # only the dispatcher's current privately admitted pair step may
+            # enter this phase window. Never rewrite that original request.
+            assert_setup_admission("setup.qualify_owned_pair_geometry")
+            if admission_local.setup["invocation_ref"] != request.get("request_id"):
+                raise ValueError("SERIALIZATION_SETUP_REQUEST_ID_DIFFERS")
+        setup_guard()
+    elif operation not in ("safety.bootstrap", "safety.checkpoint", "safety.rollback"):
         raise ValueError("SERIALIZATION_PHASE_OPERATION_UNSUPPORTED")
     assert_request_admission()
     phase_guard()
@@ -43,6 +56,8 @@ def _phase_window(scene, phase_guard):
     prior = getattr(guards._LOCAL, "guard", None)
     def guard():
         assert_request_admission()
+        if setup_guard is not None:
+            setup_guard()
         phase_guard()
         if (getattr(guards._LOCAL, "request", None) is not request
                 or dict(guards.scene_instance(scene)) != identity

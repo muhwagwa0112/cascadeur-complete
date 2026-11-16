@@ -17,7 +17,7 @@ _LIMITS = {
     "finite_models": {"new_tabs": 1, "files": 2},
     "position_writer": {"new_tabs": 1, "files": 2},
     "geometry_calculation": {"new_tabs": 1, "files": 2},
-    "owned_pair_geometry": {"new_tabs": 1, "files": 2},
+    "owned_pair_geometry": {"new_tabs": 2, "files": 5},
 }
 _SETUP_OPERATIONS = {
     "native_adapter": "setup.qualify_native_adapter",
@@ -31,7 +31,8 @@ _FILENAMES = {
     "finite_models": {"fixture-before.casc", "fixture-after.casc"},
     "position_writer": {"fixture-before.casc", "fixture-after.casc"},
     "geometry_calculation": {"fixture-before.casc", "fixture-after.casc"},
-    "owned_pair_geometry": {"fixture-before.casc", "fixture-after.casc"},
+    "owned_pair_geometry": {"fixture-before.casc", "fixture-after.casc", "checkpoint.casc",
+                            "checkpoint-working.casc", "checkpoint-restored.casc"},
 }
 
 

@@ -21,12 +21,12 @@ _HELPERS = {
     "setup.qualify_independent_models": ("native_interpolation_qualification.py", 1, 2),
     "setup.qualify_independent_position_writer": ("native_independent_position.py", 1, 2),
     "setup.qualify_geometry_calculation": ("native_geometry_qualification.py", 1, 2),
-    "setup.qualify_owned_pair_geometry": ("native_owned_pair_binding.py", 1, 2),
+    "setup.qualify_owned_pair_geometry": ("native_owned_pair_binding.py", 2, 5),
 }
 _SEMANTIC_LIMITS = {"setup.qualify_geometry_calculation": {
     "maximum_geometry_calculations": 5, "maximum_evaluations": 2, "maximum_driver_mutations": 1},
     "setup.qualify_owned_pair_geometry": {"maximum_geometry_calculations": 10,
-        "maximum_evaluations": 2, "maximum_driver_mutations": 1, "maximum_update_graph_captures": 2}}
+        "maximum_evaluations": 2, "maximum_driver_mutations": 1, "maximum_update_graph_captures": 7}}
 
 
 def _bridge_directory():
