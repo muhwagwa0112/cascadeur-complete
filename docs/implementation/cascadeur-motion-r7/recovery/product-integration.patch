@@ -1,0 +1,126 @@
+diff --git a/src/cascadeur_complete/change_flow.py b/src/cascadeur_complete/change_flow.py
+--- a/src/cascadeur_complete/change_flow.py
++++ b/src/cascadeur_complete/change_flow.py
+@@ -338,8 +338,8 @@
+         from .request_ledger import canonical_digest
+         try:
+             journal = RecoveryJournal(self.paths, record.mutation_request_id)
+-            # Claim precedes any prepare/dispatch. An interrupted owner can only
+-            # be observed; an unknown attempt never gets a replacement request.
++            # Claim precedes preparation. A retained unused token may make only
++            # its first dispatch; an unknown attempt gets no replacement request.
+             if not journal.claim():
+                 result = journal.read("result")
+                 permit = journal.read("permit")
+@@ -364,8 +364,14 @@
+                     else:
+                         failed.recovery_state = result["state"]
+                 elif permit:
+-                    observed = self.client.reconcile_request(permit["recovery_request_id"])
+-                    failed.recovery_state = "recovered" if recovery_succeeded(observed, permit) else "blocked_recovery_outcome_unknown"
++                    prepared = journal.read("prepared")
++                    # A durable unused approval may complete its first dispatch.
++                    # Any recorded dispatch or consumed token stays observation-only.
++                    observed = (self._dispatch_prepared_recovery(journal, permit) if prepared
++                        else self.client.reconcile_request(permit["recovery_request_id"]))
++                    failed.recovery_state = ("recovered" if recovery_succeeded(observed, permit)
++                        else "blocked_recovery_outcome_unknown" if observed.phase != "terminal"
++                        or observed.outcome in {None, "pending", "outcome_unknown"} else "recovery_failed")
+                 else:
+                     failed.recovery_state = "blocked_recovery_owner_unresolved"
+                 return failed
+@@ -489,10 +495,89 @@
+             recovery_permit=recovery_permit, recovery_journal=recovery_journal)
+         if not prepared.get("ok"):
+             return ResultEnvelope.model_validate(prepared)
++        return self._dispatch_prepared_recovery(recovery_journal, recovery_permit)
++
++    def _dispatch_prepared_recovery(self, journal, permit) -> ResultEnvelope:
++        """Finish only the first dispatch of an existing signed recovery token.
++
++        This method is reached from an authorized failed change, never from the
++        read-only request-status API. It does not mint a token, permit or ID.
++        Once intent or token consumption exists, the same request is observed.
++        """
++        from types import SimpleNamespace
++        from .models import SourceBinding
++        from .recovery import recovery_candidate, verify_snapshot
+         from .request_ledger import canonical_digest
+-        try:
+-            recovery_journal.write("dispatch", {"recovery_request_id": recovery_permit["recovery_request_id"],
+-                                                 "permit_digest": canonical_digest(recovery_permit)})
++
++        stored = journal.read("permit")
++        prepared = journal.read("prepared")
++        if stored != permit or prepared is None:
++            raise ValueError("RECOVERY_PREPARED_APPROVAL_UNAVAILABLE")
++        request_id = permit["recovery_request_id"]
++        permit_digest = canonical_digest(permit)
++        if (prepared.get("original_request_id") != permit["original_request_id"]
++                or prepared.get("recovery_request_id") != request_id
++                or prepared.get("permit_digest") != permit_digest):
++            raise ValueError("RECOVERY_PREPARED_APPROVAL_DIFFERS")
++
++        expected_dispatch = {"recovery_request_id": request_id, "permit_digest": permit_digest}
++        dispatch = journal.read("dispatch")
++        if dispatch is not None:
++            if any(dispatch.get(key) != value for key, value in expected_dispatch.items()):
++                raise ValueError("RECOVERY_DISPATCH_DIFFERS")
++            return self.client.reconcile_request(request_id)
++        if self.client.queue.ledger.read_request(request_id) is not None:
++            return self.client.reconcile_request(request_id)
++
++        token = prepared["confirmation_token"]
++        try:
++            approval = self.changes.load(token)
++        except SafetyError:
++            consumed = self.changes.consumed(token)
++            if consumed is not None and consumed.mutation_request_id == request_id:
++                return self.client.reconcile_request(request_id)
++            raise
++        context = {**(permit["original_execution_context"] or {}), "request_id": request_id,
++            "recovery_of": permit["original_request_id"], "recovery_permit_digest": permit_digest}
++        if (approval.schema_version != 3 or approval.used
++                or approval.feature_id != "change_rollback" or approval.operation.name != "safety.rollback"
++                or approval.mutation_request_id != request_id or approval.execution_context != context
++                or approval.source_binding is None
++                or approval.source_binding.model_dump(mode="json") != permit["source_binding"]
++                or approval.operation.arguments != permit["arguments"]):
++            raise ValueError("RECOVERY_TOKEN_BINDING_DIFFERS")
++        if permit["expires_at"] - time.time() < 31:
++            raise ValueError("RECOVERY_PERMIT_TOO_CLOSE_TO_EXPIRY")
++
++        original = self.client.queue.ledger.read_request(permit["original_request_id"])
++        receipt = self.client.queue.ledger.read_receipt(permit["original_request_id"])
++        if (original is None or receipt is None or not receipt.terminal_result
++                or canonical_digest(receipt.model_dump(mode="json")) != permit["original_receipt_digest"]
++                or original.get("execution_context") != permit["original_execution_context"]):
++            raise ValueError("RECOVERY_ORIGINAL_TERMINAL_CHANGED")
++        original_source = SourceBinding.model_validate(original.get("source_binding"))
++        manifest = original_source.scope.get("snapshot_manifest")
++        record = SimpleNamespace(mutation_request_id=permit["original_request_id"],
++            source_binding=original_source, snapshot_manifest_id=canonical_digest(manifest),
++            execution_context=original.get("execution_context"))
++        failed = ResultEnvelope.model_validate({**receipt.terminal_result,
++            "request_id": permit["original_request_id"]})
++        post, recovery, manifest, arguments = recovery_candidate(record, failed, receipt)
++        if (recovery.model_dump(mode="json") != permit["source_binding"]
++                or manifest != permit["snapshot_manifest"] or arguments != permit["arguments"]
++                or canonical_digest(manifest) != permit["snapshot_manifest_digest"]):
++            raise ValueError("RECOVERY_RETAINED_TARGET_CHANGED")
++        if (not self.validate_source(post).ok
++                or not self.validate_source(recovery, operation_name="safety.rollback", arguments=arguments).ok):
++            raise ValueError("RECOVERY_CURRENT_TARGET_CHANGED")
++        verify_snapshot(manifest, post, self.paths.snapshots,
++                        expected_digest=permit["snapshot_manifest_digest"])
++
++        try:
++            journal.write("dispatch", expected_dispatch)
+         except FileExistsError:
+-            return self.client.reconcile_request(recovery_permit["recovery_request_id"])
+-        return self.commit_change(prepared["confirmation_token"], timeout=120)
++            dispatch = journal.read("dispatch")
++            if dispatch is None or any(dispatch.get(key) != value for key, value in expected_dispatch.items()):
++                raise ValueError("RECOVERY_DISPATCH_DIFFERS")
++            return self.client.reconcile_request(request_id)
++        return self.commit_change(token, timeout=120)

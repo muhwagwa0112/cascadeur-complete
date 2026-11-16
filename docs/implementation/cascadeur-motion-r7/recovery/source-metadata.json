@@ -1,0 +1,12 @@
+{
+  "base_commit": "99b85163c4125a621ef7e2deeabe22270032c60b",
+  "product_applied": false,
+  "targets": [
+    {
+      "path": "src/cascadeur_complete/change_flow.py",
+      "base_blob": "8c080579c125bc533262360119e8822a5e38832b",
+      "proposed_blob": "4febe5aa3c149597e754be2cd83d6922381d493d",
+      "proposed_sha256": "8e327c36c44d8b72e895f4bba2bc4a00a22c5655b3fd24ac2c356642dc7be93a"
+    }
+  ]
+}

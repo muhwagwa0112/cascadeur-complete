@@ -1,0 +1,55 @@
+{
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "base_commit": "99b85163c4125a621ef7e2deeabe22270032c60b",
+  "product_applied": false,
+  "native_execution": false,
+  "component": "delivery",
+  "patch": "product-integration.patch",
+  "patch_sha256": "92855e2bc3fc41f32361c662bb629abcc1cf21c03fdf93e361b0f5034eb07bca",
+  "patch_bytes": 21748,
+  "working_source_root": "cascadeur-r7-work/delivery",
+  "targets": [
+    {
+      "target_path": "src/cascadeur_complete/export_models.py",
+      "status": "modified",
+      "base_blob_sha1": "444b10c2416ed56d9f2b8d40c3fe3b974b2fba41",
+      "proposed_blob_sha1": "ff1be9b90db1afa561aae34c2ca1b94d347814e9",
+      "proposed_sha256": "3d6fd4b24361ebd4a0e90edaf403c1cf29126d7232f907ded825fa7b19274358",
+      "proposed_bytes": 10268
+    },
+    {
+      "target_path": "src/cascadeur_complete/mesh_delivery.py",
+      "status": "added",
+      "base_blob_sha1": null,
+      "proposed_blob_sha1": "79b7925c6bfaf2f1ca690f3d1d41c77fa237bae9",
+      "proposed_sha256": "4b4dcaf6bb2ed9bc2b0c2530f49651c5474f73c8a3ae4fb8c8908e26c11dec38",
+      "proposed_bytes": 11479
+    },
+    {
+      "target_path": "src/cascadeur_complete/recipe_runner.py",
+      "status": "modified",
+      "base_blob_sha1": "5a8ba666e1c29805cdf187b38f1c7ecb7a1dbf07",
+      "proposed_blob_sha1": "fa24127111e8f32db81abea76625de8fe50e7766",
+      "proposed_sha256": "34b51e15a27c1b3929874c74c43f2f958b5ee9065a4a06a19f6aec0d84fe585a",
+      "proposed_bytes": 106438
+    },
+    {
+      "target_path": "src/cascadeur_complete/target_capture.py",
+      "status": "modified",
+      "base_blob_sha1": "62c87f72754f9957bd438486a71cd48150956bc1",
+      "proposed_blob_sha1": "1415e3e51cf948ee3c64b623fde83f4760330a3a",
+      "proposed_sha256": "1a453dd4c5e462d693b9722eb1228be0fb4d3245b83f637ddad987c11c7aab8d",
+      "proposed_bytes": 20254
+    }
+  ],
+  "proposed_schema_changes": [
+    "TargetImportSettings.native_mesh_mapping",
+    "TargetImportSettings.max_mesh_distance_checks"
+  ],
+  "checks": {
+    "syntax": "delegated_to_root_single_pass",
+    "apply_context": "delegated_to_root_single_pass",
+    "tests": "not_run",
+    "native": "not_run"
+  }
+}

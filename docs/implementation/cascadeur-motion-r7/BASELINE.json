@@ -1,0 +1,23 @@
+{
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "implementation_branch": "feat/cascadeur-motion-r3",
+  "implementation_commit": "99b85163c4125a621ef7e2deeabe22270032c60b",
+  "implementation_tree": "1b992c1afeae75f0c6503f27b1318e665c4332b5",
+  "preparation_branch": "docs/cascadeur-motion-plan-r7",
+  "prepared_on": "2026-11-17",
+  "timezone": "Asia/Seoul",
+  "status": "unapplied_code_preparation",
+  "product_applied": false,
+  "native_execution_performed": false,
+  "previous_proposal_commit": "d31bdf3210f83fea2964a05d185d9bc976ef04ca",
+  "recorded_installed_build": "2026.2.3.0.16863",
+  "recorded_installed_build_source": "docs/KNOWN_ISSUES_2026-11-15.md at implementation_commit",
+  "host_python_target": "3.12",
+  "native_python_target": "3.11",
+  "scope": [
+    "unbaking execution binding",
+    "character motion lowering and native writer contracts",
+    "final FBX consumer quality",
+    "recovery first-dispatch continuation"
+  ]
+}

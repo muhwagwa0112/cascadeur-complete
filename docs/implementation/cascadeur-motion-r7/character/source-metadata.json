@@ -1,0 +1,47 @@
+{
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "base_commit": "99b85163c4125a621ef7e2deeabe22270032c60b",
+  "base_tree_sha": "1b992c1afeae75f0c6503f27b1318e665c4332b5",
+  "scope": "host FK local rotation lowering and existing controller call integration",
+  "product_applied": false,
+  "code_executed": false,
+  "native_capability_registered": false,
+  "native_fk_leaf_implemented": false,
+  "patch": "product-integration.patch",
+  "patch_sha256": "8b95436c0d8b617a86e4a5b75fb8001a5495491d188199fdf899d439a8c05cec",
+  "patch_bytes": 18319,
+  "targets": [
+    {
+      "target_path": "src/cascadeur_complete/skeletal_fk_controller.py",
+      "status": "added",
+      "base_git_blob_sha1": null,
+      "proposed_git_blob_sha1": "d00079b7e8fdaf9c1f79ffb331a5c6f2586a2191",
+      "proposed_sha256": "205160745f195f274c59989c10b51bdd50acc4415b42d720b06dd3ac7fa815e5",
+      "proposed_bytes": 9224
+    },
+    {
+      "target_path": "src/cascadeur_complete/retarget_controller.py",
+      "status": "modified",
+      "base_git_blob_sha1": "fb48ee4db07bf2bde54ed6a2ddba2e8b3c87aacf",
+      "proposed_git_blob_sha1": "b130577acc8ef48e962d2543f62456a39267dd64",
+      "proposed_sha256": "7d4cfad28a50f53abbbf948e98db3e1c3dd9a6f2ffd419cb2c2a345218cd2393",
+      "proposed_bytes": 5141
+    },
+    {
+      "target_path": "src/cascadeur_complete/recipe_native_service.py",
+      "status": "modified",
+      "base_git_blob_sha1": "87ce1d0ad85a17a69c0d9a010f26dadda02da118",
+      "proposed_git_blob_sha1": "712b35e28d6e1021cd1c46f46385271d3bd4be9e",
+      "proposed_sha256": "d75fc95dbc9b549359e1311b87294fb0a3b3df4d63ff841a8cadcff70cbc2d2e",
+      "proposed_bytes": 50983
+    },
+    {
+      "target_path": "src/cascadeur_complete/cleanup_workflow.py",
+      "status": "modified",
+      "base_git_blob_sha1": "22536865f788f49ec34124f04a4b6f54dee8b01f",
+      "proposed_git_blob_sha1": "8f567c7af34eff8dc9a5ee433053212428c7098c",
+      "proposed_sha256": "2ee3e4f1b21c89b70afbcd7361f21ba0044bffec0e3fe84e3d44d600c46232d6",
+      "proposed_bytes": 96286
+    }
+  ]
+}

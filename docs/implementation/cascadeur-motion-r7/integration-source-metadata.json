@@ -1,0 +1,145 @@
+{
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "base_commit": "99b85163c4125a621ef7e2deeabe22270032c60b",
+  "base_tree_sha": "1b992c1afeae75f0c6503f27b1318e665c4332b5",
+  "product_applied": false,
+  "native_executed": false,
+  "patch": "product-integration.patch",
+  "patch_sha256": "08fb89a805f0bc0ab5b0d6d6accf2884e0f043a3efa32e787ac9e4651bbcdb52",
+  "patch_bytes": 70987,
+  "target_count": 12,
+  "added_count": 3,
+  "modified_count": 9,
+  "components": [
+    {
+      "name": "unbaking",
+      "patch": "unbaking/product-integration.patch",
+      "sha256": "3ae2ba0e6c101075f49ef1c6717b7112f83c49f8a76d9365f56164e36a5ba452"
+    },
+    {
+      "name": "character",
+      "patch": "character/product-integration.patch",
+      "sha256": "8b95436c0d8b617a86e4a5b75fb8001a5495491d188199fdf899d439a8c05cec"
+    },
+    {
+      "name": "delivery",
+      "patch": "delivery/product-integration.patch",
+      "sha256": "92855e2bc3fc41f32361c662bb629abcc1cf21c03fdf93e361b0f5034eb07bca"
+    },
+    {
+      "name": "recovery",
+      "patch": "recovery/product-integration.patch",
+      "sha256": "2c8e55ddca4fd4d05f09f3268862a662b66f65252632d8a7549afe253226c8fb"
+    }
+  ],
+  "targets": [
+    {
+      "path": "cascadeur_side/cascadeur_complete/native_unbaking.py",
+      "component": "unbaking",
+      "status": "modified",
+      "base_blob_sha1": "6a3c003eb46d34a341ab32c563b8525ece66e874",
+      "proposed_blob_sha1": "e5af93b8e77d57b94872f4c239df246250c9418a",
+      "proposed_sha256": "87e8fa9c505e263d54f3dc395abe511df8ed856870a57b516233d2fa9caa5c2f",
+      "proposed_bytes": 16152
+    },
+    {
+      "path": "cascadeur_side/cascadeur_complete/native_unbaking_binding.py",
+      "component": "unbaking",
+      "status": "added",
+      "base_blob_sha1": null,
+      "proposed_blob_sha1": "e26b9da098e1d6ffe158439e57a582b859a30031",
+      "proposed_sha256": "11b2fcdd8a8e9d6e7d4af403aad0e292c7e827e3735cf15c0c1fa26391dca625",
+      "proposed_bytes": 12496
+    },
+    {
+      "path": "cascadeur_side/cascadeur_complete/handlers/generation.py",
+      "component": "unbaking",
+      "status": "modified",
+      "base_blob_sha1": "ee669d5209fad0a8325e7899edd9f4455feda222",
+      "proposed_blob_sha1": "152efd71bcb67b59b3afd18e29edada1ad2f6ed0",
+      "proposed_sha256": "8e812e00a073ebde04d9678416a654cf10ba6e8e15a21134e2899b63e55abf00",
+      "proposed_bytes": 11331
+    },
+    {
+      "path": "src/cascadeur_complete/skeletal_fk_controller.py",
+      "component": "character",
+      "status": "added",
+      "base_blob_sha1": null,
+      "proposed_blob_sha1": "d00079b7e8fdaf9c1f79ffb331a5c6f2586a2191",
+      "proposed_sha256": "205160745f195f274c59989c10b51bdd50acc4415b42d720b06dd3ac7fa815e5",
+      "proposed_bytes": 9224
+    },
+    {
+      "path": "src/cascadeur_complete/retarget_controller.py",
+      "component": "character",
+      "status": "modified",
+      "base_blob_sha1": "fb48ee4db07bf2bde54ed6a2ddba2e8b3c87aacf",
+      "proposed_blob_sha1": "b130577acc8ef48e962d2543f62456a39267dd64",
+      "proposed_sha256": "7d4cfad28a50f53abbbf948e98db3e1c3dd9a6f2ffd419cb2c2a345218cd2393",
+      "proposed_bytes": 5141
+    },
+    {
+      "path": "src/cascadeur_complete/recipe_native_service.py",
+      "component": "character",
+      "status": "modified",
+      "base_blob_sha1": "87ce1d0ad85a17a69c0d9a010f26dadda02da118",
+      "proposed_blob_sha1": "712b35e28d6e1021cd1c46f46385271d3bd4be9e",
+      "proposed_sha256": "d75fc95dbc9b549359e1311b87294fb0a3b3df4d63ff841a8cadcff70cbc2d2e",
+      "proposed_bytes": 50983
+    },
+    {
+      "path": "src/cascadeur_complete/cleanup_workflow.py",
+      "component": "character",
+      "status": "modified",
+      "base_blob_sha1": "22536865f788f49ec34124f04a4b6f54dee8b01f",
+      "proposed_blob_sha1": "8f567c7af34eff8dc9a5ee433053212428c7098c",
+      "proposed_sha256": "2ee3e4f1b21c89b70afbcd7361f21ba0044bffec0e3fe84e3d44d600c46232d6",
+      "proposed_bytes": 96286
+    },
+    {
+      "path": "src/cascadeur_complete/export_models.py",
+      "component": "delivery",
+      "status": "modified",
+      "base_blob_sha1": "444b10c2416ed56d9f2b8d40c3fe3b974b2fba41",
+      "proposed_blob_sha1": "ff1be9b90db1afa561aae34c2ca1b94d347814e9",
+      "proposed_sha256": "3d6fd4b24361ebd4a0e90edaf403c1cf29126d7232f907ded825fa7b19274358",
+      "proposed_bytes": 10268
+    },
+    {
+      "path": "src/cascadeur_complete/mesh_delivery.py",
+      "component": "delivery",
+      "status": "added",
+      "base_blob_sha1": null,
+      "proposed_blob_sha1": "79b7925c6bfaf2f1ca690f3d1d41c77fa237bae9",
+      "proposed_sha256": "4b4dcaf6bb2ed9bc2b0c2530f49651c5474f73c8a3ae4fb8c8908e26c11dec38",
+      "proposed_bytes": 11479
+    },
+    {
+      "path": "src/cascadeur_complete/recipe_runner.py",
+      "component": "delivery",
+      "status": "modified",
+      "base_blob_sha1": "5a8ba666e1c29805cdf187b38f1c7ecb7a1dbf07",
+      "proposed_blob_sha1": "fa24127111e8f32db81abea76625de8fe50e7766",
+      "proposed_sha256": "34b51e15a27c1b3929874c74c43f2f958b5ee9065a4a06a19f6aec0d84fe585a",
+      "proposed_bytes": 106438
+    },
+    {
+      "path": "src/cascadeur_complete/target_capture.py",
+      "component": "delivery",
+      "status": "modified",
+      "base_blob_sha1": "62c87f72754f9957bd438486a71cd48150956bc1",
+      "proposed_blob_sha1": "1415e3e51cf948ee3c64b623fde83f4760330a3a",
+      "proposed_sha256": "1a453dd4c5e462d693b9722eb1228be0fb4d3245b83f637ddad987c11c7aab8d",
+      "proposed_bytes": 20254
+    },
+    {
+      "path": "src/cascadeur_complete/change_flow.py",
+      "component": "recovery",
+      "status": "modified",
+      "base_blob_sha1": "8c080579c125bc533262360119e8822a5e38832b",
+      "proposed_blob_sha1": "4febe5aa3c149597e754be2cd83d6922381d493d",
+      "proposed_sha256": "8e327c36c44d8b72e895f4bba2bc4a00a22c5655b3fd24ac2c356642dc7be93a",
+      "proposed_bytes": 34559
+    }
+  ]
+}

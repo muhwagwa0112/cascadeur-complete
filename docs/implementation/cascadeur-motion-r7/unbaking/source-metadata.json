@@ -1,0 +1,38 @@
+{
+  "component": "unbaking",
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "base_commit": "99b85163c4125a621ef7e2deeabe22270032c60b",
+  "product_applied": false,
+  "native_executed": false,
+  "patch": "product-integration.patch",
+  "patch_sha256": "3ae2ba0e6c101075f49ef1c6717b7112f83c49f8a76d9365f56164e36a5ba452",
+  "patch_bytes": 22440,
+  "targets": [
+    {
+      "path": "cascadeur_side/cascadeur_complete/native_unbaking.py",
+      "status": "modified",
+      "base_blob_sha1": "6a3c003eb46d34a341ab32c563b8525ece66e874",
+      "proposed_blob_sha1": "e5af93b8e77d57b94872f4c239df246250c9418a",
+      "proposed_sha256": "87e8fa9c505e263d54f3dc395abe511df8ed856870a57b516233d2fa9caa5c2f",
+      "proposed_bytes": 16152
+    },
+    {
+      "path": "cascadeur_side/cascadeur_complete/native_unbaking_binding.py",
+      "status": "added",
+      "base_blob_sha1": null,
+      "proposed_blob_sha1": "e26b9da098e1d6ffe158439e57a582b859a30031",
+      "proposed_sha256": "11b2fcdd8a8e9d6e7d4af403aad0e292c7e827e3735cf15c0c1fa26391dca625",
+      "proposed_bytes": 12496
+    },
+    {
+      "path": "cascadeur_side/cascadeur_complete/handlers/generation.py",
+      "status": "modified",
+      "base_blob_sha1": "ee669d5209fad0a8325e7899edd9f4455feda222",
+      "proposed_blob_sha1": "152efd71bcb67b59b3afd18e29edada1ad2f6ed0",
+      "proposed_sha256": "8e812e00a073ebde04d9678416a654cf10ba6e8e15a21134e2899b63e55abf00",
+      "proposed_bytes": 11331
+    }
+  ],
+  "missing_native_leaf": "cascadeur_side/cascadeur_complete/native_installed_unbaking.py",
+  "native_qualification_helper_implemented": false
+}

@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "base_commit": "99b85163c4125a621ef7e2deeabe22270032c60b",
+  "product_applied": false,
+  "tasks": [
+    {
+      "id": "R7-UNBAKING",
+      "area": "unbaking",
+      "implementation": "unbaking/IMPLEMENTATION.md",
+      "patch": "unbaking/product-integration.patch",
+      "status": "code_prepared_native_leaf_pending",
+      "code_ready": [
+        "runtime adapter registration and step status",
+        "exact request/source/attempt to private completion handle",
+        "legacy handler routing to the same adapter"
+      ],
+      "remaining": [
+        "installed exact callables and explicit argument lowering for three steps",
+        "operation-correlated completion and semantic postconditions",
+        "owned fixture helper issuing the original private qualification handle"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "R7-CHARACTER",
+      "area": "character_motion",
+      "implementation": "character/IMPLEMENTATION.md",
+      "patch": "character/product-integration.patch",
+      "status": "host_code_prepared_native_writer_pending",
+      "code_ready": [
+        "FK skeleton quaternion lowering and existing controller integration"
+      ],
+      "remaining": [
+        "actual RigInfo hierarchy/rest/ownership and controller closure observations",
+        "native rotation writer and independent evaluated readback",
+        "coupled root/rotation lowering, contact and IK/controller lowering"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "R7-DELIVERY",
+      "area": "consumer_delivery",
+      "implementation": "delivery/IMPLEMENTATION.md",
+      "patch": "delivery/product-integration.patch",
+      "status": "consumer_code_prepared_character_export_pending",
+      "code_ready": [
+        "sampled native-versus-consumer surface fidelity",
+        "original final capture binding and retained consumer quality integration"
+      ],
+      "remaining": [
+        "actual native character/skin export settings and completion",
+        "whole character consumer mapping and original-intent roundtrip",
+        "final quality-qualified publication"
+      ],
+      "depends_on": [
+        "R7-CHARACTER"
+      ],
+      "proposed_public_changes": [
+        "TargetImportSettings native_mesh_mapping",
+        "TargetImportSettings max_mesh_distance_checks"
+      ]
+    },
+    {
+      "id": "R7-RECOVERY",
+      "area": "recovery",
+      "implementation": "recovery/IMPLEMENTATION.md",
+      "patch": "recovery/product-integration.patch",
+      "status": "host_code_prepared_native_failure_observation_pending",
+      "code_ready": [
+        "first dispatch continuation using original signed prepared recovery token",
+        "existing dispatch or consumed approval remains observation-only"
+      ],
+      "remaining": [
+        "real failed operation to authenticated failure terminal to restore observation",
+        "per-character/unbaking-writer completed-failure attestation",
+        "producer closure for legacy unknowns remains unavailable"
+      ],
+      "depends_on": []
+    }
+  ],
+  "verification_scope": "Changed Python syntax and patch context only; no full suite, CI, native qualification, or product application.",
+  "completion_rule": "Code preparation, native implementation, and live final-motion/consumer success are distinct. No task is marked fully completed by this packet."
+}

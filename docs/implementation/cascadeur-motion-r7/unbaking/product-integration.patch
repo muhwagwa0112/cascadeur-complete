@@ -1,0 +1,396 @@
+diff --git a/cascadeur_side/cascadeur_complete/native_unbaking.py b/cascadeur_side/cascadeur_complete/native_unbaking.py
+index 6a3c003eb46d34a341ab32c563b8525ece66e874..e5af93b8e77d57b94872f4c239df246250c9418a 100644
+--- a/cascadeur_side/cascadeur_complete/native_unbaking.py
++++ b/cascadeur_side/cascadeur_complete/native_unbaking.py
+@@ -1,8 +1,8 @@
+ """Exact unbaking scope and topology bounds, never native completion proof.
+ 
+-The opaque actions remain unqualified. A projection taken after call_action
+-returns can reject a visible scope violation, but cannot close an async action.
+-This module does not register an adapter or turn its observation into success.
++The installed leaf remains unqualified until its exact native observations exist.
++Projection comparison bounds visible effects; it never closes an async action.
++Status delegates only to the already registered code-owned step adapter.
+ """
+ from __future__ import annotations
+ 
+@@ -17,14 +17,15 @@
+ 
+ 
+ def step_contract_status(step):
+-    """Describe missing native proof; declarations cannot qualify an action.
+-
+-    The installed ActionManager entry points return None, and the published
+-    editable-animation tool is a getter, not a completion-correlated executor.
+-    There is currently no process-private qualified leaf for these steps.
+-    """
++    """Read a retained private step contract; never qualify from wire flags."""
+     if step not in STEPS:
+         raise ValueError("UNBAKING_STEP_INVALID")
++    from .native_unbaking_binding import registered_adapter
++    adapter = registered_adapter()
++    if adapter is not None:
++        status = adapter.step_status(step)
++        if status is not None:
++            return status
+     return {"step": step, "qualified": False, "code": "UNBAKING_STEP_UNQUALIFIED",
+         "missing": ["exact_installed_callable_binding", "explicit_argument_lowering",
+                     "operation_correlated_completion", "private_step_qualification"],
+@@ -32,12 +33,16 @@
+ 
+ 
+ def require_step_contract(scene, step, *, source=None, arguments=None):
+-    """Fail before selection/effects; no opaque action is a qualified leaf."""
++    """Return the already registered private executor before selection/effects."""
++    from .native_unbaking_binding import registered_adapter
+     guards.assert_loaded_package()
++    status = step_contract_status(step)
++    adapter = registered_adapter()
++    if status.get("qualified") is not True or adapter is None:
++        raise ValueError(status["code"] + ": " + step + ": " + ",".join(status["missing"]))
+     if source is not None:
+         guards.assert_source(scene, source, operation_name="generation.unbaking", arguments=arguments)
+-    status = step_contract_status(step)
+-    raise ValueError(status["code"] + ": " + step + ": " + ",".join(status["missing"]))
++    return adapter
+ 
+ 
+ def validate_arguments(arguments):
+diff --git a/cascadeur_side/cascadeur_complete/native_unbaking_binding.py b/cascadeur_side/cascadeur_complete/native_unbaking_binding.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e26b9da098e1d6ffe158439e57a582b859a30031
+--- /dev/null
++++ b/cascadeur_side/cascadeur_complete/native_unbaking_binding.py
+@@ -0,0 +1,228 @@
++"""Bridge plumbing for a code-owned, privately qualified unbaking executor.
++
++This module is not an SDK leaf. The fixed native_installed_unbaking module is
++intentionally absent until its installed action bindings and completion lifetime
++are observed. No wire argument can install a leaf or supply its private handle.
++"""
++from __future__ import annotations
++
++import copy
++import hashlib
++import importlib
++import json
++
++from . import guarded_runtime as guards
++
++_OPERATION = "generation.unbaking"
++_CONTRACT_FIELDS = ("installed_callable_digest", "lowering_digest",
++                    "completion_contract_digest", "postcondition_contract_digest", "qualification_digest")
++_ACTION_IDS = {
++    "prepare_keys_by_fulcrums": "View.AutoInterpolation_Keys",
++    "adjust_keys_and_interpolation": "View.Animation unbaking",
++    "adjust_autoposing_lock_state": "AutoPosingTool.AutoUnlock",
++}
++
++
++def _freeze(value):
++    return json.dumps(value, sort_keys=True, separators=(",", ":"),
++                      ensure_ascii=False, allow_nan=False).encode()
++
++
++def _sha(value):
++    return (isinstance(value, str) and len(value) == 64
++            and all(character in "0123456789abcdef" for character in value))
++
++
++def _installed_build():
++    from .native_adapters import installed_build
++    return installed_build()
++
++
++class _QualifiedUnbakingAdapter:
++    def __init__(self, leaf, bundle):
++        self._leaf = leaf
++        self._bundle = bundle
++        self._epoch = guards.RUNTIME_EPOCH
++        self._fingerprint = guards.LOADED_FINGERPRINT
++        self.evidence_bytes = leaf.qualification_bytes(bundle)
++        if not isinstance(self.evidence_bytes, bytes) or not self.evidence_bytes:
++            raise ValueError("UNBAKING_PRIVATE_QUALIFICATION_UNAVAILABLE")
++        self.verification = copy.deepcopy(leaf.adapter_verification(bundle))
++        if (not isinstance(self.verification, dict)
++                or self.verification.get("operations") != [_OPERATION]
++                or self.verification.get("evidence_sha256") != hashlib.sha256(self.evidence_bytes).hexdigest()
++                or self.verification.get("runtime_fingerprint") != self._fingerprint
++                or self.verification.get("installed_build") != _installed_build()
++                or self.verification.get("dispatch_semantics") != "synchronous_no_yield"
++                or self.verification.get("identity_stable") is not True):
++            raise ValueError("UNBAKING_PRIVATE_QUALIFICATION_DIFFERS")
++        self._verification_bytes = _freeze(self.verification)
++        self._contracts = self._read_contracts()
++        self._contract_bytes = _freeze(self._contracts)
++        self._consumed = set()
++        self._assert_current()
++
++    observed_build = staticmethod(_installed_build)
++
++    def _read_contracts(self):
++        from .native_unbaking import STEPS
++        result = self._leaf.step_contracts(self._bundle)
++        if not isinstance(result, dict) or not result or not set(result) <= STEPS:
++            raise ValueError("UNBAKING_PRIVATE_STEP_CONTRACTS_UNAVAILABLE")
++        for step, contract in result.items():
++            if (not isinstance(contract, dict) or contract.get("step") != step
++                    or contract.get("action_id") != _ACTION_IDS[step]
++                    or contract.get("runtime_epoch") != self._epoch
++                    or contract.get("runtime_fingerprint") != self._fingerprint
++                    or contract.get("installed_build") != _installed_build()
++                    or contract.get("dispatch_semantics") != "synchronous_no_yield"
++                    or any(not _sha(contract.get(name)) for name in _CONTRACT_FIELDS)):
++                raise ValueError("UNBAKING_PRIVATE_STEP_CONTRACT_DIFFERS: " + step)
++        return copy.deepcopy(result)
++
++    def _assert_current(self):
++        guards.assert_loaded_package()
++        if (self._epoch != guards.RUNTIME_EPOCH or self._fingerprint != guards.LOADED_FINGERPRINT
++                or self._leaf.bundle_is_current(self._bundle) is not True
++                or self._leaf.qualification_bytes(self._bundle) != self.evidence_bytes
++                or _freeze(self.verification) != self._verification_bytes
++                or _freeze(self._leaf.adapter_verification(self._bundle)) != self._verification_bytes
++                or _freeze(self._read_contracts()) != self._contract_bytes):
++            raise ValueError("UNBAKING_PRIVATE_QUALIFICATION_REVOKED")
++
++    def step_status(self, step):
++        self._assert_current()
++        contract = self._contracts.get(step)
++        if contract is None:
++            return None
++        return {**copy.deepcopy(contract), "qualified": True, "missing": []}
++
++    def required_scope(self, scene, scope):
++        from .native_unbaking import validate_arguments
++        self._assert_current()
++        arguments = scope.get("operation_arguments")
++        validate_arguments(arguments)
++        if (scope.get("operation_name") != _OPERATION
++                or self.step_status(arguments["step"]) is None):
++            raise ValueError("UNBAKING_STEP_UNQUALIFIED")
++        required = self._leaf.required_scope(self._bundle, scene, scope)
++        if (not isinstance(required, dict) or required.get("operation_name") != _OPERATION
++                or required.get("operation_arguments") != arguments
++                or required.get("operation_arguments_digest") != guards.digest(arguments)
++                or required.get("validation_mode") == "qualified_update_boundary"):
++            # This first binding uses the existing full-projection source mode.
++            # A future Update-bound executor must perform current-source checks
++            # in its actual native callback before it can accept that mode.
++            raise ValueError("UNBAKING_SOURCE_CONTRACT_UNQUALIFIED")
++        return required
++
++    def capture(self, scene, scope):
++        self._assert_current()
++        self.required_scope(scene, scope)
++        return self._leaf.capture(self._bundle, scene, scope)
++
++    def execute(self, scene, arguments, request):
++        from . import native_unbaking
++        self._assert_current()
++        native_unbaking.validate_arguments(arguments)
++        if (getattr(guards._LOCAL, "request", None) is not request
++                or request.get("operations") != [{"name": _OPERATION, "arguments": arguments}]
++                or guards._ADAPTERS.get(_OPERATION) is not self):
++            raise ValueError("UNBAKING_REQUEST_CONTEXT_DIFFERS")
++        attempt = guards.current_adapter_attempt()
++        identity = guards.adapter_attempt_identity(attempt)
++        request_digest = guards.digest(request)
++        if (identity["request_digest"] != request_digest
++                or request_digest in self._consumed):
++            raise ValueError("UNBAKING_ATTEMPT_UNAVAILABLE")
++        contract = self.step_status(arguments["step"])
++        if contract is None:
++            raise ValueError("UNBAKING_STEP_UNQUALIFIED")
++        source = request.get("source_binding")
++        guards.assert_source(scene, source, operation_name=_OPERATION, arguments=arguments)
++        before = native_unbaking.capture_before(scene, arguments)
++        scene_before = dict(guards.scene_instance(scene))
++        # Validate/lower all SDK arguments without effects before consuming the
++        # attempt. The opaque prepared handle binds this exact request and scope.
++        prepared = self._leaf.prepare_step(self._bundle, scene, arguments, request, identity)
++        if (type(prepared) is not self._leaf.PreparedStep
++                or self._leaf.prepared_step_matches(self._bundle, prepared, scene, arguments, request, identity) is not True):
++            raise ValueError("UNBAKING_PREPARED_STEP_DIFFERS")
++        self._consumed.add(request_digest)
++        guards.before_write(lambda: guards.assert_source(scene, source,
++            operation_name=_OPERATION, arguments=arguments))
++        # The leaf must recheck admission at every selection/write boundary and
++        # cannot return a success handle while native work can still mutate.
++        # An exception keeps runtime.py's existing unknown/failure semantics.
++        completed = self._leaf.execute_step(self._bundle, prepared, attempt)
++        if type(completed) is not self._leaf.CompletedStep:
++            raise ValueError("UNBAKING_NATIVE_COMPLETION_HANDLE_UNAVAILABLE")
++        completion = self._leaf.consume_completed_step(self._bundle, completed, identity)
++        after = native_unbaking._read_projection(scene)
++        topology = native_unbaking.compare_projections(before, after, arguments)
++        scene_after = dict(guards.scene_instance(scene))
++        if (not isinstance(completion, dict)
++                or completion.get("step") != arguments["step"]
++                or completion.get("request_digest") != request_digest
++                or completion.get("operation_digest") != identity["operation_digest"]
++                or completion.get("original_source_digest") != identity["original_source_digest"]
++                or completion.get("runtime_epoch") != self._epoch
++                or completion.get("runtime_fingerprint") != self._fingerprint
++                or completion.get("installed_build") != _installed_build()
++                or completion.get("callback_generation") != identity["callback_generation"]
++                or completion.get("scene_before") != scene_before
++                or completion.get("scene_after") != scene_after or scene_after != scene_before
++                or completion.get("completion") != "completed"
++                or completion.get("postcondition") != "matched"
++                or completion.get("before_projection_digest") != guards.digest(before)
++                or completion.get("after_projection_digest") != guards.digest(after)
++                or completion.get("completion_contract_digest") != contract["completion_contract_digest"]
++                or completion.get("postcondition_contract_digest") != contract["postcondition_contract_digest"]
++                or not _sha(completion.get("native_trace_digest"))
++                or self._leaf.completed_step_is_current(self._bundle, completed, identity) is not True):
++            raise ValueError("UNBAKING_NATIVE_COMPLETION_UNVERIFIED")
++        self._assert_current()
++        guards.observe_effect(_OPERATION, "completed", scene_before=scene_before, scene_after=scene_after,
++            detail={"step": arguments["step"], "completion_contract_digest": contract["completion_contract_digest"],
++                    "native_trace_digest": completion["native_trace_digest"],
++                    "topology_observation": topology})
++        guards.finish_write()
++        return {"step": arguments["step"], "object_ids": arguments["object_ids"],
++            "layer_ids": arguments["layer_ids"], "interval": [arguments["first_frame"], arguments["last_frame"]],
++            "native_completion": "observed", "topology_observation": topology,
++            "completion_contract_digest": contract["completion_contract_digest"],
++            "native_trace_digest": completion["native_trace_digest"]}, []
++
++    def validate_failure_observation(self, scene, request, record_ref):
++        self._assert_current()
++        return self._leaf.validate_failure_observation(self._bundle, scene, request, record_ref)
++
++    def failure_observation_revoked(self, record_ref):
++        try:
++            self._assert_current()
++        except (ValueError, RuntimeError):
++            return True
++        return self._leaf.failure_observation_revoked(self._bundle, record_ref)
++
++
++def registered_adapter():
++    adapter = guards._ADAPTERS.get(_OPERATION)
++    return adapter if type(adapter) is _QualifiedUnbakingAdapter else None
++
++
++def install_after_native_qualification(qualification_handle):
++    """Called only by the future exact owned-fixture qualification helper.
++
++    The handle is process-private. No MCP handler, JSON loader, startup hook or
++    user flag calls this function. Importing this module performs no SDK action.
++    """
++    guards.assert_loaded_package()
++    if _OPERATION in guards._ADAPTERS:
++        raise ValueError("UNBAKING_ADAPTER_ALREADY_REGISTERED")
++    leaf = importlib.import_module(".native_installed_unbaking", __package__)
++    bundle = leaf.take_qualified_bundle(qualification_handle)
++    if type(bundle) is not leaf.QualifiedBundle:
++        raise ValueError("UNBAKING_PRIVATE_QUALIFICATION_HANDLE_UNAVAILABLE")
++    adapter = _QualifiedUnbakingAdapter(leaf, bundle)
++    guards.register_adapter(_OPERATION, adapter)
++    return {step: adapter.step_status(step) for step in sorted(adapter._contracts)}
+diff --git a/cascadeur_side/cascadeur_complete/handlers/generation.py b/cascadeur_side/cascadeur_complete/handlers/generation.py
+index ee669d5209fad0a8325e7899edd9f4455feda222..152efd71bcb67b59b3afd18e29edada1ad2f6ed0 100644
+--- a/cascadeur_side/cascadeur_complete/handlers/generation.py
++++ b/cascadeur_side/cascadeur_complete/handlers/generation.py
+@@ -101,91 +101,17 @@
+ 
+ @handler("generation.unbaking")
+ def unbaking(scene, arguments, request, context):
+-    """Dispatch only the exact authenticated target, without claiming completion.
+-
+-    ActionManager returns no completion receipt. A qualified native adapter must
+-    still observe completion and bounded key/interpolation changes before this
+-    operation can be enabled for guarded production dispatch.
++    """Use only the same qualified executor as guarded native dispatch.
++
++    There is no ActionManager fallback: its return cannot establish completion.
++    The ordinary runtime routes registered mutations directly to adapter.execute;
++    this legacy entry therefore requires that same active private attempt too.
+     """
+-    from .. import guarded_runtime as guards
+     from .. import native_unbaking
+-    from .timeline_edit import _interval, _layers, _select_interval, _select_objects
+-
+     native_unbaking.validate_arguments(arguments)
+-    step = arguments["step"]
+-    actions = {
+-        "prepare_keys_by_fulcrums": "View.AutoInterpolation_Keys",
+-        "adjust_keys_and_interpolation": "View.Animation unbaking",
+-        "adjust_autoposing_lock_state": "AutoPosingTool.AutoUnlock",
+-    }
+-    if not isinstance(step, str) or step not in actions:
+-        raise ValueError("Unknown unbaking step: " + str(step))
+-    for field in ("object_ids", "layer_ids"):
+-        values = arguments[field]
+-        if (not isinstance(values, list) or not values
+-                or any(not isinstance(item, str) or not item for item in values)
+-                or len(set(values)) != len(values)):
+-            raise ValueError("INVALID_WRITE_SCOPE: nonempty unique explicit " + field + " required")
+-    if (type(arguments["first_frame"]) is not int or type(arguments["last_frame"]) is not int
+-            or arguments["first_frame"] >= arguments["last_frame"]):
+-        raise ValueError("INVALID_WRITE_SCOPE: unbaking requires an increasing integer interval")
+-
+-    source = request.get("source_binding")
+-    guards.assert_source(scene, source, operation_name="generation.unbaking", arguments=arguments)
+-    native_unbaking.require_step_contract(scene, step, source=source, arguments=arguments)
+-    scope = source["scope"]
+-    object_ids, layer_ids = arguments["object_ids"], arguments["layer_ids"]
+-    first, last = arguments["first_frame"], arguments["last_frame"]
+-    scoped_frames = scope.get("frames")
+-    if (not set(object_ids) <= set(scope.get("object_ids", ()))
+-            or not set(layer_ids) <= set(scope.get("layer_ids", ()))
+-            or not isinstance(scoped_frames, (list, tuple)) or len(scoped_frames) != 2
+-            or any(type(frame) is not int for frame in scoped_frames)
+-            or not scoped_frames[0] <= first < last <= scoped_frames[1]):
+-        raise ValueError("INVALID_WRITE_SCOPE: unbaking target is outside authenticated source closure")
+-
+-    domain = context["domain_scene"](scene)
+-    existing = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
+-    if not set(object_ids) <= existing:
+-        raise ValueError("INVALID_WRITE_SCOPE: unknown unbaking target objects")
+-    layers = _layers(domain, layer_ids, context)
+-    _interval(domain, arguments)
+-    # The action consumes whole selected layers. Do not let a caller authorize
+-    # one controller while silently affecting other objects in that layer.
+-    layer_objects = {context["id_string"](item)
+-                     for layer in layers for item in domain.layers_viewer().layer(layer).obj_ids}
+-    if layer_objects != set(object_ids):
+-        raise ValueError("INVALID_WRITE_SCOPE: unbaking objects must equal the selected layer closure")
+-
+-    # Retain the full actual source before selection or action dispatch. This
+-    # is an observation, not caller-supplied topology or action qualification.
+-    topology_before = native_unbaking.capture_before(scene, arguments)
+-
+-    _select_objects(domain, object_ids, context)
+-    _select_interval(domain, layers, first, last)
+-    state = _generation_state(scene, context)
+-    selected_objects = {context["id_string"](item) for item in domain.selector().selected().ids}
+-    if (selected_objects != set(object_ids) or set(state["selected_layer_ids"]) != set(layer_ids)
+-            or state["interval"] != {"valid": True, "first": first, "last": last}
+-            or not state["ready_for_unbaking"]):
+-        raise ValueError("INVALID_WRITE_SCOPE: native unbaking selection differs from exact target")
+-    before = context["scene_state"](context["scene_view"]() or scene)
+-    instance_before = dict(guards.scene_instance(scene))
+-    guards.before_write()
+-    try:
+-        result = context["csc"].app.get_application().get_action_manager().call_action(actions[step])
+-    finally:
+-        guards.observe_effect("generation.unbaking", "unknown", scene_before=instance_before,
+-            scene_after=dict(guards.scene_instance(context["scene_view"]() or scene)),
+-            detail={"action_id": actions[step], "native_completion": "unverified"})
+-    topology = native_unbaking.observe_after(context["scene_view"]() or scene, topology_before, arguments)
+-    after = context["scene_state"](context["scene_view"]() or scene)
+-    return {"step": step, "action_id": actions[step], "object_ids": object_ids, "layer_ids": layer_ids,
+-            "interval": [first, last], "return_value": context["json_safe"](result),
+-            "action_dispatch_returned": True, "native_completion": "unverified",
+-            "before_revision": before["revision"], "after_revision": after["revision"], "topology_observation": topology,
+-            "observed_postconditions": ["exact_unbaking_selection"]}, [
+-                "Unbaking action completion remains unverified; the returned snapshot cannot bound later effects"]
++    adapter = native_unbaking.require_step_contract(scene, arguments["step"],
++        source=request.get("source_binding"), arguments=arguments)
++    return adapter.execute(scene, arguments, request)
+ 
+ 
+ @handler("generation.auto_posing", postconditions=("scene_revision_changed",))

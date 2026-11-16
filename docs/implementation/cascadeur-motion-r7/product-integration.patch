@@ -1,0 +1,1155 @@
+diff --git a/cascadeur_side/cascadeur_complete/native_unbaking.py b/cascadeur_side/cascadeur_complete/native_unbaking.py
+index 6a3c003eb46d34a341ab32c563b8525ece66e874..e5af93b8e77d57b94872f4c239df246250c9418a 100644
+--- a/cascadeur_side/cascadeur_complete/native_unbaking.py
++++ b/cascadeur_side/cascadeur_complete/native_unbaking.py
+@@ -1,8 +1,8 @@
+ """Exact unbaking scope and topology bounds, never native completion proof.
+ 
+-The opaque actions remain unqualified. A projection taken after call_action
+-returns can reject a visible scope violation, but cannot close an async action.
+-This module does not register an adapter or turn its observation into success.
++The installed leaf remains unqualified until its exact native observations exist.
++Projection comparison bounds visible effects; it never closes an async action.
++Status delegates only to the already registered code-owned step adapter.
+ """
+ from __future__ import annotations
+ 
+@@ -17,14 +17,15 @@
+ 
+ 
+ def step_contract_status(step):
+-    """Describe missing native proof; declarations cannot qualify an action.
+-
+-    The installed ActionManager entry points return None, and the published
+-    editable-animation tool is a getter, not a completion-correlated executor.
+-    There is currently no process-private qualified leaf for these steps.
+-    """
++    """Read a retained private step contract; never qualify from wire flags."""
+     if step not in STEPS:
+         raise ValueError("UNBAKING_STEP_INVALID")
++    from .native_unbaking_binding import registered_adapter
++    adapter = registered_adapter()
++    if adapter is not None:
++        status = adapter.step_status(step)
++        if status is not None:
++            return status
+     return {"step": step, "qualified": False, "code": "UNBAKING_STEP_UNQUALIFIED",
+         "missing": ["exact_installed_callable_binding", "explicit_argument_lowering",
+                     "operation_correlated_completion", "private_step_qualification"],
+@@ -32,12 +33,16 @@
+ 
+ 
+ def require_step_contract(scene, step, *, source=None, arguments=None):
+-    """Fail before selection/effects; no opaque action is a qualified leaf."""
++    """Return the already registered private executor before selection/effects."""
++    from .native_unbaking_binding import registered_adapter
+     guards.assert_loaded_package()
++    status = step_contract_status(step)
++    adapter = registered_adapter()
++    if status.get("qualified") is not True or adapter is None:
++        raise ValueError(status["code"] + ": " + step + ": " + ",".join(status["missing"]))
+     if source is not None:
+         guards.assert_source(scene, source, operation_name="generation.unbaking", arguments=arguments)
+-    status = step_contract_status(step)
+-    raise ValueError(status["code"] + ": " + step + ": " + ",".join(status["missing"]))
++    return adapter
+ 
+ 
+ def validate_arguments(arguments):
+diff --git a/cascadeur_side/cascadeur_complete/native_unbaking_binding.py b/cascadeur_side/cascadeur_complete/native_unbaking_binding.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e26b9da098e1d6ffe158439e57a582b859a30031
+--- /dev/null
++++ b/cascadeur_side/cascadeur_complete/native_unbaking_binding.py
+@@ -0,0 +1,228 @@
++"""Bridge plumbing for a code-owned, privately qualified unbaking executor.
++
++This module is not an SDK leaf. The fixed native_installed_unbaking module is
++intentionally absent until its installed action bindings and completion lifetime
++are observed. No wire argument can install a leaf or supply its private handle.
++"""
++from __future__ import annotations
++
++import copy
++import hashlib
++import importlib
++import json
++
++from . import guarded_runtime as guards
++
++_OPERATION = "generation.unbaking"
++_CONTRACT_FIELDS = ("installed_callable_digest", "lowering_digest",
++                    "completion_contract_digest", "postcondition_contract_digest", "qualification_digest")
++_ACTION_IDS = {
++    "prepare_keys_by_fulcrums": "View.AutoInterpolation_Keys",
++    "adjust_keys_and_interpolation": "View.Animation unbaking",
++    "adjust_autoposing_lock_state": "AutoPosingTool.AutoUnlock",
++}
++
++
++def _freeze(value):
++    return json.dumps(value, sort_keys=True, separators=(",", ":"),
++                      ensure_ascii=False, allow_nan=False).encode()
++
++
++def _sha(value):
++    return (isinstance(value, str) and len(value) == 64
++            and all(character in "0123456789abcdef" for character in value))
++
++
++def _installed_build():
++    from .native_adapters import installed_build
++    return installed_build()
++
++
++class _QualifiedUnbakingAdapter:
++    def __init__(self, leaf, bundle):
++        self._leaf = leaf
++        self._bundle = bundle
++        self._epoch = guards.RUNTIME_EPOCH
++        self._fingerprint = guards.LOADED_FINGERPRINT
++        self.evidence_bytes = leaf.qualification_bytes(bundle)
++        if not isinstance(self.evidence_bytes, bytes) or not self.evidence_bytes:
++            raise ValueError("UNBAKING_PRIVATE_QUALIFICATION_UNAVAILABLE")
++        self.verification = copy.deepcopy(leaf.adapter_verification(bundle))
++        if (not isinstance(self.verification, dict)
++                or self.verification.get("operations") != [_OPERATION]
++                or self.verification.get("evidence_sha256") != hashlib.sha256(self.evidence_bytes).hexdigest()
++                or self.verification.get("runtime_fingerprint") != self._fingerprint
++                or self.verification.get("installed_build") != _installed_build()
++                or self.verification.get("dispatch_semantics") != "synchronous_no_yield"
++                or self.verification.get("identity_stable") is not True):
++            raise ValueError("UNBAKING_PRIVATE_QUALIFICATION_DIFFERS")
++        self._verification_bytes = _freeze(self.verification)
++        self._contracts = self._read_contracts()
++        self._contract_bytes = _freeze(self._contracts)
++        self._consumed = set()
++        self._assert_current()
++
++    observed_build = staticmethod(_installed_build)
++
++    def _read_contracts(self):
++        from .native_unbaking import STEPS
++        result = self._leaf.step_contracts(self._bundle)
++        if not isinstance(result, dict) or not result or not set(result) <= STEPS:
++            raise ValueError("UNBAKING_PRIVATE_STEP_CONTRACTS_UNAVAILABLE")
++        for step, contract in result.items():
++            if (not isinstance(contract, dict) or contract.get("step") != step
++                    or contract.get("action_id") != _ACTION_IDS[step]
++                    or contract.get("runtime_epoch") != self._epoch
++                    or contract.get("runtime_fingerprint") != self._fingerprint
++                    or contract.get("installed_build") != _installed_build()
++                    or contract.get("dispatch_semantics") != "synchronous_no_yield"
++                    or any(not _sha(contract.get(name)) for name in _CONTRACT_FIELDS)):
++                raise ValueError("UNBAKING_PRIVATE_STEP_CONTRACT_DIFFERS: " + step)
++        return copy.deepcopy(result)
++
++    def _assert_current(self):
++        guards.assert_loaded_package()
++        if (self._epoch != guards.RUNTIME_EPOCH or self._fingerprint != guards.LOADED_FINGERPRINT
++                or self._leaf.bundle_is_current(self._bundle) is not True
++                or self._leaf.qualification_bytes(self._bundle) != self.evidence_bytes
++                or _freeze(self.verification) != self._verification_bytes
++                or _freeze(self._leaf.adapter_verification(self._bundle)) != self._verification_bytes
++                or _freeze(self._read_contracts()) != self._contract_bytes):
++            raise ValueError("UNBAKING_PRIVATE_QUALIFICATION_REVOKED")
++
++    def step_status(self, step):
++        self._assert_current()
++        contract = self._contracts.get(step)
++        if contract is None:
++            return None
++        return {**copy.deepcopy(contract), "qualified": True, "missing": []}
++
++    def required_scope(self, scene, scope):
++        from .native_unbaking import validate_arguments
++        self._assert_current()
++        arguments = scope.get("operation_arguments")
++        validate_arguments(arguments)
++        if (scope.get("operation_name") != _OPERATION
++                or self.step_status(arguments["step"]) is None):
++            raise ValueError("UNBAKING_STEP_UNQUALIFIED")
++        required = self._leaf.required_scope(self._bundle, scene, scope)
++        if (not isinstance(required, dict) or required.get("operation_name") != _OPERATION
++                or required.get("operation_arguments") != arguments
++                or required.get("operation_arguments_digest") != guards.digest(arguments)
++                or required.get("validation_mode") == "qualified_update_boundary"):
++            # This first binding uses the existing full-projection source mode.
++            # A future Update-bound executor must perform current-source checks
++            # in its actual native callback before it can accept that mode.
++            raise ValueError("UNBAKING_SOURCE_CONTRACT_UNQUALIFIED")
++        return required
++
++    def capture(self, scene, scope):
++        self._assert_current()
++        self.required_scope(scene, scope)
++        return self._leaf.capture(self._bundle, scene, scope)
++
++    def execute(self, scene, arguments, request):
++        from . import native_unbaking
++        self._assert_current()
++        native_unbaking.validate_arguments(arguments)
++        if (getattr(guards._LOCAL, "request", None) is not request
++                or request.get("operations") != [{"name": _OPERATION, "arguments": arguments}]
++                or guards._ADAPTERS.get(_OPERATION) is not self):
++            raise ValueError("UNBAKING_REQUEST_CONTEXT_DIFFERS")
++        attempt = guards.current_adapter_attempt()
++        identity = guards.adapter_attempt_identity(attempt)
++        request_digest = guards.digest(request)
++        if (identity["request_digest"] != request_digest
++                or request_digest in self._consumed):
++            raise ValueError("UNBAKING_ATTEMPT_UNAVAILABLE")
++        contract = self.step_status(arguments["step"])
++        if contract is None:
++            raise ValueError("UNBAKING_STEP_UNQUALIFIED")
++        source = request.get("source_binding")
++        guards.assert_source(scene, source, operation_name=_OPERATION, arguments=arguments)
++        before = native_unbaking.capture_before(scene, arguments)
++        scene_before = dict(guards.scene_instance(scene))
++        # Validate/lower all SDK arguments without effects before consuming the
++        # attempt. The opaque prepared handle binds this exact request and scope.
++        prepared = self._leaf.prepare_step(self._bundle, scene, arguments, request, identity)
++        if (type(prepared) is not self._leaf.PreparedStep
++                or self._leaf.prepared_step_matches(self._bundle, prepared, scene, arguments, request, identity) is not True):
++            raise ValueError("UNBAKING_PREPARED_STEP_DIFFERS")
++        self._consumed.add(request_digest)
++        guards.before_write(lambda: guards.assert_source(scene, source,
++            operation_name=_OPERATION, arguments=arguments))
++        # The leaf must recheck admission at every selection/write boundary and
++        # cannot return a success handle while native work can still mutate.
++        # An exception keeps runtime.py's existing unknown/failure semantics.
++        completed = self._leaf.execute_step(self._bundle, prepared, attempt)
++        if type(completed) is not self._leaf.CompletedStep:
++            raise ValueError("UNBAKING_NATIVE_COMPLETION_HANDLE_UNAVAILABLE")
++        completion = self._leaf.consume_completed_step(self._bundle, completed, identity)
++        after = native_unbaking._read_projection(scene)
++        topology = native_unbaking.compare_projections(before, after, arguments)
++        scene_after = dict(guards.scene_instance(scene))
++        if (not isinstance(completion, dict)
++                or completion.get("step") != arguments["step"]
++                or completion.get("request_digest") != request_digest
++                or completion.get("operation_digest") != identity["operation_digest"]
++                or completion.get("original_source_digest") != identity["original_source_digest"]
++                or completion.get("runtime_epoch") != self._epoch
++                or completion.get("runtime_fingerprint") != self._fingerprint
++                or completion.get("installed_build") != _installed_build()
++                or completion.get("callback_generation") != identity["callback_generation"]
++                or completion.get("scene_before") != scene_before
++                or completion.get("scene_after") != scene_after or scene_after != scene_before
++                or completion.get("completion") != "completed"
++                or completion.get("postcondition") != "matched"
++                or completion.get("before_projection_digest") != guards.digest(before)
++                or completion.get("after_projection_digest") != guards.digest(after)
++                or completion.get("completion_contract_digest") != contract["completion_contract_digest"]
++                or completion.get("postcondition_contract_digest") != contract["postcondition_contract_digest"]
++                or not _sha(completion.get("native_trace_digest"))
++                or self._leaf.completed_step_is_current(self._bundle, completed, identity) is not True):
++            raise ValueError("UNBAKING_NATIVE_COMPLETION_UNVERIFIED")
++        self._assert_current()
++        guards.observe_effect(_OPERATION, "completed", scene_before=scene_before, scene_after=scene_after,
++            detail={"step": arguments["step"], "completion_contract_digest": contract["completion_contract_digest"],
++                    "native_trace_digest": completion["native_trace_digest"],
++                    "topology_observation": topology})
++        guards.finish_write()
++        return {"step": arguments["step"], "object_ids": arguments["object_ids"],
++            "layer_ids": arguments["layer_ids"], "interval": [arguments["first_frame"], arguments["last_frame"]],
++            "native_completion": "observed", "topology_observation": topology,
++            "completion_contract_digest": contract["completion_contract_digest"],
++            "native_trace_digest": completion["native_trace_digest"]}, []
++
++    def validate_failure_observation(self, scene, request, record_ref):
++        self._assert_current()
++        return self._leaf.validate_failure_observation(self._bundle, scene, request, record_ref)
++
++    def failure_observation_revoked(self, record_ref):
++        try:
++            self._assert_current()
++        except (ValueError, RuntimeError):
++            return True
++        return self._leaf.failure_observation_revoked(self._bundle, record_ref)
++
++
++def registered_adapter():
++    adapter = guards._ADAPTERS.get(_OPERATION)
++    return adapter if type(adapter) is _QualifiedUnbakingAdapter else None
++
++
++def install_after_native_qualification(qualification_handle):
++    """Called only by the future exact owned-fixture qualification helper.
++
++    The handle is process-private. No MCP handler, JSON loader, startup hook or
++    user flag calls this function. Importing this module performs no SDK action.
++    """
++    guards.assert_loaded_package()
++    if _OPERATION in guards._ADAPTERS:
++        raise ValueError("UNBAKING_ADAPTER_ALREADY_REGISTERED")
++    leaf = importlib.import_module(".native_installed_unbaking", __package__)
++    bundle = leaf.take_qualified_bundle(qualification_handle)
++    if type(bundle) is not leaf.QualifiedBundle:
++        raise ValueError("UNBAKING_PRIVATE_QUALIFICATION_HANDLE_UNAVAILABLE")
++    adapter = _QualifiedUnbakingAdapter(leaf, bundle)
++    guards.register_adapter(_OPERATION, adapter)
++    return {step: adapter.step_status(step) for step in sorted(adapter._contracts)}
+diff --git a/cascadeur_side/cascadeur_complete/handlers/generation.py b/cascadeur_side/cascadeur_complete/handlers/generation.py
+index ee669d5209fad0a8325e7899edd9f4455feda222..152efd71bcb67b59b3afd18e29edada1ad2f6ed0 100644
+--- a/cascadeur_side/cascadeur_complete/handlers/generation.py
++++ b/cascadeur_side/cascadeur_complete/handlers/generation.py
+@@ -101,91 +101,17 @@
+ 
+ @handler("generation.unbaking")
+ def unbaking(scene, arguments, request, context):
+-    """Dispatch only the exact authenticated target, without claiming completion.
+-
+-    ActionManager returns no completion receipt. A qualified native adapter must
+-    still observe completion and bounded key/interpolation changes before this
+-    operation can be enabled for guarded production dispatch.
++    """Use only the same qualified executor as guarded native dispatch.
++
++    There is no ActionManager fallback: its return cannot establish completion.
++    The ordinary runtime routes registered mutations directly to adapter.execute;
++    this legacy entry therefore requires that same active private attempt too.
+     """
+-    from .. import guarded_runtime as guards
+     from .. import native_unbaking
+-    from .timeline_edit import _interval, _layers, _select_interval, _select_objects
+-
+     native_unbaking.validate_arguments(arguments)
+-    step = arguments["step"]
+-    actions = {
+-        "prepare_keys_by_fulcrums": "View.AutoInterpolation_Keys",
+-        "adjust_keys_and_interpolation": "View.Animation unbaking",
+-        "adjust_autoposing_lock_state": "AutoPosingTool.AutoUnlock",
+-    }
+-    if not isinstance(step, str) or step not in actions:
+-        raise ValueError("Unknown unbaking step: " + str(step))
+-    for field in ("object_ids", "layer_ids"):
+-        values = arguments[field]
+-        if (not isinstance(values, list) or not values
+-                or any(not isinstance(item, str) or not item for item in values)
+-                or len(set(values)) != len(values)):
+-            raise ValueError("INVALID_WRITE_SCOPE: nonempty unique explicit " + field + " required")
+-    if (type(arguments["first_frame"]) is not int or type(arguments["last_frame"]) is not int
+-            or arguments["first_frame"] >= arguments["last_frame"]):
+-        raise ValueError("INVALID_WRITE_SCOPE: unbaking requires an increasing integer interval")
+-
+-    source = request.get("source_binding")
+-    guards.assert_source(scene, source, operation_name="generation.unbaking", arguments=arguments)
+-    native_unbaking.require_step_contract(scene, step, source=source, arguments=arguments)
+-    scope = source["scope"]
+-    object_ids, layer_ids = arguments["object_ids"], arguments["layer_ids"]
+-    first, last = arguments["first_frame"], arguments["last_frame"]
+-    scoped_frames = scope.get("frames")
+-    if (not set(object_ids) <= set(scope.get("object_ids", ()))
+-            or not set(layer_ids) <= set(scope.get("layer_ids", ()))
+-            or not isinstance(scoped_frames, (list, tuple)) or len(scoped_frames) != 2
+-            or any(type(frame) is not int for frame in scoped_frames)
+-            or not scoped_frames[0] <= first < last <= scoped_frames[1]):
+-        raise ValueError("INVALID_WRITE_SCOPE: unbaking target is outside authenticated source closure")
+-
+-    domain = context["domain_scene"](scene)
+-    existing = {context["id_string"](item) for item in domain.model_viewer().get_objects()}
+-    if not set(object_ids) <= existing:
+-        raise ValueError("INVALID_WRITE_SCOPE: unknown unbaking target objects")
+-    layers = _layers(domain, layer_ids, context)
+-    _interval(domain, arguments)
+-    # The action consumes whole selected layers. Do not let a caller authorize
+-    # one controller while silently affecting other objects in that layer.
+-    layer_objects = {context["id_string"](item)
+-                     for layer in layers for item in domain.layers_viewer().layer(layer).obj_ids}
+-    if layer_objects != set(object_ids):
+-        raise ValueError("INVALID_WRITE_SCOPE: unbaking objects must equal the selected layer closure")
+-
+-    # Retain the full actual source before selection or action dispatch. This
+-    # is an observation, not caller-supplied topology or action qualification.
+-    topology_before = native_unbaking.capture_before(scene, arguments)
+-
+-    _select_objects(domain, object_ids, context)
+-    _select_interval(domain, layers, first, last)
+-    state = _generation_state(scene, context)
+-    selected_objects = {context["id_string"](item) for item in domain.selector().selected().ids}
+-    if (selected_objects != set(object_ids) or set(state["selected_layer_ids"]) != set(layer_ids)
+-            or state["interval"] != {"valid": True, "first": first, "last": last}
+-            or not state["ready_for_unbaking"]):
+-        raise ValueError("INVALID_WRITE_SCOPE: native unbaking selection differs from exact target")
+-    before = context["scene_state"](context["scene_view"]() or scene)
+-    instance_before = dict(guards.scene_instance(scene))
+-    guards.before_write()
+-    try:
+-        result = context["csc"].app.get_application().get_action_manager().call_action(actions[step])
+-    finally:
+-        guards.observe_effect("generation.unbaking", "unknown", scene_before=instance_before,
+-            scene_after=dict(guards.scene_instance(context["scene_view"]() or scene)),
+-            detail={"action_id": actions[step], "native_completion": "unverified"})
+-    topology = native_unbaking.observe_after(context["scene_view"]() or scene, topology_before, arguments)
+-    after = context["scene_state"](context["scene_view"]() or scene)
+-    return {"step": step, "action_id": actions[step], "object_ids": object_ids, "layer_ids": layer_ids,
+-            "interval": [first, last], "return_value": context["json_safe"](result),
+-            "action_dispatch_returned": True, "native_completion": "unverified",
+-            "before_revision": before["revision"], "after_revision": after["revision"], "topology_observation": topology,
+-            "observed_postconditions": ["exact_unbaking_selection"]}, [
+-                "Unbaking action completion remains unverified; the returned snapshot cannot bound later effects"]
++    adapter = native_unbaking.require_step_contract(scene, arguments["step"],
++        source=request.get("source_binding"), arguments=arguments)
++    return adapter.execute(scene, arguments, request)
+ 
+ 
+ @handler("generation.auto_posing", postconditions=("scene_revision_changed",))
+diff --git a/src/cascadeur_complete/skeletal_fk_controller.py b/src/cascadeur_complete/skeletal_fk_controller.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d00079b7e8fdaf9c1f79ffb331a5c6f2586a2191
+--- /dev/null
++++ b/src/cascadeur_complete/skeletal_fk_controller.py
+@@ -0,0 +1,161 @@
++"""Host lowering for an observed, translation-fixed FK rotation skeleton.
++
++This is not a native writer or a qualification issuer.  The service must bind
++every candidate to a private native observation of the actual hierarchy, fixed
++translations, existing rotation keys and writer closure before it can be used.
++"""
++from __future__ import annotations
++
++import json
++
++import numpy as np
++from scipy.spatial.transform import Rotation
++
++from .capture import canonical_digest
++from .motion_context import MotionInputError, SolverResult
++from .motion_math import hemisphere_continuous
++from .retargeting import forward_kinematics
++
++
++ADAPTER_ID = "observed-fk-local-rotation-v1"
++RIG_CONTRACT = "owned_fk_fixed_translation_existing_rotation_v1"
++# Match native_retarget_inputs._bounded; this is an input bound, not evidence
++# that every model fitting it is supported by an installed native writer.
++_MAX_REQUEST_BYTES = 2 * 1024 * 1024
++
++
++def _proper_rotation(value):
++    matrix = np.asarray(value, dtype=float)
++    if (matrix.shape[-2:] != (3, 3) or not np.isfinite(matrix).all()
++            or not np.allclose(np.swapaxes(matrix, -1, -2) @ matrix,
++                               np.eye(3), rtol=0, atol=1e-8)
++            or not np.allclose(np.linalg.det(matrix), 1, rtol=0, atol=1e-8)):
++        raise MotionInputError("INVALID_ROTATION", "proper FK rotation matrices required")
++    return matrix
++
++
++def _profile_order(profile):
++    if (not isinstance(profile, dict) or profile.get("controller_adapter_id") != ADAPTER_ID
++            or not isinstance(profile.get("role_ids"), dict) or not profile["role_ids"]
++            or not isinstance(profile.get("parent_ids"), dict)
++            or not isinstance(profile.get("rest_local_transforms"), dict)
++            or not isinstance(profile.get("character_id"), str) or not profile["character_id"]):
++        raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "observed FK profile required")
++    roles = profile["role_ids"]
++    if any(not isinstance(item, str) or not item for item in (*roles, *roles.values())):
++        raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "explicit stable IDs and semantic mapping required")
++    ids = set(roles.values())
++    if (len(ids) != len(roles) or set(profile.get("writable_ids", ())) != ids
++            or profile.get("dependency_ids") or ids & set(profile.get("derived_ids", ()))
++            or set(profile["parent_ids"]) != ids
++            or not ids <= set(profile["rest_local_transforms"])):
++        raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "complete writable FK parent closure required")
++    by_id = {identifier: role for role, identifier in roles.items()}
++    parents, children = {}, {role: [] for role in roles}
++    for role, identifier in roles.items():
++        parent_id = profile["parent_ids"][identifier]
++        if parent_id is not None and parent_id not in by_id:
++            raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "unobserved FK ancestor")
++        parent = None if parent_id is None else by_id[parent_id]
++        parents[role] = parent
++        if parent is not None:
++            children[parent].append(role)
++        rest = np.asarray(profile["rest_local_transforms"][identifier], dtype=float)
++        if (rest.shape != (4, 4) or not np.isfinite(rest).all()
++                or not np.array_equal(rest[3], np.array([0., 0., 0., 1.]))):
++            raise MotionInputError("RIG_REST_UNVERIFIED", "complete observed rigid local bind matrix required")
++        _proper_rotation(rest[:3, :3])
++    roots = [role for role, parent in parents.items() if parent is None]
++    if len(roots) != 1:
++        raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "one connected FK root required")
++    order = list(roots)
++    offset = 0
++    while offset < len(order):
++        order.extend(sorted(children[order[offset]]))
++        offset += 1
++    if len(order) != len(roles):
++        raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "cyclic or disconnected FK hierarchy")
++    return roles, parents, order
++
++
++def _pose(value, count):
++    if not isinstance(value, dict) or set(value) != {"position_m", "rotation_matrix"}:
++        raise MotionInputError("INCOMPLETE_CAPTURE", "complete canonical FK pose required")
++    position = np.asarray(value["position_m"], dtype=float)
++    rotation = np.asarray(value["rotation_matrix"], dtype=float)
++    if position.shape == (3,):
++        position = np.broadcast_to(position, (count, 3))
++    if rotation.shape == (3, 3):
++        rotation = np.broadcast_to(rotation, (count, 3, 3))
++    if (position.shape != (count, 3) or rotation.shape != (count, 3, 3)
++            or not np.isfinite(position).all()):
++        raise MotionInputError("INCOMPLETE_CAPTURE", "FK channels must cover the same physical sample grid")
++    return {"position_m": position, "rotation_matrix": _proper_rotation(rotation)}
++
++
++def lower_fk_rotation_request(request):
++    if (not isinstance(request, dict)
++            or set(request) != {"adapter_id", "profile", "targets", "planned_world"}
++            or request["adapter_id"] != ADAPTER_ID):
++        raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "exact FK controller request required")
++    try:
++        encoded = json.dumps(request, ensure_ascii=False, allow_nan=False,
++                             separators=(",", ":")).encode("utf-8")
++    except (ValueError, TypeError) as exc:
++        raise MotionInputError("INCOMPLETE_CAPTURE", "finite canonical FK request required") from exc
++    if len(encoded) > _MAX_REQUEST_BYTES:
++        raise MotionInputError("RESOURCE_BUDGET_EXCEEDED", "FK request exceeds native retarget input bound")
++    roles, parents, order = _profile_order(request["profile"])
++    targets = request["targets"]
++    if (not isinstance(targets, dict) or set(targets) != {"local", "world"}
++            or any(not isinstance(targets[key], dict) or set(targets[key]) != set(roles)
++                   for key in ("local", "world"))
++            or request["planned_world"] != targets["world"]):
++        raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "complete local and planned world FK poses required")
++    root_world = targets["world"][order[0]]
++    if not isinstance(root_world, dict):
++        raise MotionInputError("INCOMPLETE_CAPTURE", "sampled FK root pose required")
++    root_positions = np.asarray(root_world.get("position_m"), dtype=float)
++    if root_positions.ndim != 2 or root_positions.shape[1:] != (3,) or not len(root_positions):
++        raise MotionInputError("INCOMPLETE_CAPTURE", "sampled FK root trajectory required")
++    count = len(root_positions)
++    local = {role: _pose(targets["local"][role], count) for role in order}
++    planned = {role: _pose(targets["world"][role], count) for role in order}
++    for role, pose in local.items():
++        # This route emits rotation only. Native attestation must also compare
++        # these positions with the actual unchanged native local channels.
++        if not np.array_equal(pose["position_m"], np.broadcast_to(pose["position_m"][0], (count, 3))):
++            raise MotionInputError("COUPLED_CHANNEL_WRITER_UNAVAILABLE", "FK rotation pass cannot change local translations")
++    # Parent-first ordering bounds recursive FK depth independently of rig size.
++    computed = forward_kinematics(local, parents)
++    for role in order:
++        if (not np.allclose(computed[role]["position_m"], planned[role]["position_m"], rtol=0, atol=1e-8)
++                or not np.allclose(computed[role]["rotation_matrix"], planned[role]["rotation_matrix"], rtol=0, atol=1e-8)):
++            raise MotionInputError("FK_TARGET_INCONSISTENT", "planned world pose does not follow the proposed parent hierarchy")
++    rotations = {}
++    for role, pose in local.items():
++        xyzw = Rotation.from_matrix(pose["rotation_matrix"]).as_quat()
++        rotations[roles[role]] = hemisphere_continuous(xyzw[:, [3, 0, 1, 2]]).tolist()
++    return {"rotation_wxyz": rotations, "space": "local"}
++
++
++class ObservedFKRotationController:
++    def __init__(self, verified_targets):
++        self._verified_targets = verified_targets
++
++    def controller_targets(self, targets, profile, *, planned_world=None):
++        from .retarget_controller import controller_request
++        request = controller_request(targets, profile, planned_world)
++        lowered = lower_fk_rotation_request(request)
++        proof = self._verified_targets(request, canonical_digest(request))
++        if (not isinstance(proof, dict) or proof.get("adapter_id") != ADAPTER_ID
++                or proof.get("controller_targets_digest") != canonical_digest(lowered)
++                or proof.get("controller_targets") != lowered
++                or not proof.get("observation_digest") or not proof.get("retarget_inputs_digest")):
++            raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "FK target has no current private native writer observation")
++        return SolverResult("candidate", values=lowered,
++            report={"controller_adapter_id": ADAPTER_ID, "rig_contract": RIG_CONTRACT,
++                    "controller_observation_digest": proof["observation_digest"],
++                    "retarget_inputs_digest": proof["retarget_inputs_digest"],
++                    "runtime_quality": "unverified", "coverage": "sampled_frames",
++                    "local_translation_write": False})
+diff --git a/src/cascadeur_complete/retarget_controller.py b/src/cascadeur_complete/retarget_controller.py
+index fb48ee4db07bf2bde54ed6a2ddba2e8b3c87aacf..b130577acc8ef48e962d2543f62456a39267dd64 100644
+--- a/src/cascadeur_complete/retarget_controller.py
++++ b/src/cascadeur_complete/retarget_controller.py
+@@ -63,3 +63,26 @@
+         return SolverResult("candidate", values=lowered,
+             report={"controller_adapter_id": ADAPTER_ID, "controller_observation_digest": proof["observation_digest"],
+                     "retarget_inputs_digest": proof["retarget_inputs_digest"], "runtime_quality": "unverified"})
++
++
++def lower_controller_request(request):
++    """Select only code-owned lowering; this does not register a native adapter."""
++    from .skeletal_fk_controller import ADAPTER_ID as FK_ADAPTER_ID, lower_fk_rotation_request
++    if isinstance(request, dict) and request.get("adapter_id") == FK_ADAPTER_ID:
++        return lower_fk_rotation_request(request)
++    return lower_position_request(request)
++
++
++class ObservedControllerRouter:
++    def __init__(self, verified_targets):
++        self._verified_targets = verified_targets
++
++    def controller_targets(self, targets, profile, *, planned_world=None):
++        from .skeletal_fk_controller import ADAPTER_ID as FK_ADAPTER_ID, ObservedFKRotationController
++        if profile.controller_adapter_id == ADAPTER_ID:
++            adapter = IndependentPositionController(self._verified_targets)
++        elif profile.controller_adapter_id == FK_ADAPTER_ID:
++            adapter = ObservedFKRotationController(self._verified_targets)
++        else:
++            raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "no code-owned lowering for this controller")
++        return adapter.controller_targets(targets, profile, planned_world=planned_world)
+diff --git a/src/cascadeur_complete/recipe_native_service.py b/src/cascadeur_complete/recipe_native_service.py
+index 87ce1d0ad85a17a69c0d9a010f26dadda02da118..712b35e28d6e1021cd1c46f46385271d3bd4be9e 100644
+--- a/src/cascadeur_complete/recipe_native_service.py
++++ b/src/cascadeur_complete/recipe_native_service.py
+@@ -275,16 +275,24 @@
+             reasons.append({"code": "ROTATION_CONVENTION_UNVERIFIED", "detail": "Keyposes require observed native Euler encoding"})
+         if spec.motion.mode == "retarget" and spec.motion.route == "host":
+             from .retarget_controller import ADAPTER_ID
++            from .skeletal_fk_controller import ADAPTER_ID as FK_ADAPTER_ID, RIG_CONTRACT
+             capability = capabilities.get("retarget_inputs")
+             file_bootstrap = (spec.input.kind == "casc_file" and spec.input.mode == "new_working_scene")
+-            if (not isinstance(capability, dict) or capability.get("adapter_id") != ADAPTER_ID
+-                    or capability.get("channels") != ["position"] or capability.get("space") != "global"
++            independent = (isinstance(capability, dict) and capability.get("adapter_id") == ADAPTER_ID
++                and capability.get("channels") == ["position"] and capability.get("space") == "global"
++                and spec.motion.host_channel == "position")
++            fk_rotation = (isinstance(capability, dict) and capability.get("adapter_id") == FK_ADAPTER_ID
++                and capability.get("rig_contract") == RIG_CONTRACT
++                and capability.get("channels") == ["rotation"] and capability.get("space") == "local"
++                and spec.motion.host_channel == "rotation"
++                and spec.character.rig_profile.get("controller_adapter_id") == FK_ADAPTER_ID)
++            if (not (independent or fk_rotation)
+                     or capability.get("existing_keys_only") is not True
+                     or capability.get("private_target_observation_required") is not True
+                     or (not file_bootstrap and (capability.get("target_scope") != "observed"
+                         or capability.get("object_ids") != list(spec.character.object_ids)))):
+                 reasons.append({"code": "RETARGET_TARGET_OBSERVATION_UNAVAILABLE",
+-                    "detail": "Current target requires its privately qualified independent existing-position writer"})
++                    "detail": "Current target requires its private existing-key position or fixed-translation FK rotation writer"})
+         if any(item.kind == "foot_contacts" for item in spec.cleanup) and not capabilities.get("key_layout_observation"):
+             reasons.append({"code": "INTERPOLATION_MODEL_UNVERIFIED"})
+         if spec.intent.allow_key_insertion and not capabilities.get("key_topology_write"):
+@@ -433,17 +441,18 @@
+ 
+     @property
+     def motion_controller_adapter(self):
+-        from .retarget_controller import IndependentPositionController
+-        return IndependentPositionController(self._verified_position_targets)
++        from .retarget_controller import ObservedControllerRouter
++        return ObservedControllerRouter(self._verified_position_targets)
+ 
+     def verify_controller_targets(self, request, request_digest):
+-        from .retarget_controller import lower_position_request
++        from .retarget_controller import lower_controller_request
+         if digest(request) != request_digest:
+             raise RecipeConflict("RETARGET_CONTROLLER_REQUEST_MISMATCH")
+-        lowered = lower_position_request(request)
++        lowered = lower_controller_request(request)
+         observations = getattr(self, "_retarget_observations", {})
+         observation = observations.get(getattr(self._retarget_context(), "observation_digest", None))
+-        if observation is None or observation["profile_digest"] != digest(request["profile"]):
++        if (observation is None or observation["profile_digest"] != digest(request["profile"])
++                or observation.get("adapter_id") != request["adapter_id"]):
+             raise RecipeConflict("RETARGET_TARGET_PROVENANCE_UNVERIFIED")
+         result = self.client.execute("transform_get", [Operation(name="system.observe_controller_targets", arguments={
+             "retarget_observation": observation, "controller_request": request,
+diff --git a/src/cascadeur_complete/cleanup_workflow.py b/src/cascadeur_complete/cleanup_workflow.py
+index 22536865f788f49ec34124f04a4b6f54dee8b01f..8f567c7af34eff8dc9a5ee433053212428c7098c 100644
+--- a/src/cascadeur_complete/cleanup_workflow.py
++++ b/src/cascadeur_complete/cleanup_workflow.py
+@@ -889,6 +889,7 @@
+         from .retargeting import retarget_pose,controller_targets
+         from dataclasses import asdict
+         from .retarget_controller import ADAPTER_ID
++        from .skeletal_fk_controller import ADAPTER_ID as FK_ADAPTER_ID
+         from .motion_solvers import fit_keys
+         self._require_contract("retarget")
+         self._key_layout_digest=None
+@@ -911,12 +912,15 @@
+         channels=tuple(settings.get("target_channels",("position",)))
+         if channels not in (("position",),("rotation",)):
+             raise MotionInputError("COUPLED_CHANNEL_WRITER_UNAVAILABLE","retarget must declare one target channel")
+-        if (self.profile.controller_adapter_id != ADAPTER_ID or channels != ("position",)
+-                or set(self.profile.role_ids) != {"root"}
+-                or settings.get("root_role") != "root" or set(mapping) != {"root"}
+-                or settings.get("end_effector_constraints") or settings.get("target_leg_length_m") is not None):
++        independent=(self.profile.controller_adapter_id == ADAPTER_ID and channels == ("position",)
++            and set(self.profile.role_ids) == {"root"} and settings.get("root_role") == "root"
++            and set(mapping) == {"root"})
++        fk_rotation=(self.profile.controller_adapter_id == FK_ADAPTER_ID and channels == ("rotation",)
++            and set(mapping) == set(self.profile.role_ids))
++        if (not (independent or fk_rotation) or settings.get("end_effector_constraints")
++                or settings.get("target_leg_length_m") is not None):
+             return {"status":"unsupported","reason_codes":["RETARGET_CONTROLLER_SCOPE_UNSUPPORTED"],
+-                    "report":{"detail":"only the qualified independent parentless root position controller is implemented"}}
++                    "report":{"detail":"native-qualified independent position or translation-fixed FK rotation is required; coupled/IK lowering remains unavailable"}}
+         declaration_fields={"root_role","axis_alignment","root_basis","scale","target_root_anchor_m"}
+         if not declaration_fields <= set(settings):
+             return {"status":"unsupported","reason_codes":["MISSING_RETARGET_MAPPING"],
+diff --git a/src/cascadeur_complete/export_models.py b/src/cascadeur_complete/export_models.py
+index 444b10c2416ed56d9f2b8d40c3fe3b974b2fba41..ff1be9b90db1afa561aae34c2ca1b94d347814e9 100644
+--- a/src/cascadeur_complete/export_models.py
++++ b/src/cascadeur_complete/export_models.py
+@@ -76,6 +76,8 @@
+     bone_mapping: dict[str, tuple[str, str | None]]
+     helper_mapping: dict[str, str] = Field(default_factory=dict)
+     mesh_mapping: dict[str, str] = Field(default_factory=dict)
++    native_mesh_mapping: dict[str, str] = Field(default_factory=dict)
++    max_mesh_distance_checks: StrictInt = Field(default=10_000_000, gt=0, le=100_000_000)
+     blender_executable_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+     importer_fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+     max_report_bytes: StrictInt = Field(default=64 * 1024**2, gt=0, le=256 * 1024**2)
+diff --git a/src/cascadeur_complete/mesh_delivery.py b/src/cascadeur_complete/mesh_delivery.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..79b7925c6bfaf2f1ca690f3d1d41c77fa237bae9
+--- /dev/null
++++ b/src/cascadeur_complete/mesh_delivery.py
+@@ -0,0 +1,194 @@
++"""Measured mesh fidelity between native output and the imported FBX surface.
++
++This compares canonical surfaces at observed frames. It does not align meshes,
++assume a common vertex order, certify topology, or infer continuous-time quality.
++"""
++from __future__ import annotations
++
++import heapq
++import math
++
++import numpy as np
++
++from .capture import canonical_digest
++from .models import SourceBinding
++from .motion_context import MotionContext, MotionInputError, SampleBatch, validate_samples
++from .motion_geometry import closest_triangle, load_native_geometry
++
++
++def _batch(value):
++    return SampleBatch(MotionContext.from_dict(value['context']), tuple(value['object_ids']), value['space'],
++        {key: np.asarray(item) for key, item in value['position_m'].items()},
++        {key: np.asarray(item) for key, item in value['rotation_wxyz'].items()},
++        {key: np.asarray(item, dtype=bool) for key, item in value['channel_valid'].items()},
++        SourceBinding.model_validate(value['source_binding']))
++
++
++def _mapping(profile):
++    settings = profile.target_import_settings
++    mapping = settings.native_mesh_mapping if settings is not None else None
++    if (not isinstance(mapping, dict) or set(mapping) != set(profile.mesh_refs)
++            or len(set(mapping.values())) != len(mapping)
++            or any(not isinstance(value, str) or not value for value in mapping.values())):
++        raise MotionInputError('EXPORT_NATIVE_MESH_MAPPING_UNAVAILABLE',
++            'Every exported mesh path needs a unique explicitly declared native stable mesh ID')
++    return mapping
++
++
++def _same_motion(native, before, required_mesh_ids):
++    """Match the code-owned whole-scene projection across operation scopes.
++
++    NativeSceneAdapter.capture() hashes the same complete read_scene projection
++    for evaluation and checkpoint. Their scope/content_revision hashes include
++    operation arguments and therefore cannot be used as cross-operation keys.
++    """
++    sources = []
++    for batch in (native, before):
++        # Follow capture coverage: positions for every requested ID, rotations
++        # only when actually supplied. Intent/quality retain their own required
++        # rotation obligations; this surface metric does not invent new ones.
++        required = {key: ('position', 'rotation') if key in batch.rotation_wxyz else ('position',)
++                    for key in batch.object_ids}
++        validate_samples(batch, required)
++        if (set(batch.position_m) != set(batch.object_ids) or set(batch.channel_valid) != set(batch.object_ids)
++                or not set(batch.rotation_wxyz) <= set(batch.object_ids)):
++            raise MotionInputError('INCOMPLETE_CAPTURE', 'Native motion channel maps escape their captured IDs')
++        source = SourceBinding.model_validate(batch.source_binding)
++        if (batch.space != 'global' or not source.complete
++                or source.scope.get('adapter_id') != 'native-model-assets-v1'
++                or not set(required_mesh_ids) <= set(source.scope.get('object_ids', ()))):
++            raise MotionInputError('EXPORT_NATIVE_MESH_SOURCE_UNVERIFIED', 'Complete native global source required')
++        sources.append(source)
++    identity = ('runtime_epoch', 'scene_instance_id', 'document_lineage_id')
++    if (any(getattr(sources[0].binding, key) != getattr(sources[1].binding, key) for key in identity)
++            or sources[0].sample_digest != sources[1].sample_digest
++            or sources[0].adapter_fingerprint != sources[1].adapter_fingerprint
++            or set(native.object_ids) != set(before.object_ids)):
++        raise MotionInputError('EXPORT_NATIVE_MESH_SOURCE_CHANGED',
++            'Geometry must belong to the exact final native source used by the pre-export motion capture')
++    for field in ('frames', 'time_s', 'scene_to_solver_basis'):
++        if not np.array_equal(getattr(native.context, field), getattr(before.context, field)):
++            raise MotionInputError('EXPORT_NATIVE_MESH_GRID_CHANGED', 'Native geometry and export grids differ')
++    if (native.context.fps_num, native.context.fps_den, native.context.metres_per_scene_unit) != (
++            before.context.fps_num, before.context.fps_den, before.context.metres_per_scene_unit):
++        raise MotionInputError('EXPORT_NATIVE_MESH_GRID_CHANGED', 'Native geometry and export conversion policies differ')
++    for field in ('position_m', 'rotation_wxyz', 'channel_valid'):
++        first, second = getattr(native, field), getattr(before, field)
++        if set(first) != set(second) or any(not np.array_equal(first[key], second[key]) for key in first):
++            raise MotionInputError('EXPORT_NATIVE_MESH_SOURCE_CHANGED', 'Final native motion changed after geometry capture')
++
++
++def _reference_geometry(reference, before_export, profile, verifier):
++    if (not isinstance(reference, dict) or reference.get('schema_version') != 1
++            or reference.get('before_export_digest') != canonical_digest(before_export.as_dict())):
++        raise MotionInputError('EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE', 'Retained final mesh reference differs')
++    native_motion = _batch(reference['native_motion'])
++    _same_motion(native_motion, before_export, _mapping(profile).values())
++    sealed = reference['sealed_geometry']
++    manifest = sealed.get('manifest', {})
++    if manifest.get('motion_capture_digest') != canonical_digest(native_motion.as_dict()):
++        raise MotionInputError('EXPORT_NATIVE_MESH_SOURCE_UNVERIFIED', 'Native mesh is bound to a different motion capture')
++    maximum = reference.get('memory_budget_bytes')
++    if type(maximum) is not int or maximum <= 0:
++        raise MotionInputError('RESOURCE_BUDGET_EXCEEDED', 'Explicit native geometry window budget required')
++    geometry = load_native_geometry(sealed, context=native_motion.context, semantics='unsigned_surface',
++        verifier=verifier, memory_budget_bytes=maximum)
++    if not set(_mapping(profile).values()) <= set(geometry['tracks']):
++        raise MotionInputError('EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE', 'A declared native mesh has no authenticated windows')
++    return geometry
++
++
++def make_mesh_delivery_reference(sealed, native_motion, before_export, profile, *, verifier, memory_budget_bytes):
++    """Retain native evidence before dispatching the one authorized export."""
++    reference = {'schema_version': 1, 'native_motion': native_motion.as_dict(),
++        'sealed_geometry': sealed, 'before_export_digest': canonical_digest(before_export.as_dict()),
++        'memory_budget_bytes': memory_budget_bytes}
++    _reference_geometry(reference, before_export, profile, verifier)
++    return reference
++
++
++class _DistanceBudget:
++    def __init__(self, maximum):
++        if type(maximum) is not int or maximum <= 0:
++            raise MotionInputError('RESOURCE_BUDGET_EXCEEDED', 'Explicit mesh distance-work budget required')
++        self.maximum, self.used = maximum, 0
++
++    def consume(self):
++        if self.used >= self.maximum:
++            raise MotionInputError('RESOURCE_BUDGET_EXCEEDED', 'Mesh distance-work budget exhausted; no quality pass issued')
++        self.used += 1
++
++
++def _nearest(point, surface, budget):
++    """Reuse the repository's BVH and point/triangle calculation with bounded work."""
++    pending = [(surface._bound(point, surface.root), surface.root)]
++    best = math.inf
++    while pending:
++        bound, index = heapq.heappop(pending)
++        if bound > best:
++            continue
++        _, _, ids, left, right = surface.nodes[index]
++        if ids is None:
++            for child in (left, right):
++                lower = surface._bound(point, child)
++                if lower <= best:
++                    heapq.heappush(pending, (lower, child))
++            continue
++        for triangle_id in ids:
++            budget.consume()
++            nearest, _ = closest_triangle(point, surface._geometry[triangle_id])
++            distance = float(np.dot(point - nearest, point - nearest))
++            best = min(best, distance)
++    if not math.isfinite(best):
++        raise MotionInputError('EXPORT_MESH_DISTANCE_UNAVAILABLE', 'No finite surface distance was measured')
++    return math.sqrt(best)
++
++
++def _samples(surface):
++    # Unreferenced vertices are not part of the rendered triangle surface.
++    for vertex in np.unique(surface.triangles.reshape(-1)):
++        yield 'vertex', int(vertex), surface.vertices[vertex]
++    for triangle_id, triangle in enumerate(surface._geometry):
++        yield 'triangle_centroid', triangle_id, triangle.mean(axis=0)
++
++
++def measure_mesh_delivery(reference, before_export, profile, target_tracks, *, verifier):
++    """Measure both directions in global metres; one frame pair is resident at a time."""
++    native = _reference_geometry(reference, before_export, profile, verifier)
++    mapping = _mapping(profile)
++    if set(target_tracks) != set(mapping):
++        raise MotionInputError('EXPORT_MESH_MAPPING_AMBIGUOUS', 'Imported mesh coverage differs from declared paths')
++    budget = _DistanceBudget(profile.target_import_settings.max_mesh_distance_checks)
++    count, total, maximum, worst = 0, 0., 0., None
++    for path, native_id in sorted(mapping.items()):
++        source_track, target_track = native['tracks'][native_id], target_tracks[path]
++        if (not np.array_equal(source_track.frames, before_export.context.frames)
++                or not np.array_equal(target_track.frames, before_export.context.frames)
++                or not np.array_equal(source_track.context.time_s, target_track.context.time_s)):
++            raise MotionInputError('EXPORT_NATIVE_MESH_GRID_CHANGED', 'Imported/native mesh times differ')
++        for row, frame in enumerate(before_export.context.frames):
++            source_surface, target_surface = source_track[row], target_track[row]
++            for direction, first, second in (('native_to_target', source_surface, target_surface),
++                                              ('target_to_native', target_surface, source_surface)):
++                for kind, index, point in _samples(first):
++                    distance = _nearest(point, second, budget)
++                    count += 1
++                    total += distance
++                    if worst is None or distance > maximum:
++                        maximum = distance
++                        worst = {'mesh_path': path, 'native_mesh_id': native_id, 'frame': int(frame),
++                            'direction': direction, 'sample_kind': kind, 'sample_index': index}
++            # Do not retain a second frame's BVH/geometry while loading the next.
++            del source_surface, target_surface, first, second
++    if not count:
++        raise MotionInputError('EXPORT_MESH_DISTANCE_UNAVAILABLE', 'No native/imported surface samples were measured')
++    limit = profile.tolerances.position_m
++    return {'status': 'measured', 'units': 'm', 'sample_count': count,
++        'max': maximum, 'mean': total / count, 'limit': limit, 'pass': maximum <= limit, 'worst': worst,
++        'coverage': 'sampled_frames_vertices_and_triangle_centroids',
++        'native_geometry_digest': reference['sealed_geometry']['geometry_digest'],
++        'native_motion_capture_digest': canonical_digest(reference['native_motion']),
++        'pre_export_capture_digest': reference['before_export_digest'],
++        'native_mesh_mapping': dict(mapping), 'triangle_distance_checks': budget.used,
++        'alignment_applied': False, 'continuous_time_verified': False,
++        'vertex_correspondence_verified': False, 'topology_equivalence_verified': False}
+diff --git a/src/cascadeur_complete/recipe_runner.py b/src/cascadeur_complete/recipe_runner.py
+index 5a8ba666e1c29805cdf187b38f1c7ecb7a1dbf07..fa24127111e8f32db81abea76625de8fe50e7766 100644
+--- a/src/cascadeur_complete/recipe_runner.py
++++ b/src/cascadeur_complete/recipe_runner.py
+@@ -1121,13 +1121,26 @@
+                 n = spec.clip.last_frame - spec.clip.first_frame + 1
+                 used = run.budgets_used.model_dump()
+                 used["bridge_requests"] += 4 * ((n * len(spec.character.object_ids) + 24) // 25) + 8
++                used["bridge_requests"] += int(spec.export.include_mesh)
+                 used["memory_bytes"] = max(used["memory_bytes"], n * len(spec.character.object_ids) * 2048)
+                 usage = BudgetUsage.model_validate(used)
+                 validate_usage(plan, usage, run.deadline)
+                 run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
++                before = self._capture(spec, source=run.current_binding)
++                mesh_reference = None
++                if spec.export.include_mesh:
++                    if spec.geometry_capture is None:
++                        raise RecipeConflict("EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE: final geometry capture required")
++                    from .mesh_delivery import make_mesh_delivery_reference
++                    mesh_reference = make_mesh_delivery_reference(self._latest(run, "geometry_capture"),
++                        _batch(self._latest(run, "quality_capture")["global"]), _batch(before["global"]), spec.export,
++                        verifier=self.service.verify_geometry_capture,
++                        memory_budget_bytes=spec.geometry_capture.max_array_bytes)
+                 stage = create_export_stage(plan.spec.export, run.run_id, step.step_id)
+-                before = self._capture(spec, source=run.current_binding)
+-                record = record.model_copy(update={"stage_data": {"export_stage": stage.as_dict(), "before_export": before}})
++                data = {"export_stage": stage.as_dict(), "before_export": before}
++                if mesh_reference is not None:
++                    data["native_mesh_reference"] = mesh_reference
++                record = record.model_copy(update={"stage_data": data})
+                 run = self._step_update(run, record)
+             context["export_stage"] = record.stage_data["export_stage"]
+         effect = self.service.recipe_resolve_stage_effect(plan, run, step, context)
+@@ -1358,6 +1371,8 @@
+             artifact = seal_export(stage, receipt, plan.spec.budgets)
+             value = {"artifact": artifact.model_dump(mode="json"), "export_stage": stage.as_dict(),
+                      "before_export": record.stage_data["before_export"]}
++            if "native_mesh_reference" in record.stage_data:
++                value["native_mesh_reference"] = record.stage_data["native_mesh_reference"]
+             binding = effect.source_binding
+             transition["export"] = "staged"
+         elif step.stage == "geometry_capture":
+@@ -1421,6 +1436,7 @@
+             # observed again only as an explicitly resumed read retry. Keep the
+             # original export request, sealed artifact, profile and captures.
+             usage["read_retries"] += int(record.calls_used > 0)
++            usage["bridge_requests"] += int(plan.spec.export.include_mesh)
+             usage = BudgetUsage.model_validate(usage)
+             validate_usage(plan, usage, run.deadline)
+             record = record.model_copy(update={"state": "ready", "calls_used": record.calls_used + 1})
+@@ -1430,12 +1446,19 @@
+             before = _batch(exported["before_export"]["global"])
+             original = _batch(self._latest(run, "baseline_capture")["global"])
+             rig = self._profile(plan.spec)
++            reference_digests = {"supports": digest(plan.spec.references.support_tracks),
++                "geometry": digest(plan.spec.references.geometry), "props": digest(plan.spec.references.prop_tracks)}
++            mesh_reference = exported.get("native_mesh_reference")
++            if plan.spec.export.include_mesh:
++                if not isinstance(mesh_reference, dict):
++                    raise RecipeConflict("EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE: retained native reference required")
++                reference_digests["native_geometry"] = mesh_reference["sealed_geometry"]["geometry_digest"]
+             expected = make_export_expectation(before, plan.spec.export, rig,
+                 original_reference=original, intent=plan.spec.intent, policy=plan.spec.quality,
+-                reference_digests={"supports": digest(plan.spec.references.support_tracks),
+-                                   "geometry": digest(plan.spec.references.geometry), "props": digest(plan.spec.references.prop_tracks)})
++                reference_digests=reference_digests)
+             context = roundtrip_quality_context(before, original, rig, plan.spec.intent, plan.spec.quality,
+-                                               supports=self._supports(plan.spec))
++                supports=self._supports(plan.spec), native_mesh_reference=mesh_reference,
++                native_geometry_verifier=self.service.verify_geometry_capture)
+             result = validate_export(artifact, plan.spec.export, expected, quality_context=context,
+                                      provenance_key=self.store._secret, timeout=plan.spec.budgets.per_step_seconds,
+                                      cancel=lambda: self.store.read(run.run_id).cancel_requested)
+diff --git a/src/cascadeur_complete/target_capture.py b/src/cascadeur_complete/target_capture.py
+index 62c87f72754f9957bd438486a71cd48150956bc1..1415e3e51cf948ee3c64b623fde83f4760330a3a 100644
+--- a/src/cascadeur_complete/target_capture.py
++++ b/src/cascadeur_complete/target_capture.py
+@@ -150,10 +150,14 @@
+     policy: object
+     supports: object = None
+     mesh_evaluator: object = None
+-
+-
+-def roundtrip_quality_context(before_export, original_reference, rig, intent, policy, supports=None, mesh_evaluator=None):
+-    return RoundtripQualityContext(before_export,original_reference,rig,intent,policy,supports,mesh_evaluator)
++    native_mesh_reference: object = None
++    native_geometry_verifier: object = None
++
++
++def roundtrip_quality_context(before_export, original_reference, rig, intent, policy, supports=None, mesh_evaluator=None,
++                              *, native_mesh_reference=None, native_geometry_verifier=None):
++    return RoundtripQualityContext(before_export,original_reference,rig,intent,policy,supports,mesh_evaluator,
++                                   native_mesh_reference,native_geometry_verifier)
+ 
+ 
+ def decode_target_capture(raw, expected, profile, context, *, source_binding):
+@@ -285,6 +289,7 @@
+     evidence=TargetCaptureEvidence.record(directory,key,report_path=report_path,manifest=manifest,canonical=batch,
+                                           max_report_bytes=report_budget)
+     mesh_evaluator=None
++    mesh_delivery=None
+     if profile.include_mesh:
+         from itertools import combinations
+         from .motion_geometry import ObservedSurfaceTrack
+@@ -294,6 +299,13 @@
+         tracks={name:ObservedSurfaceTrack(value['positions_m'],value['triangles'],context=batch.context,
+                                           semantics=ctx.policy.collision_semantics)
+                 for name,value in raw['mesh'].items()}
++        from .mesh_delivery import measure_mesh_delivery
++        reference=ctx.native_mesh_reference
++        if (not isinstance(reference,dict) or expected.reference_digests.get('native_geometry')
++                != reference.get('sealed_geometry',{}).get('geometry_digest')):
++            raise ValueError('EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE')
++        mesh_delivery=measure_mesh_delivery(reference,ctx.before_export,profile,tracks,
++                                            verifier=ctx.native_geometry_verifier)
+         windows={name:track.windows for name,track in tracks.items()}
+         geometry_manifest={'capture_kind':'target_actual','source_digest':expected.source_capture_digest,
+             'successor_digest':capture_digest(batch.as_dict()),'completion_receipt_digest':file_sha256(report_path,report_budget),
+@@ -305,6 +317,12 @@
+         evidence.bind_geometry(geometry_manifest,batch)
+         geometry={'manifest':geometry_manifest,'tracks':tracks}
+         mesh_evaluator=lambda measured,rig,intent:actual_mesh_metrics(geometry,ctx.policy,verifier=evidence.verify_geometry)
+-    return validate_export_roundtrip(ctx.before_export,batch,profile,{key:key for key in batch.object_ids},ctx.intent,ctx.policy,
++    quality=validate_export_roundtrip(ctx.before_export,batch,profile,{key:key for key in batch.object_ids},ctx.intent,ctx.policy,
+         rig=ctx.rig,original_reference=ctx.original_reference,supports=ctx.supports,capture_verifier=evidence.verify,
+         mesh_evaluator=mesh_evaluator)
++    if mesh_delivery is not None:
++        quality.metrics['mesh_surface_readback_m']=mesh_delivery
++        if not mesh_delivery['pass']:
++            quality.status='fail'
++            quality.reason_codes.append('EXPORT_MESH_SURFACE_READBACK_FAILED')
++    return quality
+diff --git a/src/cascadeur_complete/change_flow.py b/src/cascadeur_complete/change_flow.py
+index 8c080579c125bc533262360119e8822a5e38832b..4febe5aa3c149597e754be2cd83d6922381d493d 100644
+--- a/src/cascadeur_complete/change_flow.py
++++ b/src/cascadeur_complete/change_flow.py
+@@ -338,8 +338,8 @@
+         from .request_ledger import canonical_digest
+         try:
+             journal = RecoveryJournal(self.paths, record.mutation_request_id)
+-            # Claim precedes any prepare/dispatch. An interrupted owner can only
+-            # be observed; an unknown attempt never gets a replacement request.
++            # Claim precedes preparation. A retained unused token may make only
++            # its first dispatch; an unknown attempt gets no replacement request.
+             if not journal.claim():
+                 result = journal.read("result")
+                 permit = journal.read("permit")
+@@ -364,8 +364,14 @@
+                     else:
+                         failed.recovery_state = result["state"]
+                 elif permit:
+-                    observed = self.client.reconcile_request(permit["recovery_request_id"])
+-                    failed.recovery_state = "recovered" if recovery_succeeded(observed, permit) else "blocked_recovery_outcome_unknown"
++                    prepared = journal.read("prepared")
++                    # A durable unused approval may complete its first dispatch.
++                    # Any recorded dispatch or consumed token stays observation-only.
++                    observed = (self._dispatch_prepared_recovery(journal, permit) if prepared
++                        else self.client.reconcile_request(permit["recovery_request_id"]))
++                    failed.recovery_state = ("recovered" if recovery_succeeded(observed, permit)
++                        else "blocked_recovery_outcome_unknown" if observed.phase != "terminal"
++                        or observed.outcome in {None, "pending", "outcome_unknown"} else "recovery_failed")
+                 else:
+                     failed.recovery_state = "blocked_recovery_owner_unresolved"
+                 return failed
+@@ -489,10 +495,89 @@
+             recovery_permit=recovery_permit, recovery_journal=recovery_journal)
+         if not prepared.get("ok"):
+             return ResultEnvelope.model_validate(prepared)
++        return self._dispatch_prepared_recovery(recovery_journal, recovery_permit)
++
++    def _dispatch_prepared_recovery(self, journal, permit) -> ResultEnvelope:
++        """Finish only the first dispatch of an existing signed recovery token.
++
++        This method is reached from an authorized failed change, never from the
++        read-only request-status API. It does not mint a token, permit or ID.
++        Once intent or token consumption exists, the same request is observed.
++        """
++        from types import SimpleNamespace
++        from .models import SourceBinding
++        from .recovery import recovery_candidate, verify_snapshot
+         from .request_ledger import canonical_digest
+-        try:
+-            recovery_journal.write("dispatch", {"recovery_request_id": recovery_permit["recovery_request_id"],
+-                                                 "permit_digest": canonical_digest(recovery_permit)})
++
++        stored = journal.read("permit")
++        prepared = journal.read("prepared")
++        if stored != permit or prepared is None:
++            raise ValueError("RECOVERY_PREPARED_APPROVAL_UNAVAILABLE")
++        request_id = permit["recovery_request_id"]
++        permit_digest = canonical_digest(permit)
++        if (prepared.get("original_request_id") != permit["original_request_id"]
++                or prepared.get("recovery_request_id") != request_id
++                or prepared.get("permit_digest") != permit_digest):
++            raise ValueError("RECOVERY_PREPARED_APPROVAL_DIFFERS")
++
++        expected_dispatch = {"recovery_request_id": request_id, "permit_digest": permit_digest}
++        dispatch = journal.read("dispatch")
++        if dispatch is not None:
++            if any(dispatch.get(key) != value for key, value in expected_dispatch.items()):
++                raise ValueError("RECOVERY_DISPATCH_DIFFERS")
++            return self.client.reconcile_request(request_id)
++        if self.client.queue.ledger.read_request(request_id) is not None:
++            return self.client.reconcile_request(request_id)
++
++        token = prepared["confirmation_token"]
++        try:
++            approval = self.changes.load(token)
++        except SafetyError:
++            consumed = self.changes.consumed(token)
++            if consumed is not None and consumed.mutation_request_id == request_id:
++                return self.client.reconcile_request(request_id)
++            raise
++        context = {**(permit["original_execution_context"] or {}), "request_id": request_id,
++            "recovery_of": permit["original_request_id"], "recovery_permit_digest": permit_digest}
++        if (approval.schema_version != 3 or approval.used
++                or approval.feature_id != "change_rollback" or approval.operation.name != "safety.rollback"
++                or approval.mutation_request_id != request_id or approval.execution_context != context
++                or approval.source_binding is None
++                or approval.source_binding.model_dump(mode="json") != permit["source_binding"]
++                or approval.operation.arguments != permit["arguments"]):
++            raise ValueError("RECOVERY_TOKEN_BINDING_DIFFERS")
++        if permit["expires_at"] - time.time() < 31:
++            raise ValueError("RECOVERY_PERMIT_TOO_CLOSE_TO_EXPIRY")
++
++        original = self.client.queue.ledger.read_request(permit["original_request_id"])
++        receipt = self.client.queue.ledger.read_receipt(permit["original_request_id"])
++        if (original is None or receipt is None or not receipt.terminal_result
++                or canonical_digest(receipt.model_dump(mode="json")) != permit["original_receipt_digest"]
++                or original.get("execution_context") != permit["original_execution_context"]):
++            raise ValueError("RECOVERY_ORIGINAL_TERMINAL_CHANGED")
++        original_source = SourceBinding.model_validate(original.get("source_binding"))
++        manifest = original_source.scope.get("snapshot_manifest")
++        record = SimpleNamespace(mutation_request_id=permit["original_request_id"],
++            source_binding=original_source, snapshot_manifest_id=canonical_digest(manifest),
++            execution_context=original.get("execution_context"))
++        failed = ResultEnvelope.model_validate({**receipt.terminal_result,
++            "request_id": permit["original_request_id"]})
++        post, recovery, manifest, arguments = recovery_candidate(record, failed, receipt)
++        if (recovery.model_dump(mode="json") != permit["source_binding"]
++                or manifest != permit["snapshot_manifest"] or arguments != permit["arguments"]
++                or canonical_digest(manifest) != permit["snapshot_manifest_digest"]):
++            raise ValueError("RECOVERY_RETAINED_TARGET_CHANGED")
++        if (not self.validate_source(post).ok
++                or not self.validate_source(recovery, operation_name="safety.rollback", arguments=arguments).ok):
++            raise ValueError("RECOVERY_CURRENT_TARGET_CHANGED")
++        verify_snapshot(manifest, post, self.paths.snapshots,
++                        expected_digest=permit["snapshot_manifest_digest"])
++
++        try:
++            journal.write("dispatch", expected_dispatch)
+         except FileExistsError:
+-            return self.client.reconcile_request(recovery_permit["recovery_request_id"])
+-        return self.commit_change(prepared["confirmation_token"], timeout=120)
++            dispatch = journal.read("dispatch")
++            if dispatch is None or any(dispatch.get(key) != value for key, value in expected_dispatch.items()):
++                raise ValueError("RECOVERY_DISPATCH_DIFFERS")
++            return self.client.reconcile_request(request_id)
++        return self.commit_change(token, timeout=120)

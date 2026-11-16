@@ -1,0 +1,341 @@
+diff --git a/src/cascadeur_complete/export_models.py b/src/cascadeur_complete/export_models.py
+--- a/src/cascadeur_complete/export_models.py
++++ b/src/cascadeur_complete/export_models.py
+@@ -76,6 +76,8 @@
+     bone_mapping: dict[str, tuple[str, str | None]]
+     helper_mapping: dict[str, str] = Field(default_factory=dict)
+     mesh_mapping: dict[str, str] = Field(default_factory=dict)
++    native_mesh_mapping: dict[str, str] = Field(default_factory=dict)
++    max_mesh_distance_checks: StrictInt = Field(default=10_000_000, gt=0, le=100_000_000)
+     blender_executable_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+     importer_fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+     max_report_bytes: StrictInt = Field(default=64 * 1024**2, gt=0, le=256 * 1024**2)
+diff --git a/src/cascadeur_complete/mesh_delivery.py b/src/cascadeur_complete/mesh_delivery.py
+new file mode 100644
+--- /dev/null
++++ b/src/cascadeur_complete/mesh_delivery.py
+@@ -0,0 +1,194 @@
++"""Measured mesh fidelity between native output and the imported FBX surface.
++
++This compares canonical surfaces at observed frames. It does not align meshes,
++assume a common vertex order, certify topology, or infer continuous-time quality.
++"""
++from __future__ import annotations
++
++import heapq
++import math
++
++import numpy as np
++
++from .capture import canonical_digest
++from .models import SourceBinding
++from .motion_context import MotionContext, MotionInputError, SampleBatch, validate_samples
++from .motion_geometry import closest_triangle, load_native_geometry
++
++
++def _batch(value):
++    return SampleBatch(MotionContext.from_dict(value['context']), tuple(value['object_ids']), value['space'],
++        {key: np.asarray(item) for key, item in value['position_m'].items()},
++        {key: np.asarray(item) for key, item in value['rotation_wxyz'].items()},
++        {key: np.asarray(item, dtype=bool) for key, item in value['channel_valid'].items()},
++        SourceBinding.model_validate(value['source_binding']))
++
++
++def _mapping(profile):
++    settings = profile.target_import_settings
++    mapping = settings.native_mesh_mapping if settings is not None else None
++    if (not isinstance(mapping, dict) or set(mapping) != set(profile.mesh_refs)
++            or len(set(mapping.values())) != len(mapping)
++            or any(not isinstance(value, str) or not value for value in mapping.values())):
++        raise MotionInputError('EXPORT_NATIVE_MESH_MAPPING_UNAVAILABLE',
++            'Every exported mesh path needs a unique explicitly declared native stable mesh ID')
++    return mapping
++
++
++def _same_motion(native, before, required_mesh_ids):
++    """Match the code-owned whole-scene projection across operation scopes.
++
++    NativeSceneAdapter.capture() hashes the same complete read_scene projection
++    for evaluation and checkpoint. Their scope/content_revision hashes include
++    operation arguments and therefore cannot be used as cross-operation keys.
++    """
++    sources = []
++    for batch in (native, before):
++        # Follow capture coverage: positions for every requested ID, rotations
++        # only when actually supplied. Intent/quality retain their own required
++        # rotation obligations; this surface metric does not invent new ones.
++        required = {key: ('position', 'rotation') if key in batch.rotation_wxyz else ('position',)
++                    for key in batch.object_ids}
++        validate_samples(batch, required)
++        if (set(batch.position_m) != set(batch.object_ids) or set(batch.channel_valid) != set(batch.object_ids)
++                or not set(batch.rotation_wxyz) <= set(batch.object_ids)):
++            raise MotionInputError('INCOMPLETE_CAPTURE', 'Native motion channel maps escape their captured IDs')
++        source = SourceBinding.model_validate(batch.source_binding)
++        if (batch.space != 'global' or not source.complete
++                or source.scope.get('adapter_id') != 'native-model-assets-v1'
++                or not set(required_mesh_ids) <= set(source.scope.get('object_ids', ()))):
++            raise MotionInputError('EXPORT_NATIVE_MESH_SOURCE_UNVERIFIED', 'Complete native global source required')
++        sources.append(source)
++    identity = ('runtime_epoch', 'scene_instance_id', 'document_lineage_id')
++    if (any(getattr(sources[0].binding, key) != getattr(sources[1].binding, key) for key in identity)
++            or sources[0].sample_digest != sources[1].sample_digest
++            or sources[0].adapter_fingerprint != sources[1].adapter_fingerprint
++            or set(native.object_ids) != set(before.object_ids)):
++        raise MotionInputError('EXPORT_NATIVE_MESH_SOURCE_CHANGED',
++            'Geometry must belong to the exact final native source used by the pre-export motion capture')
++    for field in ('frames', 'time_s', 'scene_to_solver_basis'):
++        if not np.array_equal(getattr(native.context, field), getattr(before.context, field)):
++            raise MotionInputError('EXPORT_NATIVE_MESH_GRID_CHANGED', 'Native geometry and export grids differ')
++    if (native.context.fps_num, native.context.fps_den, native.context.metres_per_scene_unit) != (
++            before.context.fps_num, before.context.fps_den, before.context.metres_per_scene_unit):
++        raise MotionInputError('EXPORT_NATIVE_MESH_GRID_CHANGED', 'Native geometry and export conversion policies differ')
++    for field in ('position_m', 'rotation_wxyz', 'channel_valid'):
++        first, second = getattr(native, field), getattr(before, field)
++        if set(first) != set(second) or any(not np.array_equal(first[key], second[key]) for key in first):
++            raise MotionInputError('EXPORT_NATIVE_MESH_SOURCE_CHANGED', 'Final native motion changed after geometry capture')
++
++
++def _reference_geometry(reference, before_export, profile, verifier):
++    if (not isinstance(reference, dict) or reference.get('schema_version') != 1
++            or reference.get('before_export_digest') != canonical_digest(before_export.as_dict())):
++        raise MotionInputError('EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE', 'Retained final mesh reference differs')
++    native_motion = _batch(reference['native_motion'])
++    _same_motion(native_motion, before_export, _mapping(profile).values())
++    sealed = reference['sealed_geometry']
++    manifest = sealed.get('manifest', {})
++    if manifest.get('motion_capture_digest') != canonical_digest(native_motion.as_dict()):
++        raise MotionInputError('EXPORT_NATIVE_MESH_SOURCE_UNVERIFIED', 'Native mesh is bound to a different motion capture')
++    maximum = reference.get('memory_budget_bytes')
++    if type(maximum) is not int or maximum <= 0:
++        raise MotionInputError('RESOURCE_BUDGET_EXCEEDED', 'Explicit native geometry window budget required')
++    geometry = load_native_geometry(sealed, context=native_motion.context, semantics='unsigned_surface',
++        verifier=verifier, memory_budget_bytes=maximum)
++    if not set(_mapping(profile).values()) <= set(geometry['tracks']):
++        raise MotionInputError('EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE', 'A declared native mesh has no authenticated windows')
++    return geometry
++
++
++def make_mesh_delivery_reference(sealed, native_motion, before_export, profile, *, verifier, memory_budget_bytes):
++    """Retain native evidence before dispatching the one authorized export."""
++    reference = {'schema_version': 1, 'native_motion': native_motion.as_dict(),
++        'sealed_geometry': sealed, 'before_export_digest': canonical_digest(before_export.as_dict()),
++        'memory_budget_bytes': memory_budget_bytes}
++    _reference_geometry(reference, before_export, profile, verifier)
++    return reference
++
++
++class _DistanceBudget:
++    def __init__(self, maximum):
++        if type(maximum) is not int or maximum <= 0:
++            raise MotionInputError('RESOURCE_BUDGET_EXCEEDED', 'Explicit mesh distance-work budget required')
++        self.maximum, self.used = maximum, 0
++
++    def consume(self):
++        if self.used >= self.maximum:
++            raise MotionInputError('RESOURCE_BUDGET_EXCEEDED', 'Mesh distance-work budget exhausted; no quality pass issued')
++        self.used += 1
++
++
++def _nearest(point, surface, budget):
++    """Reuse the repository's BVH and point/triangle calculation with bounded work."""
++    pending = [(surface._bound(point, surface.root), surface.root)]
++    best = math.inf
++    while pending:
++        bound, index = heapq.heappop(pending)
++        if bound > best:
++            continue
++        _, _, ids, left, right = surface.nodes[index]
++        if ids is None:
++            for child in (left, right):
++                lower = surface._bound(point, child)
++                if lower <= best:
++                    heapq.heappush(pending, (lower, child))
++            continue
++        for triangle_id in ids:
++            budget.consume()
++            nearest, _ = closest_triangle(point, surface._geometry[triangle_id])
++            distance = float(np.dot(point - nearest, point - nearest))
++            best = min(best, distance)
++    if not math.isfinite(best):
++        raise MotionInputError('EXPORT_MESH_DISTANCE_UNAVAILABLE', 'No finite surface distance was measured')
++    return math.sqrt(best)
++
++
++def _samples(surface):
++    # Unreferenced vertices are not part of the rendered triangle surface.
++    for vertex in np.unique(surface.triangles.reshape(-1)):
++        yield 'vertex', int(vertex), surface.vertices[vertex]
++    for triangle_id, triangle in enumerate(surface._geometry):
++        yield 'triangle_centroid', triangle_id, triangle.mean(axis=0)
++
++
++def measure_mesh_delivery(reference, before_export, profile, target_tracks, *, verifier):
++    """Measure both directions in global metres; one frame pair is resident at a time."""
++    native = _reference_geometry(reference, before_export, profile, verifier)
++    mapping = _mapping(profile)
++    if set(target_tracks) != set(mapping):
++        raise MotionInputError('EXPORT_MESH_MAPPING_AMBIGUOUS', 'Imported mesh coverage differs from declared paths')
++    budget = _DistanceBudget(profile.target_import_settings.max_mesh_distance_checks)
++    count, total, maximum, worst = 0, 0., 0., None
++    for path, native_id in sorted(mapping.items()):
++        source_track, target_track = native['tracks'][native_id], target_tracks[path]
++        if (not np.array_equal(source_track.frames, before_export.context.frames)
++                or not np.array_equal(target_track.frames, before_export.context.frames)
++                or not np.array_equal(source_track.context.time_s, target_track.context.time_s)):
++            raise MotionInputError('EXPORT_NATIVE_MESH_GRID_CHANGED', 'Imported/native mesh times differ')
++        for row, frame in enumerate(before_export.context.frames):
++            source_surface, target_surface = source_track[row], target_track[row]
++            for direction, first, second in (('native_to_target', source_surface, target_surface),
++                                              ('target_to_native', target_surface, source_surface)):
++                for kind, index, point in _samples(first):
++                    distance = _nearest(point, second, budget)
++                    count += 1
++                    total += distance
++                    if worst is None or distance > maximum:
++                        maximum = distance
++                        worst = {'mesh_path': path, 'native_mesh_id': native_id, 'frame': int(frame),
++                            'direction': direction, 'sample_kind': kind, 'sample_index': index}
++            # Do not retain a second frame's BVH/geometry while loading the next.
++            del source_surface, target_surface, first, second
++    if not count:
++        raise MotionInputError('EXPORT_MESH_DISTANCE_UNAVAILABLE', 'No native/imported surface samples were measured')
++    limit = profile.tolerances.position_m
++    return {'status': 'measured', 'units': 'm', 'sample_count': count,
++        'max': maximum, 'mean': total / count, 'limit': limit, 'pass': maximum <= limit, 'worst': worst,
++        'coverage': 'sampled_frames_vertices_and_triangle_centroids',
++        'native_geometry_digest': reference['sealed_geometry']['geometry_digest'],
++        'native_motion_capture_digest': canonical_digest(reference['native_motion']),
++        'pre_export_capture_digest': reference['before_export_digest'],
++        'native_mesh_mapping': dict(mapping), 'triangle_distance_checks': budget.used,
++        'alignment_applied': False, 'continuous_time_verified': False,
++        'vertex_correspondence_verified': False, 'topology_equivalence_verified': False}
+diff --git a/src/cascadeur_complete/recipe_runner.py b/src/cascadeur_complete/recipe_runner.py
+--- a/src/cascadeur_complete/recipe_runner.py
++++ b/src/cascadeur_complete/recipe_runner.py
+@@ -1121,13 +1121,26 @@
+                 n = spec.clip.last_frame - spec.clip.first_frame + 1
+                 used = run.budgets_used.model_dump()
+                 used["bridge_requests"] += 4 * ((n * len(spec.character.object_ids) + 24) // 25) + 8
++                used["bridge_requests"] += int(spec.export.include_mesh)
+                 used["memory_bytes"] = max(used["memory_bytes"], n * len(spec.character.object_ids) * 2048)
+                 usage = BudgetUsage.model_validate(used)
+                 validate_usage(plan, usage, run.deadline)
+                 run = self._step_update(run, record, budgets_used=usage.model_dump(mode="json"))
++                before = self._capture(spec, source=run.current_binding)
++                mesh_reference = None
++                if spec.export.include_mesh:
++                    if spec.geometry_capture is None:
++                        raise RecipeConflict("EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE: final geometry capture required")
++                    from .mesh_delivery import make_mesh_delivery_reference
++                    mesh_reference = make_mesh_delivery_reference(self._latest(run, "geometry_capture"),
++                        _batch(self._latest(run, "quality_capture")["global"]), _batch(before["global"]), spec.export,
++                        verifier=self.service.verify_geometry_capture,
++                        memory_budget_bytes=spec.geometry_capture.max_array_bytes)
+                 stage = create_export_stage(plan.spec.export, run.run_id, step.step_id)
+-                before = self._capture(spec, source=run.current_binding)
+-                record = record.model_copy(update={"stage_data": {"export_stage": stage.as_dict(), "before_export": before}})
++                data = {"export_stage": stage.as_dict(), "before_export": before}
++                if mesh_reference is not None:
++                    data["native_mesh_reference"] = mesh_reference
++                record = record.model_copy(update={"stage_data": data})
+                 run = self._step_update(run, record)
+             context["export_stage"] = record.stage_data["export_stage"]
+         effect = self.service.recipe_resolve_stage_effect(plan, run, step, context)
+@@ -1358,6 +1371,8 @@
+             artifact = seal_export(stage, receipt, plan.spec.budgets)
+             value = {"artifact": artifact.model_dump(mode="json"), "export_stage": stage.as_dict(),
+                      "before_export": record.stage_data["before_export"]}
++            if "native_mesh_reference" in record.stage_data:
++                value["native_mesh_reference"] = record.stage_data["native_mesh_reference"]
+             binding = effect.source_binding
+             transition["export"] = "staged"
+         elif step.stage == "geometry_capture":
+@@ -1421,6 +1436,7 @@
+             # observed again only as an explicitly resumed read retry. Keep the
+             # original export request, sealed artifact, profile and captures.
+             usage["read_retries"] += int(record.calls_used > 0)
++            usage["bridge_requests"] += int(plan.spec.export.include_mesh)
+             usage = BudgetUsage.model_validate(usage)
+             validate_usage(plan, usage, run.deadline)
+             record = record.model_copy(update={"state": "ready", "calls_used": record.calls_used + 1})
+@@ -1430,12 +1446,19 @@
+             before = _batch(exported["before_export"]["global"])
+             original = _batch(self._latest(run, "baseline_capture")["global"])
+             rig = self._profile(plan.spec)
++            reference_digests = {"supports": digest(plan.spec.references.support_tracks),
++                "geometry": digest(plan.spec.references.geometry), "props": digest(plan.spec.references.prop_tracks)}
++            mesh_reference = exported.get("native_mesh_reference")
++            if plan.spec.export.include_mesh:
++                if not isinstance(mesh_reference, dict):
++                    raise RecipeConflict("EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE: retained native reference required")
++                reference_digests["native_geometry"] = mesh_reference["sealed_geometry"]["geometry_digest"]
+             expected = make_export_expectation(before, plan.spec.export, rig,
+                 original_reference=original, intent=plan.spec.intent, policy=plan.spec.quality,
+-                reference_digests={"supports": digest(plan.spec.references.support_tracks),
+-                                   "geometry": digest(plan.spec.references.geometry), "props": digest(plan.spec.references.prop_tracks)})
++                reference_digests=reference_digests)
+             context = roundtrip_quality_context(before, original, rig, plan.spec.intent, plan.spec.quality,
+-                                               supports=self._supports(plan.spec))
++                supports=self._supports(plan.spec), native_mesh_reference=mesh_reference,
++                native_geometry_verifier=self.service.verify_geometry_capture)
+             result = validate_export(artifact, plan.spec.export, expected, quality_context=context,
+                                      provenance_key=self.store._secret, timeout=plan.spec.budgets.per_step_seconds,
+                                      cancel=lambda: self.store.read(run.run_id).cancel_requested)
+diff --git a/src/cascadeur_complete/target_capture.py b/src/cascadeur_complete/target_capture.py
+--- a/src/cascadeur_complete/target_capture.py
++++ b/src/cascadeur_complete/target_capture.py
+@@ -150,10 +150,14 @@
+     policy: object
+     supports: object = None
+     mesh_evaluator: object = None
+-
+-
+-def roundtrip_quality_context(before_export, original_reference, rig, intent, policy, supports=None, mesh_evaluator=None):
+-    return RoundtripQualityContext(before_export,original_reference,rig,intent,policy,supports,mesh_evaluator)
++    native_mesh_reference: object = None
++    native_geometry_verifier: object = None
++
++
++def roundtrip_quality_context(before_export, original_reference, rig, intent, policy, supports=None, mesh_evaluator=None,
++                              *, native_mesh_reference=None, native_geometry_verifier=None):
++    return RoundtripQualityContext(before_export,original_reference,rig,intent,policy,supports,mesh_evaluator,
++                                   native_mesh_reference,native_geometry_verifier)
+ 
+ 
+ def decode_target_capture(raw, expected, profile, context, *, source_binding):
+@@ -285,6 +289,7 @@
+     evidence=TargetCaptureEvidence.record(directory,key,report_path=report_path,manifest=manifest,canonical=batch,
+                                           max_report_bytes=report_budget)
+     mesh_evaluator=None
++    mesh_delivery=None
+     if profile.include_mesh:
+         from itertools import combinations
+         from .motion_geometry import ObservedSurfaceTrack
+@@ -294,6 +299,13 @@
+         tracks={name:ObservedSurfaceTrack(value['positions_m'],value['triangles'],context=batch.context,
+                                           semantics=ctx.policy.collision_semantics)
+                 for name,value in raw['mesh'].items()}
++        from .mesh_delivery import measure_mesh_delivery
++        reference=ctx.native_mesh_reference
++        if (not isinstance(reference,dict) or expected.reference_digests.get('native_geometry')
++                != reference.get('sealed_geometry',{}).get('geometry_digest')):
++            raise ValueError('EXPORT_NATIVE_MESH_REFERENCE_UNAVAILABLE')
++        mesh_delivery=measure_mesh_delivery(reference,ctx.before_export,profile,tracks,
++                                            verifier=ctx.native_geometry_verifier)
+         windows={name:track.windows for name,track in tracks.items()}
+         geometry_manifest={'capture_kind':'target_actual','source_digest':expected.source_capture_digest,
+             'successor_digest':capture_digest(batch.as_dict()),'completion_receipt_digest':file_sha256(report_path,report_budget),
+@@ -305,6 +317,12 @@
+         evidence.bind_geometry(geometry_manifest,batch)
+         geometry={'manifest':geometry_manifest,'tracks':tracks}
+         mesh_evaluator=lambda measured,rig,intent:actual_mesh_metrics(geometry,ctx.policy,verifier=evidence.verify_geometry)
+-    return validate_export_roundtrip(ctx.before_export,batch,profile,{key:key for key in batch.object_ids},ctx.intent,ctx.policy,
++    quality=validate_export_roundtrip(ctx.before_export,batch,profile,{key:key for key in batch.object_ids},ctx.intent,ctx.policy,
+         rig=ctx.rig,original_reference=ctx.original_reference,supports=ctx.supports,capture_verifier=evidence.verify,
+         mesh_evaluator=mesh_evaluator)
++    if mesh_delivery is not None:
++        quality.metrics['mesh_surface_readback_m']=mesh_delivery
++        if not mesh_delivery['pass']:
++            quality.status='fail'
++            quality.reason_codes.append('EXPORT_MESH_SURFACE_READBACK_FAILED')
++    return quality

@@ -1,0 +1,287 @@
+diff --git a/src/cascadeur_complete/skeletal_fk_controller.py b/src/cascadeur_complete/skeletal_fk_controller.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d00079b7e8fdaf9c1f79ffb331a5c6f2586a2191
+--- /dev/null
++++ b/src/cascadeur_complete/skeletal_fk_controller.py
+@@ -0,0 +1,161 @@
++"""Host lowering for an observed, translation-fixed FK rotation skeleton.
++
++This is not a native writer or a qualification issuer.  The service must bind
++every candidate to a private native observation of the actual hierarchy, fixed
++translations, existing rotation keys and writer closure before it can be used.
++"""
++from __future__ import annotations
++
++import json
++
++import numpy as np
++from scipy.spatial.transform import Rotation
++
++from .capture import canonical_digest
++from .motion_context import MotionInputError, SolverResult
++from .motion_math import hemisphere_continuous
++from .retargeting import forward_kinematics
++
++
++ADAPTER_ID = "observed-fk-local-rotation-v1"
++RIG_CONTRACT = "owned_fk_fixed_translation_existing_rotation_v1"
++# Match native_retarget_inputs._bounded; this is an input bound, not evidence
++# that every model fitting it is supported by an installed native writer.
++_MAX_REQUEST_BYTES = 2 * 1024 * 1024
++
++
++def _proper_rotation(value):
++    matrix = np.asarray(value, dtype=float)
++    if (matrix.shape[-2:] != (3, 3) or not np.isfinite(matrix).all()
++            or not np.allclose(np.swapaxes(matrix, -1, -2) @ matrix,
++                               np.eye(3), rtol=0, atol=1e-8)
++            or not np.allclose(np.linalg.det(matrix), 1, rtol=0, atol=1e-8)):
++        raise MotionInputError("INVALID_ROTATION", "proper FK rotation matrices required")
++    return matrix
++
++
++def _profile_order(profile):
++    if (not isinstance(profile, dict) or profile.get("controller_adapter_id") != ADAPTER_ID
++            or not isinstance(profile.get("role_ids"), dict) or not profile["role_ids"]
++            or not isinstance(profile.get("parent_ids"), dict)
++            or not isinstance(profile.get("rest_local_transforms"), dict)
++            or not isinstance(profile.get("character_id"), str) or not profile["character_id"]):
++        raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "observed FK profile required")
++    roles = profile["role_ids"]
++    if any(not isinstance(item, str) or not item for item in (*roles, *roles.values())):
++        raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "explicit stable IDs and semantic mapping required")
++    ids = set(roles.values())
++    if (len(ids) != len(roles) or set(profile.get("writable_ids", ())) != ids
++            or profile.get("dependency_ids") or ids & set(profile.get("derived_ids", ()))
++            or set(profile["parent_ids"]) != ids
++            or not ids <= set(profile["rest_local_transforms"])):
++        raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "complete writable FK parent closure required")
++    by_id = {identifier: role for role, identifier in roles.items()}
++    parents, children = {}, {role: [] for role in roles}
++    for role, identifier in roles.items():
++        parent_id = profile["parent_ids"][identifier]
++        if parent_id is not None and parent_id not in by_id:
++            raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "unobserved FK ancestor")
++        parent = None if parent_id is None else by_id[parent_id]
++        parents[role] = parent
++        if parent is not None:
++            children[parent].append(role)
++        rest = np.asarray(profile["rest_local_transforms"][identifier], dtype=float)
++        if (rest.shape != (4, 4) or not np.isfinite(rest).all()
++                or not np.array_equal(rest[3], np.array([0., 0., 0., 1.]))):
++            raise MotionInputError("RIG_REST_UNVERIFIED", "complete observed rigid local bind matrix required")
++        _proper_rotation(rest[:3, :3])
++    roots = [role for role, parent in parents.items() if parent is None]
++    if len(roots) != 1:
++        raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "one connected FK root required")
++    order = list(roots)
++    offset = 0
++    while offset < len(order):
++        order.extend(sorted(children[order[offset]]))
++        offset += 1
++    if len(order) != len(roles):
++        raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "cyclic or disconnected FK hierarchy")
++    return roles, parents, order
++
++
++def _pose(value, count):
++    if not isinstance(value, dict) or set(value) != {"position_m", "rotation_matrix"}:
++        raise MotionInputError("INCOMPLETE_CAPTURE", "complete canonical FK pose required")
++    position = np.asarray(value["position_m"], dtype=float)
++    rotation = np.asarray(value["rotation_matrix"], dtype=float)
++    if position.shape == (3,):
++        position = np.broadcast_to(position, (count, 3))
++    if rotation.shape == (3, 3):
++        rotation = np.broadcast_to(rotation, (count, 3, 3))
++    if (position.shape != (count, 3) or rotation.shape != (count, 3, 3)
++            or not np.isfinite(position).all()):
++        raise MotionInputError("INCOMPLETE_CAPTURE", "FK channels must cover the same physical sample grid")
++    return {"position_m": position, "rotation_matrix": _proper_rotation(rotation)}
++
++
++def lower_fk_rotation_request(request):
++    if (not isinstance(request, dict)
++            or set(request) != {"adapter_id", "profile", "targets", "planned_world"}
++            or request["adapter_id"] != ADAPTER_ID):
++        raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "exact FK controller request required")
++    try:
++        encoded = json.dumps(request, ensure_ascii=False, allow_nan=False,
++                             separators=(",", ":")).encode("utf-8")
++    except (ValueError, TypeError) as exc:
++        raise MotionInputError("INCOMPLETE_CAPTURE", "finite canonical FK request required") from exc
++    if len(encoded) > _MAX_REQUEST_BYTES:
++        raise MotionInputError("RESOURCE_BUDGET_EXCEEDED", "FK request exceeds native retarget input bound")
++    roles, parents, order = _profile_order(request["profile"])
++    targets = request["targets"]
++    if (not isinstance(targets, dict) or set(targets) != {"local", "world"}
++            or any(not isinstance(targets[key], dict) or set(targets[key]) != set(roles)
++                   for key in ("local", "world"))
++            or request["planned_world"] != targets["world"]):
++        raise MotionInputError("RIG_MAPPING_AMBIGUOUS", "complete local and planned world FK poses required")
++    root_world = targets["world"][order[0]]
++    if not isinstance(root_world, dict):
++        raise MotionInputError("INCOMPLETE_CAPTURE", "sampled FK root pose required")
++    root_positions = np.asarray(root_world.get("position_m"), dtype=float)
++    if root_positions.ndim != 2 or root_positions.shape[1:] != (3,) or not len(root_positions):
++        raise MotionInputError("INCOMPLETE_CAPTURE", "sampled FK root trajectory required")
++    count = len(root_positions)
++    local = {role: _pose(targets["local"][role], count) for role in order}
++    planned = {role: _pose(targets["world"][role], count) for role in order}
++    for role, pose in local.items():
++        # This route emits rotation only. Native attestation must also compare
++        # these positions with the actual unchanged native local channels.
++        if not np.array_equal(pose["position_m"], np.broadcast_to(pose["position_m"][0], (count, 3))):
++            raise MotionInputError("COUPLED_CHANNEL_WRITER_UNAVAILABLE", "FK rotation pass cannot change local translations")
++    # Parent-first ordering bounds recursive FK depth independently of rig size.
++    computed = forward_kinematics(local, parents)
++    for role in order:
++        if (not np.allclose(computed[role]["position_m"], planned[role]["position_m"], rtol=0, atol=1e-8)
++                or not np.allclose(computed[role]["rotation_matrix"], planned[role]["rotation_matrix"], rtol=0, atol=1e-8)):
++            raise MotionInputError("FK_TARGET_INCONSISTENT", "planned world pose does not follow the proposed parent hierarchy")
++    rotations = {}
++    for role, pose in local.items():
++        xyzw = Rotation.from_matrix(pose["rotation_matrix"]).as_quat()
++        rotations[roles[role]] = hemisphere_continuous(xyzw[:, [3, 0, 1, 2]]).tolist()
++    return {"rotation_wxyz": rotations, "space": "local"}
++
++
++class ObservedFKRotationController:
++    def __init__(self, verified_targets):
++        self._verified_targets = verified_targets
++
++    def controller_targets(self, targets, profile, *, planned_world=None):
++        from .retarget_controller import controller_request
++        request = controller_request(targets, profile, planned_world)
++        lowered = lower_fk_rotation_request(request)
++        proof = self._verified_targets(request, canonical_digest(request))
++        if (not isinstance(proof, dict) or proof.get("adapter_id") != ADAPTER_ID
++                or proof.get("controller_targets_digest") != canonical_digest(lowered)
++                or proof.get("controller_targets") != lowered
++                or not proof.get("observation_digest") or not proof.get("retarget_inputs_digest")):
++            raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "FK target has no current private native writer observation")
++        return SolverResult("candidate", values=lowered,
++            report={"controller_adapter_id": ADAPTER_ID, "rig_contract": RIG_CONTRACT,
++                    "controller_observation_digest": proof["observation_digest"],
++                    "retarget_inputs_digest": proof["retarget_inputs_digest"],
++                    "runtime_quality": "unverified", "coverage": "sampled_frames",
++                    "local_translation_write": False})
+diff --git a/src/cascadeur_complete/retarget_controller.py b/src/cascadeur_complete/retarget_controller.py
+index fb48ee4db07bf2bde54ed6a2ddba2e8b3c87aacf..b130577acc8ef48e962d2543f62456a39267dd64 100644
+--- a/src/cascadeur_complete/retarget_controller.py
++++ b/src/cascadeur_complete/retarget_controller.py
+@@ -63,3 +63,26 @@
+         return SolverResult("candidate", values=lowered,
+             report={"controller_adapter_id": ADAPTER_ID, "controller_observation_digest": proof["observation_digest"],
+                     "retarget_inputs_digest": proof["retarget_inputs_digest"], "runtime_quality": "unverified"})
++
++
++def lower_controller_request(request):
++    """Select only code-owned lowering; this does not register a native adapter."""
++    from .skeletal_fk_controller import ADAPTER_ID as FK_ADAPTER_ID, lower_fk_rotation_request
++    if isinstance(request, dict) and request.get("adapter_id") == FK_ADAPTER_ID:
++        return lower_fk_rotation_request(request)
++    return lower_position_request(request)
++
++
++class ObservedControllerRouter:
++    def __init__(self, verified_targets):
++        self._verified_targets = verified_targets
++
++    def controller_targets(self, targets, profile, *, planned_world=None):
++        from .skeletal_fk_controller import ADAPTER_ID as FK_ADAPTER_ID, ObservedFKRotationController
++        if profile.controller_adapter_id == ADAPTER_ID:
++            adapter = IndependentPositionController(self._verified_targets)
++        elif profile.controller_adapter_id == FK_ADAPTER_ID:
++            adapter = ObservedFKRotationController(self._verified_targets)
++        else:
++            raise MotionInputError("RIG_ADAPTER_UNVERIFIED", "no code-owned lowering for this controller")
++        return adapter.controller_targets(targets, profile, planned_world=planned_world)
+diff --git a/src/cascadeur_complete/recipe_native_service.py b/src/cascadeur_complete/recipe_native_service.py
+index 87ce1d0ad85a17a69c0d9a010f26dadda02da118..712b35e28d6e1021cd1c46f46385271d3bd4be9e 100644
+--- a/src/cascadeur_complete/recipe_native_service.py
++++ b/src/cascadeur_complete/recipe_native_service.py
+@@ -275,16 +275,24 @@
+             reasons.append({"code": "ROTATION_CONVENTION_UNVERIFIED", "detail": "Keyposes require observed native Euler encoding"})
+         if spec.motion.mode == "retarget" and spec.motion.route == "host":
+             from .retarget_controller import ADAPTER_ID
++            from .skeletal_fk_controller import ADAPTER_ID as FK_ADAPTER_ID, RIG_CONTRACT
+             capability = capabilities.get("retarget_inputs")
+             file_bootstrap = (spec.input.kind == "casc_file" and spec.input.mode == "new_working_scene")
+-            if (not isinstance(capability, dict) or capability.get("adapter_id") != ADAPTER_ID
+-                    or capability.get("channels") != ["position"] or capability.get("space") != "global"
++            independent = (isinstance(capability, dict) and capability.get("adapter_id") == ADAPTER_ID
++                and capability.get("channels") == ["position"] and capability.get("space") == "global"
++                and spec.motion.host_channel == "position")
++            fk_rotation = (isinstance(capability, dict) and capability.get("adapter_id") == FK_ADAPTER_ID
++                and capability.get("rig_contract") == RIG_CONTRACT
++                and capability.get("channels") == ["rotation"] and capability.get("space") == "local"
++                and spec.motion.host_channel == "rotation"
++                and spec.character.rig_profile.get("controller_adapter_id") == FK_ADAPTER_ID)
++            if (not (independent or fk_rotation)
+                     or capability.get("existing_keys_only") is not True
+                     or capability.get("private_target_observation_required") is not True
+                     or (not file_bootstrap and (capability.get("target_scope") != "observed"
+                         or capability.get("object_ids") != list(spec.character.object_ids)))):
+                 reasons.append({"code": "RETARGET_TARGET_OBSERVATION_UNAVAILABLE",
+-                    "detail": "Current target requires its privately qualified independent existing-position writer"})
++                    "detail": "Current target requires its private existing-key position or fixed-translation FK rotation writer"})
+         if any(item.kind == "foot_contacts" for item in spec.cleanup) and not capabilities.get("key_layout_observation"):
+             reasons.append({"code": "INTERPOLATION_MODEL_UNVERIFIED"})
+         if spec.intent.allow_key_insertion and not capabilities.get("key_topology_write"):
+@@ -433,17 +441,18 @@
+ 
+     @property
+     def motion_controller_adapter(self):
+-        from .retarget_controller import IndependentPositionController
+-        return IndependentPositionController(self._verified_position_targets)
++        from .retarget_controller import ObservedControllerRouter
++        return ObservedControllerRouter(self._verified_position_targets)
+ 
+     def verify_controller_targets(self, request, request_digest):
+-        from .retarget_controller import lower_position_request
++        from .retarget_controller import lower_controller_request
+         if digest(request) != request_digest:
+             raise RecipeConflict("RETARGET_CONTROLLER_REQUEST_MISMATCH")
+-        lowered = lower_position_request(request)
++        lowered = lower_controller_request(request)
+         observations = getattr(self, "_retarget_observations", {})
+         observation = observations.get(getattr(self._retarget_context(), "observation_digest", None))
+-        if observation is None or observation["profile_digest"] != digest(request["profile"]):
++        if (observation is None or observation["profile_digest"] != digest(request["profile"])
++                or observation.get("adapter_id") != request["adapter_id"]):
+             raise RecipeConflict("RETARGET_TARGET_PROVENANCE_UNVERIFIED")
+         result = self.client.execute("transform_get", [Operation(name="system.observe_controller_targets", arguments={
+             "retarget_observation": observation, "controller_request": request,
+diff --git a/src/cascadeur_complete/cleanup_workflow.py b/src/cascadeur_complete/cleanup_workflow.py
+index 22536865f788f49ec34124f04a4b6f54dee8b01f..8f567c7af34eff8dc9a5ee433053212428c7098c 100644
+--- a/src/cascadeur_complete/cleanup_workflow.py
++++ b/src/cascadeur_complete/cleanup_workflow.py
+@@ -889,6 +889,7 @@
+         from .retargeting import retarget_pose,controller_targets
+         from dataclasses import asdict
+         from .retarget_controller import ADAPTER_ID
++        from .skeletal_fk_controller import ADAPTER_ID as FK_ADAPTER_ID
+         from .motion_solvers import fit_keys
+         self._require_contract("retarget")
+         self._key_layout_digest=None
+@@ -911,12 +912,15 @@
+         channels=tuple(settings.get("target_channels",("position",)))
+         if channels not in (("position",),("rotation",)):
+             raise MotionInputError("COUPLED_CHANNEL_WRITER_UNAVAILABLE","retarget must declare one target channel")
+-        if (self.profile.controller_adapter_id != ADAPTER_ID or channels != ("position",)
+-                or set(self.profile.role_ids) != {"root"}
+-                or settings.get("root_role") != "root" or set(mapping) != {"root"}
+-                or settings.get("end_effector_constraints") or settings.get("target_leg_length_m") is not None):
++        independent=(self.profile.controller_adapter_id == ADAPTER_ID and channels == ("position",)
++            and set(self.profile.role_ids) == {"root"} and settings.get("root_role") == "root"
++            and set(mapping) == {"root"})
++        fk_rotation=(self.profile.controller_adapter_id == FK_ADAPTER_ID and channels == ("rotation",)
++            and set(mapping) == set(self.profile.role_ids))
++        if (not (independent or fk_rotation) or settings.get("end_effector_constraints")
++                or settings.get("target_leg_length_m") is not None):
+             return {"status":"unsupported","reason_codes":["RETARGET_CONTROLLER_SCOPE_UNSUPPORTED"],
+-                    "report":{"detail":"only the qualified independent parentless root position controller is implemented"}}
++                    "report":{"detail":"native-qualified independent position or translation-fixed FK rotation is required; coupled/IK lowering remains unavailable"}}
+         declaration_fields={"root_role","axis_alignment","root_basis","scale","target_root_anchor_m"}
+         if not declaration_fields <= set(settings):
+             return {"status":"unsupported","reason_codes":["MISSING_RETARGET_MAPPING"],
