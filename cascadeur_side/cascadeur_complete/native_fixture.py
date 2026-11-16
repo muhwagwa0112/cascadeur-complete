@@ -24,13 +24,18 @@ def create_disposable_scene(*, retain_on_failure=False):
     scene = manager.create_application_scene()
     _OWNED[id(scene)] = {"scene": scene, "previous": previous, "objects": set()}
     try:
+        assert_current_setup_admission()
         manager.set_current_scene(scene)
         return scene
-    except Exception:
-        if previous is not None: manager.set_current_scene(previous)
-        if not retain_on_failure:
-            manager.remove_application_scene(scene)
-            _OWNED.pop(id(scene), None)
+    except Exception as error:
+        # Finite setup never authorizes closing a native tab, including when
+        # activation fails. Preserve the newly created scene for observation.
+        try:
+            if previous is not None:
+                assert_current_setup_admission()
+                manager.set_current_scene(previous)
+        except Exception as restore_error:
+            error.add_note("Original tab activation unobserved: " + str(restore_error)[:1000])
         raise
 
 

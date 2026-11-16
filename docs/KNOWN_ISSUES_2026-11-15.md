@@ -7,7 +7,23 @@
 
 ## 이번 변경과 관찰 범위
 
-### 최신 추가: R5 전체 목표 재설정과 호스트·브리지 연결
+### 최신 추가: setup 효과 경계와 retirement 재개 보완
+
+원격을 다시 fetch했으며 R5 개선안은 `dffa8f9956a01c15e9db02cee33e490f3569cd05`로 동일하다. R5-01~10 전체 목표를 유지하며 기존 구현 `e53a8f7` 위에서 다음을 보완했다.
+
+- setup의 승인된 부모/step 디렉터리를 물리 ID로 고정하고 매 효과 전에 재확인한다. 원 탭·파일 경로·projection 보존 검사를 private setup context에 묶어 fixture callback 내부에서도 setter 전에 실행한다. 실패 diagnostic 파일도 이 경계를 통과해야 쓰며, fixture 활성화 실패가 탭 자동 삭제로 이어지지 않는다.
+- 명시적 `setup.qualify_geometry_calculation`을 연결했다. 설치 SDK의 소유 self-bound cube와 실제 typed return을 사용하는 관측 코드이며, 새 탭 1개·`.casc` 2개·계산 5회·평가 2회·기존 driver key 변경 1회로 승인 범위를 고정한다. 좌표계/순서 의존성/driver 반영과 read-compute-read를 관측하고 탭·파일을 보존한다. 아직 실앱에서 실행하지 않았고 일반 mesh 계약을 발급하지 않는다.
+- retirement는 동일 승인·계획으로 이미 durable start된 경우에만 만료 뒤 관측 재개를 허용한다. signed component result를 결정된 경로에 보존하고 journal commit 전에 재검증한다. 원 OS attempt/result가 없는 새 host에서는 종료를 재dispatch하지 않는다. 아직 시작하지 않은 만료 계획, 다른 승인·snapshot·head는 거절한다. 실제 종료나 격리는 실행하지 않았다.
+
+**이번 한정 확인:** 프로젝트 `.venv`의 `tests/test_incident_admission.py tests/test_native_probe_retention.py`는 **`5 passed in 1.97s`**다. 같은 lexical 경로의 부모 디렉터리 교체 거절, callback 내부 원 projection 변경 거절, geometry helper의 admission 없는 진입 거절을 포함한다. 최초 시스템 Python 3.11 호출은 패키지 미설치로 collection에 실패했고, 위 결과는 프로젝트 환경에서 실행했다. 실앱 calibration 성공 근거는 아니다.
+
+별도 `tests/test_incident_retirement_resume.py::test_started_retirement_expiry_resumes_evidence_without_os_replay`는 **`1 passed in 1.14s`**다. 실제 임시 authenticated journal/result append·reload를 사용해 만료 전후 missing attempt의 새 실행 금지, never-started 만료·다른 valid-MAC 승인·무관한 head 변경 거절, 저장된 동일 결과 재사용과 원 terminal bytes 보존을 확인했다. OS scope/receipt 검증은 명시적 double이며 실제 Win32 executor는 금지했다. 실제 종료·격리 검증으로 세지 않는다.
+
+**진행을 막는 실제 근거 공백:** 두 legacy unknown의 원 producer PID/creation/image 및 하위·외부 consumer/리소스 전체 범위를 인증하는 issuer가 없어 실행 가능한 retirement 계획을 만들 수 없다. native completion trace에는 이를 소급 복구할 정보가 없다. 직렬화 field-role의 SDK dtype/producer graph는 Update callback에서만 보이며, 현재 readonly Scene에는 graph-only 변경을 인증할 accessor/revision이 없다. 따라서 이름이나 Animation 모드로 tolerance policy를 발급하지 않았다. 새 geometry 관측도 incident가 해소되고 승인된 새 loaded epoch에서 실행해야 하며, 임의 새 root·현재 PID·mock로 대체하지 않는다. 전체 목표는 미완료다.
+
+이번 설치 파일 재조회는 ProductVersion/FileVersion `2026.2.3.0.16863`을 확인했다. 같은 시점의 `Win32_Process` 조회에는 항목이 반환되지 않았다. 이는 앞서 관측한 PID의 정상 종료나 producer closure 증거가 아니며, 앱 종료·재시작·설치 교체·hot reload는 수행하지 않았다.
+
+### 이전 추가: R5 전체 목표 재설정과 호스트·브리지 연결
 
 원격을 다시 fetch해 r5 최신 `dffa8f9`, 구현 branch의 기준 `fc0e98e`를 확인했다. 문서·참조 코드·patch·task 전체를 읽은 뒤 **R5-01~10 전체를 새 목표로 설정**했다. 목표는 원 unknown을 보존하면서 incident admission, 원 시도 완료 판정, 유한 setup 보존, geometry 파일 효과/품질, P0 직렬화와 unbaking 계약을 실제 entry point에 연결하는 것이다. 원격 제안 26개 파일은 `docs/implementation/cascadeur-motion-r5`에 원문으로 보관했으며, 제안 파일 내부의 `not_applied` 등은 작성 당시 상태다. 현재 구현 상태는 이 절을 따른다. 실앱 증거가 필요한 전체 목표는 아직 완료하지 않았다.
 

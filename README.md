@@ -114,14 +114,24 @@ Preparing a plan never approves or executes it. A ready plan requires the
 operator's separate exact approval before `incident_retirement_commit`; retirement
 preserves the original unknown outcome and still requires new-workspace lineage.
 The currently retained legacy incidents lack the required producer closure.
+After a durable start, retrying the same approved plan only observes its retained
+OS attempt or revalidates its signed component result. It cannot dispatch another
+termination after host loss. Expiry still rejects a plan that never started;
+missing original attempt/result evidence leaves an already started plan pending.
 
 When all enrolled incidents permit new work, `setup_prepare` accepts only these
 finite helper IDs: `setup.qualify_native_adapter`,
-`setup.qualify_independent_models`, and
-`setup.qualify_independent_position_writer`. Models must precede the writer in
+`setup.qualify_independent_models`,
+`setup.qualify_independent_position_writer`, and
+`setup.qualify_geometry_calculation`. Models must precede the writer in
 the approved sequence. The plan binds current epoch/full bridge bytes, all domain
 heads, a fresh direct child of the runtime `snapshots` directory, and per-step
-tab/file limits. After reviewing and
+tab/file limits. Physical plan/step directory identities and the original tab's
+projection are rechecked at effect and fixture callback boundaries. The geometry
+prerequisite is bounded to one retained cube tab, two `.casc` files, five geometry
+calculations, two evaluations and one driver mutation. Its observed coordinate
+convention and sequential returns qualify only that owned fixture; they do not
+enable production geometry capture. After reviewing and
 separately approving that exact plan, the operator can issue its local token:
 
 ```powershell

@@ -247,12 +247,18 @@ def verify_component_operator_approval(component, authorization):
     if (context is None or context["component_digest"] != component["component_digest"]
             or context["authorization"] != authorization):
         raise p.EvidenceUnavailable("DURABLE_RETIREMENT_STARTED_CONTEXT_REQUIRED")
+    if not context["observation_only"] and time.time() >= context["expires_at"]:
+        raise p.EvidenceUnavailable("RETIREMENT_NEW_OS_EFFECT_AUTHORITY_EXPIRED")
     return context["operator_approval_digest"]
 
 
+def _evidence_envelope(domain, kind, payload):
+    return store.seal({"schema_version": 1, "kind": kind, "domain": asdict(domain.domain), "payload": payload},
+                      domain.secret, EVIDENCE_PURPOSE)
+
+
 def _publish_evidence(domain, kind, payload):
-    value = store.seal({"schema_version": 1, "kind": kind, "domain": asdict(domain.domain), "payload": payload},
-                       domain.secret, EVIDENCE_PURPOSE)
+    value = _evidence_envelope(domain, kind, payload)
     digest = p.digest(value)
     target = domain.directory / "evidence" / (digest+".json")
     if target.exists():
@@ -263,12 +269,56 @@ def _publish_evidence(domain, kind, payload):
     return digest
 
 
+def _component_result_path(domain, plan_digest, component):
+    p._digest_string(plan_digest, "retirement plan digest")
+    component_digest = p._digest_string(component["component_digest"], "retirement component digest")
+    return domain.directory / "retirement-results" / plan_digest / (component_digest + ".json")
+
+
+def _validate_component_result(domain, plan_digest, approved_ref, component, approval, value):
+    store.exact(value, {"schema_version", "kind", "domain", "payload", "mac"})
+    store.verify(value, domain.secret, EVIDENCE_PURPOSE)
+    payload = store.exact(value["payload"],
+        {"original", "plan_digest", "approved_evidence_digest", "component", "os_receipt"})
+    if (value["schema_version"] != 1 or value["kind"] != "retirement_component_result"
+            or value["domain"] != asdict(domain.domain) or payload["original"] != component["original"]
+            or payload["plan_digest"] != plan_digest or payload["approved_evidence_digest"] != approved_ref
+            or payload["component"] != component or payload["os_receipt"].get("approval_digest") != p.digest(approval)):
+        raise p.PolicyError("DURABLE_RETIREMENT_RESULT_BINDING_DIFFERS")
+    from .incident_resources import verify_retirement_evidence
+    verify_retirement_evidence(payload["os_receipt"], component)
+    return payload
+
+
+def _read_component_result(domain, plan_digest, approved_ref, component, approval):
+    path = _component_result_path(domain, plan_digest, component)
+    if not path.exists():
+        return None
+    store.physical_identity(path)
+    return _validate_component_result(domain, plan_digest, approved_ref, component, approval, store.read(path))
+
+
+def _retain_component_result(domain, plan_digest, approved_ref, component, approval, os_receipt):
+    payload = {"original": component["original"], "plan_digest": plan_digest,
+               "approved_evidence_digest": approved_ref, "component": component, "os_receipt": os_receipt}
+    value = _evidence_envelope(domain, "retirement_component_result", payload)
+    _validate_component_result(domain, plan_digest, approved_ref, component, approval, value)
+    path = _component_result_path(domain, plan_digest, component)
+    try:
+        store.publish_new(path, value)
+    except FileExistsError:
+        previous = _read_component_result(domain, plan_digest, approved_ref, component, approval)
+        if previous != payload:
+            raise p.PolicyError("IMMUTABLE_RETIREMENT_RESULT_DIFFERS")
+    return payload
+
+
 def retirement_commit(root, plan_digest, operator_authorization):
     p._digest_string(plan_digest, "plan digest")
     with store.locked_registry(root) as (registry, stores):
         domain, plan = _find_plan(stores, plan_digest)
         projections = _projections(registry, stores)
-        if (plan["registry_digest"] != p.digest(registry) or plan["expires_at"] <= time.time()
+        if (plan["registry_digest"] != p.digest(registry)
                 or plan["snapshots"] != [{"domain": asdict(value.head.domain), "unresolved_set_digest": value.unresolved_set_digest,
                     "unsealed_effect_request_ids": list(value.unsealed_effect_request_ids)} for value in projections]):
             raise p.PolicyError("RETIREMENT_PLAN_EXPIRED_OR_SNAPSHOT_CHANGED")
@@ -276,9 +326,34 @@ def retirement_commit(root, plan_digest, operator_authorization):
             raise p.EvidenceUnavailable("RETIREMENT_PLAN_NOT_EXECUTABLE: " +
                 ",".join(item["code"] for item in plan["blockers"]))
         approval = _verify_operator(stores, plan_digest, plan, operator_authorization)
+        selected = [(active, item, component) for active, projection in zip(stores, projections)
+                    for item in projection.incidents for component in plan["components"]
+                    if component["original"] == asdict(item.original)]
+        if (not selected or len(selected) != len(plan["components"])
+                or len({item.original for _, item, _ in selected}) != len(selected)
+                or [component["original"] for component in plan["components"]] != plan["originals"]):
+            raise p.PolicyError("RETIREMENT_SELECTED_COMPONENTS_DIFFER")
+        approved = {}
+        resuming = False
+        for active, item, component in selected:
+            ref = p.digest(_evidence_envelope(active, "approved_retirement_plan", {
+                "original": asdict(item.original), "plan_digest": plan_digest,
+                "operator_authorization": approval, "component": component}))
+            approved[item.original] = ref
+            if item.retirement_plan is not None:
+                expected = p.ApprovedRetirementPlan(item.original, ref, plan_digest,
+                    p.digest(approval), p.digest(component["resources"]))
+                if item.retirement_plan != expected:
+                    raise p.PolicyError("RETIREMENT_ALREADY_STARTED_WITH_DIFFERENT_APPROVAL")
+                resuming = True
+        if len(plan["heads"]) != len(stores):
+            raise p.PolicyError("RETIREMENT_PLAN_HEAD_COVERAGE_DIFFERS")
         for active, projection, baseline_head in zip(stores, projections, plan["heads"]):
             journal = active.journal()
             seq = baseline_head["seq"]
+            if (baseline_head["domain"] != asdict(active.domain) or type(seq) is not int
+                    or not 0 <= seq <= len(journal.entries) or journal.head != projection.head):
+                raise p.PolicyError("RETIREMENT_PLAN_HEAD_CHANGED")
             anchor = p.entry_digest(journal.entries[seq-1]) if seq else p.ZERO_DIGEST
             if anchor != baseline_head["event_digest"]:
                 raise p.PolicyError("RETIREMENT_PLAN_HEAD_CHANGED")
@@ -287,41 +362,47 @@ def retirement_commit(root, plan_digest, operator_authorization):
                     (p.EventKind.REGISTER, p.EventKind.RETIRE_BEGIN, p.EventKind.RETIRE_COMMIT)
                         or event.body.kind != p.EventKind.REGISTER and event.body.plan_digest != plan_digest):
                     raise p.PolicyError("UNRELATED_INCIDENT_EVENT_AFTER_PLAN")
+        if not resuming and plan["expires_at"] <= time.time():
+            raise p.PolicyError("RETIREMENT_PLAN_EXPIRED_OR_SNAPSHOT_CHANGED")
         evidence = PersistedEvidence(stores)
-        selected = [(active, item, component) for active, projection in zip(stores, projections)
-                    for item in projection.incidents for component in plan["components"]
-                    if component["original"] == asdict(item.original)]
-        if len(selected) != len(plan["components"]):
-            raise p.PolicyError("RETIREMENT_SELECTED_COMPONENTS_DIFFER")
         # Every domain is durably fenced before the first approved OS effect.
-        approved = {}
+        fenced = resuming
         for active, item, component in selected:
+            if not fenced and plan["expires_at"] <= time.time():
+                raise p.PolicyError("RETIREMENT_PLAN_EXPIRED_OR_SNAPSHOT_CHANGED")
             ref = _publish_evidence(active, "approved_retirement_plan", {"original": asdict(item.original),
                 "plan_digest": plan_digest, "operator_authorization": approval, "component": component})
-            approved[item.original] = ref
+            if ref != approved[item.original]:
+                raise p.PolicyError("APPROVED_RETIREMENT_EVIDENCE_DIFFERS")
             if item.retirement_plan is not None:
                 if item.retirement_plan.evidence_digest != ref:
                     raise p.PolicyError("RETIREMENT_ALREADY_STARTED_WITH_DIFFERENT_APPROVAL")
                 continue
             if not any(e.body.kind == p.EventKind.REGISTER and e.body.original == item.original for e in active.journal().entries):
                 active.append(p.EventKind.REGISTER, item.original, evidence=evidence, classify=classify)
+            if not fenced and plan["expires_at"] <= time.time():
+                raise p.PolicyError("RETIREMENT_PLAN_EXPIRED_OR_SNAPSHOT_CHANGED")
             active.append(p.EventKind.RETIRE_BEGIN, item.original, evidence_digest=ref, plan_digest=plan_digest,
                           evidence=evidence, classify=classify)
-        from .incident_resources import execute_approved_retirement
+            fenced = True
+        from .incident_resources import execute_approved_retirement, observe_approved_retirement
         results = []
         for active, item, component in selected:
             if item.retirement is not None:
                 results.append(asdict(item.retirement))
                 continue
-            _CONTROL.retirement = {"component_digest": component["component_digest"],
-                "authorization": approval, "operator_approval_digest": p.digest(approval)}
-            try:
-                os_receipt = execute_approved_retirement(component, approval)
-            finally:
-                _CONTROL.retirement = None
-            ref = _publish_evidence(active, "retirement_closure", {"original": asdict(item.original),
-                "plan_digest": plan_digest, "approved_evidence_digest": approved[item.original],
-                "component": component, "os_receipt": os_receipt})
+            payload = _read_component_result(active, plan_digest, approved[item.original], component, approval)
+            if payload is None:
+                _CONTROL.retirement = {"component_digest": component["component_digest"],
+                    "authorization": approval, "operator_approval_digest": p.digest(approval),
+                    "observation_only": resuming, "expires_at": plan["expires_at"]}
+                try:
+                    executor = observe_approved_retirement if resuming else execute_approved_retirement
+                    os_receipt = executor(component, approval)
+                finally:
+                    _CONTROL.retirement = None
+                payload = _retain_component_result(active, plan_digest, approved[item.original], component, approval, os_receipt)
+            ref = _publish_evidence(active, "retirement_closure", payload)
             active.append(p.EventKind.RETIRE_COMMIT, item.original, evidence_digest=ref, plan_digest=plan_digest,
                           evidence=evidence, classify=classify)
             results.append({"original": asdict(item.original), "evidence_digest": ref, "disposition": "retired_unresolved"})

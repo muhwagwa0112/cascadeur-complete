@@ -23,7 +23,8 @@ EVIDENCE_PURPOSE = b"cascadeur-complete/incident-evidence/v1\0"
 _LOCAL = threading.local()
 SETUP_IDS = {"setup.qualify_native_adapter": (2, 5),
              "setup.qualify_independent_models": (1, 2),
-             "setup.qualify_independent_position_writer": (1, 2)}
+             "setup.qualify_independent_position_writer": (1, 2),
+             "setup.qualify_geometry_calculation": (1, 2)}
 
 
 class PersistedEvidence:
@@ -257,6 +258,9 @@ class VerifiedSetupStepGrant:
     workspace_path: str
     maximum_new_tabs: int
     maximum_casc_files: int
+    maximum_geometry_calculations: int | None = None
+    maximum_evaluations: int | None = None
+    maximum_driver_mutations: int | None = None
 
 
 def assert_setup_admission(setup_id, setup_invocation_ref=None):
@@ -267,7 +271,11 @@ def assert_setup_admission(setup_id, setup_invocation_ref=None):
             or setup_invocation_ref is not None and setup_invocation_ref != context["invocation_ref"]
             or not isinstance(context["grant"], VerifiedSetupStepGrant)):
         raise p.EvidenceUnavailable("AUTHENTICATED_SETUP_INVOCATION_REQUIRED")
+    if store.physical_identity(context["plan_workspace"]) != context["plan_workspace_identity"]:
+        raise p.PolicyError("SETUP_PLAN_WORKSPACE_IDENTITY_CHANGED")
     workspace = Path(context["grant"].workspace_path)
+    if workspace.parent != Path(context["plan_workspace"]):
+        raise p.PolicyError("SETUP_STEP_OUTSIDE_PLAN_WORKSPACE")
     if workspace.exists():
         identity = store.physical_identity(workspace)
         if context.get("workspace_identity") is None:
@@ -276,7 +284,25 @@ def assert_setup_admission(setup_id, setup_invocation_ref=None):
             raise p.PolicyError("SETUP_WORKSPACE_IDENTITY_CHANGED")
     elif context.get("workspace_identity") is not None:
         raise p.PolicyError("SETUP_WORKSPACE_REMOVED")
+    source_guard = context.get("source_guard")
+    if source_guard is not None:
+        source_guard()
     return context["grant"]
+
+
+def _bind_setup_source_guard(setup_id, guard):
+    """Install the retained helper's private original-scene guard once.
+
+    No caller-supplied callable crosses a wire boundary. Fixture callbacks use
+    this same guard through assert_current_setup_admission, independently of
+    the ordinary guarded_runtime request/source context.
+    """
+    assert_setup_admission(setup_id)
+    context = _LOCAL.setup
+    if not callable(guard) or context.get("source_guard") is not None:
+        raise p.PolicyError("SETUP_SOURCE_GUARD_ALREADY_BOUND_OR_INVALID")
+    guard()
+    context["source_guard"] = guard
 
 
 def assert_current_setup_admission():
@@ -304,14 +330,18 @@ def dispatch_setup(request, sidecar):
     # The exact fresh plan directory is an approved effect. Each helper owns
     # one finite child, so its fixture paths remain under runtime snapshots.
     assert_request_admission()
-    Path(plan["workspace"]).mkdir()
+    plan_workspace = Path(plan["workspace"])
+    plan_workspace.mkdir()
+    plan_workspace_identity = store.physical_identity(plan_workspace)
     results = []
     try:
         for step in plan["steps"]:
             setup_id = step["operation"]
             _LOCAL.setup = {"step": setup_id, "invocation_ref": request["request_id"],
-                "workspace_identity": None,
-                "grant": VerifiedSetupStepGrant(step["workspace_path"], step["maximum_new_tabs"], step["maximum_casc_files"])}
+                "workspace_identity": None, "source_guard": None,
+                "plan_workspace": str(plan_workspace), "plan_workspace_identity": plan_workspace_identity,
+                "grant": VerifiedSetupStepGrant(step["workspace_path"], step["maximum_new_tabs"],
+                    step["maximum_casc_files"], **(step["semantic_limits"] or {}))}
             assert_setup_admission(setup_id)
             if setup_id == "setup.qualify_native_adapter":
                 from .native_adapters import qualify_disposable
@@ -322,6 +352,9 @@ def dispatch_setup(request, sidecar):
             elif setup_id == "setup.qualify_independent_position_writer":
                 from .native_independent_position import qualify_independent_position_writer
                 result = qualify_independent_position_writer()
+            elif setup_id == "setup.qualify_geometry_calculation":
+                from .native_geometry_qualification import qualify_geometry_calculation
+                result = qualify_geometry_calculation()
             else:
                 raise p.PolicyError("UNKNOWN_SETUP_HELPER")
             results.append({"operation": setup_id, "result": result})

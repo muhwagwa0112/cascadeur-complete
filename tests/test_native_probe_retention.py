@@ -70,7 +70,15 @@ def test_retention_requires_admission_and_never_closes_or_replays(tmp_path, monk
     def admit(*_args):
         if not state["admitted"]:
             raise ValueError("SETUP_CONTEXT_UNAVAILABLE")
+        if state.get("source_guard") is not None:
+            state["source_guard"]()
         return types.SimpleNamespace(workspace_path=str(state["workspace"]), maximum_new_tabs=2, maximum_casc_files=5)
+
+    def bind_source(_setup_id, guard):
+        admit()
+        assert state.get("source_guard") is None
+        guard()
+        state["source_guard"] = guard
 
     def save(scene, path):
         path.write_bytes(b"fixture")
@@ -86,7 +94,8 @@ def test_retention_requires_admission_and_never_closes_or_replays(tmp_path, monk
     guards = module("retention_boundary.guarded_runtime", RUNTIME_EPOCH="epoch", LOADED_FINGERPRINT="bytes",
         assert_loaded_package=lambda: None, scene_instance=lambda scene: {"scene_instance_id": scene.identity})
     module("retention_boundary.runtime", runtime_root=lambda: tmp_path, _domain_scene=lambda scene: scene)
-    module("retention_boundary.incident_admission", assert_setup_admission=admit, assert_current_setup_admission=admit)
+    module("retention_boundary.incident_admission", assert_setup_admission=admit, assert_current_setup_admission=admit,
+        _bind_setup_source_guard=bind_source)
     module("retention_boundary.native_adapters", installed_build=lambda: "exact-build", _save_observed=save)
     module("retention_boundary.native_scene_reader", read_scene=lambda scene: dict(scene.projection))
 
@@ -108,6 +117,7 @@ def test_retention_requires_admission_and_never_closes_or_replays(tmp_path, monk
     state["admitted"] = True
 
     def start(kind):
+        state["source_guard"] = None
         plan_workspace = tmp_path / "snapshots" / kind
         plan_workspace.mkdir()
         state["workspace"] = plan_workspace / "0"
@@ -142,6 +152,12 @@ def test_retention_requires_admission_and_never_closes_or_replays(tmp_path, monk
 
     changed, _ = start("native_adapter")
     original.projection["changed"] = True
+    # Original source validation must happen inside fixture callbacks too,
+    # before the caller's setter and before retention diagnostic file writes.
+    invoked = []
+    with pytest.raises(ValueError, match="QUALIFICATION_ORIGINAL_SCENE_CHANGED"):
+        fixture._modify(lambda _label, callback: callback(), "bounded callback", lambda: invoked.append(True))
+    assert not invoked
     with pytest.raises(ValueError, match="RETENTION_UNVERIFIED"):
         changed.finish()
     with pytest.raises(ValueError, match="RETENTION_UNVERIFIED"):

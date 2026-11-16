@@ -136,7 +136,8 @@ def test_changed_head_and_copied_auth_domain_fail_closed(tmp_path, monkeypatch):
         persistence.enroll_domains([root, other, duplicate])
 
 
-def test_exact_setup_dispatch_owns_parent_and_step_directory(tmp_path, monkeypatch):
+@pytest.mark.parametrize("replace_parent", [False, True])
+def test_exact_setup_dispatch_owns_parent_and_step_directory(tmp_path, monkeypatch, replace_parent):
     from cascadeur_complete.incident_setup import prepare, approve_local
     root, _ = _fixture(tmp_path, monkeypatch)
     queue = AtomicQueue(RuntimePaths.discover(root))
@@ -147,8 +148,10 @@ def test_exact_setup_dispatch_owns_parent_and_step_directory(tmp_path, monkeypat
         adapters = importlib.import_module("_finite_setup_bridge.native_adapters")
         models = importlib.import_module("_finite_setup_bridge.native_interpolation_qualification")
         writer = importlib.import_module("_finite_setup_bridge.native_independent_position")
+        geometry = importlib.import_module("_finite_setup_bridge.native_geometry_qualification")
         for helper in (adapters.qualify_disposable, models.ensure_independent_models,
-                       models.qualify_independent_models, writer.qualify_independent_position_writer):
+                       models.qualify_independent_models, writer.qualify_independent_position_writer,
+                       geometry.qualify_geometry_calculation):
             with pytest.raises(ValueError, match="NATIVE_ADMISSION_CONTEXT_REQUIRED"):
                 helper()
         workspace = root / "snapshots" / "approved-setup"
@@ -163,9 +166,14 @@ def test_exact_setup_dispatch_owns_parent_and_step_directory(tmp_path, monkeypat
             path = Path(grant.workspace_path)
             assert path == workspace / "0" and path.parent.is_dir() and not path.exists()
             assert (grant.maximum_new_tabs, grant.maximum_casc_files) == (2, 5)
+            calls.append(str(path))
+            if replace_parent:
+                workspace.rename(workspace.with_name("retained-original-workspace"))
+                workspace.mkdir()
+                # Same lexical approved path cannot substitute another directory.
+                native.assert_setup_admission("setup.qualify_native_adapter")
             path.mkdir()
             native.assert_setup_admission("setup.qualify_native_adapter")
-            calls.append(str(path))
             return {"fixture_boundary_only": True}
 
         monkeypatch.setattr(adapters, "qualify_disposable", finite_helper)
@@ -177,5 +185,10 @@ def test_exact_setup_dispatch_owns_parent_and_step_directory(tmp_path, monkeypat
         queue.submit(request)
         payload = request.model_dump(mode="json")
         result = runtime.execute_request(None, payload)
-        assert result["ok"] and result["outcome"] == "succeeded"
+        if replace_parent:
+            assert not result["ok"] and result["outcome"] == "outcome_unknown"
+            assert "SETUP_PLAN_WORKSPACE_IDENTITY_CHANGED" in result["error_message"]
+            assert not (workspace / "0").exists()
+        else:
+            assert result["ok"] and result["outcome"] == "succeeded"
         assert runtime.execute_request(None, payload) == result and len(calls) == 1

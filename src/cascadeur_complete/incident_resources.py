@@ -553,6 +553,8 @@ def execute_approved_retirement(plan, authorization):
                         _fail("ORIGINAL_PROCESS_IDENTITY_CHANGED")
                 if _scope(authority, plan["producer_manifest"], plan["original"]) != plan["scope_facts"]:
                     _fail("PRODUCER_SCOPE_CHANGED_BEFORE_TERMINATION")
+                if authority.approval(_clone(plan), _clone(authorization)) != approval_digest:
+                    _fail("RETIREMENT_APPROVAL_CHANGED_BEFORE_TERMINATION")
                 attempt["started"] = True
                 for handle in attempt["handles"]:
                     if handle.kernel.WaitForSingleObject(handle.value, 0) == 0x102:
@@ -579,6 +581,22 @@ def execute_approved_retirement(plan, authorization):
         body["os_receipt_mac"] = _receipt_mac(authority, body)
         attempt["payload"] = _clone(body)
         return body
+
+
+@_unavailable_boundary
+def observe_approved_retirement(plan, authorization):
+    """Observe an already-started local attempt; never open a new termination attempt.
+
+    A durable RETIRE_BEGIN fence alone cannot establish which OS calls ran.
+    After host loss, control must revalidate its code-issued durable result or
+    retain pending/unknown; PID absence cannot recreate this private attempt.
+    """
+    plan, _ = _validate_plan(plan)
+    with _LOCK:
+        attempt = _EXECUTIONS.get(plan["component_digest"])
+        if attempt is None or attempt.get("started") is not True:
+            _fail("ORIGINAL_RETIREMENT_ATTEMPT_OBSERVATION_UNAVAILABLE")
+        return execute_approved_retirement(plan, authorization)
 
 
 @_unavailable_boundary

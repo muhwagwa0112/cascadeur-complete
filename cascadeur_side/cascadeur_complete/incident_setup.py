@@ -20,7 +20,10 @@ _HELPERS = {
     "setup.qualify_native_adapter": ("native_adapters.py", 2, 5),
     "setup.qualify_independent_models": ("native_interpolation_qualification.py", 1, 2),
     "setup.qualify_independent_position_writer": ("native_independent_position.py", 1, 2),
+    "setup.qualify_geometry_calculation": ("native_geometry_qualification.py", 1, 2),
 }
+_SEMANTIC_LIMITS = {"setup.qualify_geometry_calculation": {
+    "maximum_geometry_calculations": 5, "maximum_evaluations": 2, "maximum_driver_mutations": 1}}
 
 
 def _bridge_directory():
@@ -79,7 +82,8 @@ def prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace):
             "workspace": str(workspace), "workspace_parent_identity": parent,
             "created_at": now, "expires_at": now+300,
             "steps": [{"operation": step, "workspace_path": str(workspace / str(index)),
-                       "maximum_new_tabs": _HELPERS[step][1], "maximum_casc_files": _HELPERS[step][2]}
+                       "maximum_new_tabs": _HELPERS[step][1], "maximum_casc_files": _HELPERS[step][2],
+                       "semantic_limits": _SEMANTIC_LIMITS.get(step)}
                       for index, step in enumerate(steps)]}
         envelope = store.seal(plan, active.secret, PURPOSE)
         digest = p.digest(envelope)

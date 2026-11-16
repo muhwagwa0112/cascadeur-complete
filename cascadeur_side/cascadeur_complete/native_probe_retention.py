@@ -16,16 +16,19 @@ _LIMITS = {
     "native_adapter": {"new_tabs": 2, "files": 5},
     "finite_models": {"new_tabs": 1, "files": 2},
     "position_writer": {"new_tabs": 1, "files": 2},
+    "geometry_calculation": {"new_tabs": 1, "files": 2},
 }
 _SETUP_OPERATIONS = {
     "native_adapter": "setup.qualify_native_adapter",
     "finite_models": "setup.qualify_independent_models",
     "position_writer": "setup.qualify_independent_position_writer",
+    "geometry_calculation": "setup.qualify_geometry_calculation",
 }
 _FILENAMES = {
     "native_adapter": {"source.casc", "backup.casc", "working.casc", "next-backup.casc", "next-working.casc"},
     "finite_models": {"fixture-before.casc", "fixture-after.casc"},
     "position_writer": {"fixture-before.casc", "fixture-after.casc"},
+    "geometry_calculation": {"fixture-before.casc", "fixture-after.casc"},
 }
 
 
@@ -74,7 +77,7 @@ class RetainedProbe:
         self.directory = Path(admission.workspace_path).resolve()
         self.grant_limits = admission.maximum_new_tabs, admission.maximum_casc_files
         if (self.directory.parent.parent != (rt.runtime_root() / "snapshots").resolve()
-                or self.directory.name not in {"0", "1", "2"}
+                or self.directory.name not in {"0", "1", "2", "3"}
                 or any(type(value) is not int for value in self.grant_limits)
                 or self.grant_limits[0] < self.limit["new_tabs"]
                 or self.grant_limits[1] < self.limit["files"]):
@@ -86,8 +89,22 @@ class RetainedProbe:
             raise ValueError("QUALIFICATION_ORIGINAL_SCENE_UNOBSERVED")
         if rt._domain_scene(self.previous).model_viewer().get_objects():
             raise ValueError("QUALIFICATION_REQUIRES_EMPTY_CURRENT_SCENE")
-        self.original_projection = read_scene(self.previous)
+        self.original_projection = _copy(read_scene(self.previous))
         self.original_path = str(self.previous.get_path_name())
+        # Capture these references in the request-private guard, rather than
+        # retaining native wrappers in the cached result after the step ends.
+        manager, previous = self.manager, self.previous
+        inventory, paths = tuple(self.inventory), tuple(str(item.get_path_name()) for item in self.inventory)
+        original_projection, original_path, context = self.original_projection, self.original_path, self.context
+        def original_unchanged():
+            live = list(manager.scenes())
+            if (context != _context()
+                    or not all(any(item is value for item in live) for value in inventory)
+                    or tuple(str(item.get_path_name()) for item in inventory) != paths
+                    or str(previous.get_path_name()) != original_path
+                    or read_scene(previous) != original_projection):
+                raise ValueError("QUALIFICATION_ORIGINAL_SCENE_CHANGED")
+        incident_admission._bind_setup_source_guard(self.setup_operation, original_unchanged)
         self.identified, self.finished, self.retention_ok, self.result = [], False, False, None
         self.public = {
             "schema_version": 1, "qualification_id": str(uuid.uuid4()), "kind": kind,
@@ -104,6 +121,7 @@ class RetainedProbe:
         # cannot trigger a new UUID/workspace or another native attempt.
         _ATTEMPTS[kind] = self
         self.directory.mkdir()
+        incident_admission.assert_setup_admission(self.setup_operation)
 
     def before_effect(self):
         """Recheck the claimed helper; this never claims/consumes another token."""
@@ -229,6 +247,10 @@ class RetainedProbe:
             self.public["retention_status"] = "observed" if self.retention_ok else "unverified"
             self.public["qualification_error"] = None if error is None else str(error)[:1000]
             try:
+                # A failed experiment still cannot write through a replaced
+                # directory or an invalidated admission/source guard.
+                from . import incident_admission
+                incident_admission.assert_setup_admission(self.setup_operation)
                 payload = json.dumps(self.public, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
                 with (self.directory / "retention.json").open("xb") as stream:
                     stream.write(payload)

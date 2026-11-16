@@ -61,10 +61,12 @@ def validate_arguments(arguments):
 
 
 def geometry_contract_status():
+    from .native_geometry_qualification import calibration_status
     return {"qualified": False, "code": "GEOMETRY_CALCULATION_CONTRACT_UNQUALIFIED",
         "missing": ["known_transform_coordinate_calibration", "operation_correlated_synchronous_calculation",
                     "qualified_dependency_and_transform_readers"],
-        "runtime_epoch": guards.RUNTIME_EPOCH, "runtime_fingerprint": guards.LOADED_FINGERPRINT}
+        "runtime_epoch": guards.RUNTIME_EPOCH, "runtime_fingerprint": guards.LOADED_FINGERPRINT,
+        "prerequisite_calibration": calibration_status()}
 
 
 def require_geometry_contract(scene, projection, arguments):
