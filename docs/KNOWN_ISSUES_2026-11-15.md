@@ -7,6 +7,14 @@
 
 ## 이번 변경과 관찰 범위
 
+### 실앱 전환 대기: 열린 원 탭과 새 코드의 loaded epoch
+
+Computer Use로 실제 Cascadeur 창을 읽기 전용 확인했다. 창 제목은 `artifacts/native-r4/isolated-runtime/snapshots/guarded-spaced-key-insertion-8e409ec0-0054-4982-a654-ce04d572c37c/working.casc`이며 `trial-2`, `trial-3`, `source`, `untitled (1)`, `evaluated-working`, `source`, `working` 등 여러 탭이 보인다. 제목이나 화면만으로 각 탭의 저장 여부를 확정하지 않았다. 창을 전면에 표시한 것 외에 클릭·저장·탭 전환·닫기·재시작은 수행하지 않았다.
+
+isolated runtime의 실제 pump PID **2328**과 CIM의 `cascadeur.exe` creation **2026-11-16T06:14:42.902727+09:00**가 일치했다. 조회 당시 heartbeat age는 **0.30초**, `busy:false`, `last_error:"package changed: clean Cascadeur restart required"`였다. 살아 있는 이전 runtime이 코드 변경을 감지한 상태이므로 새 bytes의 native qualification을 추가 queue 요청이나 hot reload로 대신하지 않는다. 기본 runtime root에는 현재 state/snapshots/logs만 있고 source installer의 최종 `src/.venv` 설치는 아직 없다. 기존 Python 설정의 Path는 빈 목록이다. 이는 현재 실행 중인 bridge의 정확한 import 경로 전체를 증명하지 않는다.
+
+실제 전환 순서는 **사용자가 원 탭의 저장 위치/보존을 결정하고 앱 정상 종료 → source `scripts/install.ps1 -SkipCodexRegistration`로 기본 runtime 및 두 user-script code target 교체 → 앱 정상 시작 및 새 fingerprint/epoch metadata 확인 → 정확한 유한 fixture 계획 prepare → 별도 로컬 operator 검토·승인 → bounded setup/continuation**이다. 설치는 runtime/state/snapshots/logs의 기존 물리 ID와 인증 상태를 보존하며 전역 Codex 등록을 변경하지 않는 경로를 사용한다. 정상 종료 자체나 이 순서의 열람은 legacy unknown의 위험 수용 승인, 종료/격리/비간섭 증거를 뜻하지 않는다. 별도 독립 환경의 실제 supervisor/transport/custody 근거도 아직 제공되지 않았다. 이 전제 변화 전에는 남은 실앱 qualification을 진행할 수 없으며 전체 완료로 처리하지 않는다.
+
 ### 후속 보완: native Update 반환 확인과 unbaking 설치 위치 구체화
 
 설치 `csc/domain/__init__.pyi:293`의 `Scene.modify_update(...)->bool` 계약과 실제 binding을 대조해, `bind_native_update_runner.invoke`가 기존 `handler_registry.transact`의 반환을 버리던 연결을 수정했다. 이제 literal `True` 반환이 없으면 `UPDATE_NATIVE_TRANSACTION_ACCEPTANCE_UNOBSERVED`로 private snapshot 발급 전에 거절한다. 콜백이 끝났다는 사실만으로 native transaction acceptance를 대신하지 않는다. `False/None`의 rollback·완료 의미는 선언만으로 확정하지 않았다. 그룹/interface/typed Data 접근의 이번 한정 대조에서는 추가 method/signature 불일치가 발견되지 않았지만 실제 callback 인자·no-yield·반환 후 안정성 및 authored/derived storage는 여전히 실앱 근거가 필요하다.
