@@ -268,16 +268,20 @@ def checkpoint(scene, arguments, request, adapter):
     working.parent.mkdir(parents=True, exist_ok=True)
     from .native_scene_adapter import NativeSceneAdapter
     serialization_anchor = None
+    def phase_guard():
+        current_admission()
+        if target is not scene:
+            original_unchanged()
     if isinstance(adapter, NativeSceneAdapter):
         from .native_serialization import pin_reference, compare_with_private_policy
-        serialization_anchor = pin_reference(target)
+        serialization_anchor = pin_reference(target, phase_guard=phase_guard, expected_projection=expected_target)
     current_admission()
     checkpoint_file = _save_observed(target, backup)
-    checkpoint_observation = (compare_with_private_policy(target, serialization_anchor, phase="checkpoint_save")
+    checkpoint_observation = (compare_with_private_policy(target, serialization_anchor, phase="checkpoint_save", phase_guard=phase_guard)
                               if serialization_anchor is not None else None)
     current_admission()
     working_file = _save_observed(target, working)
-    working_observation = (compare_with_private_policy(target, serialization_anchor, phase="working_save")
+    working_observation = (compare_with_private_policy(target, serialization_anchor, phase="working_save", phase_guard=phase_guard)
                            if serialization_anchor is not None else None)
     saved_projection = reader(target)
     if ((serialization_anchor is None and saved_projection != expected_target)

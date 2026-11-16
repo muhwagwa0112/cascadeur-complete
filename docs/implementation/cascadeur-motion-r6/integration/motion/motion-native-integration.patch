@@ -1,0 +1,2405 @@
+diff --git a/cascadeur_side/cascadeur_complete/incident_admission.py b/cascadeur_side/cascadeur_complete/incident_admission.py
+--- a/cascadeur_side/cascadeur_complete/incident_admission.py
++++ b/cascadeur_side/cascadeur_complete/incident_admission.py
+@@ -24,7 +24,8 @@
+ SETUP_IDS = {"setup.qualify_native_adapter": (2, 5),
+              "setup.qualify_independent_models": (1, 2),
+              "setup.qualify_independent_position_writer": (1, 2),
+-             "setup.qualify_geometry_calculation": (1, 2)}
++             "setup.qualify_geometry_calculation": (1, 2),
++             "setup.qualify_owned_pair_geometry": (1, 2)}
+ 
+ 
+ class PersistedEvidence:
+@@ -261,6 +262,7 @@
+     maximum_geometry_calculations: int | None = None
+     maximum_evaluations: int | None = None
+     maximum_driver_mutations: int | None = None
++    maximum_update_graph_captures: int | None = None
+ 
+ 
+ def assert_setup_admission(setup_id, setup_invocation_ref=None):
+@@ -352,6 +354,9 @@
+             elif setup_id == "setup.qualify_independent_position_writer":
+                 from .native_independent_position import qualify_independent_position_writer
+                 result = qualify_independent_position_writer()
++            elif setup_id == "setup.qualify_owned_pair_geometry":
++                from .native_owned_pair_binding import qualify_owned_pair_geometry
++                result = qualify_owned_pair_geometry()
+             elif setup_id == "setup.qualify_geometry_calculation":
+                 from .native_geometry_qualification import qualify_geometry_calculation
+                 result = qualify_geometry_calculation()
+diff --git a/cascadeur_side/cascadeur_complete/incident_effects.py b/cascadeur_side/cascadeur_complete/incident_effects.py
+--- a/cascadeur_side/cascadeur_complete/incident_effects.py
++++ b/cascadeur_side/cascadeur_complete/incident_effects.py
+@@ -20,7 +20,8 @@
+ def classify_effect(operation_name: str, normalized_arguments: dict | None = None) -> str:
+     args = normalized_arguments or {}
+     if operation_name == "system.observe_geometry_capture":
+-        return "file"
++        # The owned-pair backend observes its graph inside an admitted Update.
++        return "mixed"
+     if operation_name == "animation.interpolation_refresh":
+         return "evaluation"
+     if operation_name == "animation.transform_get" and args.get("refresh", False):
+diff --git a/cascadeur_side/cascadeur_complete/incident_setup.py b/cascadeur_side/cascadeur_complete/incident_setup.py
+--- a/cascadeur_side/cascadeur_complete/incident_setup.py
++++ b/cascadeur_side/cascadeur_complete/incident_setup.py
+@@ -21,9 +21,12 @@
+     "setup.qualify_independent_models": ("native_interpolation_qualification.py", 1, 2),
+     "setup.qualify_independent_position_writer": ("native_independent_position.py", 1, 2),
+     "setup.qualify_geometry_calculation": ("native_geometry_qualification.py", 1, 2),
++    "setup.qualify_owned_pair_geometry": ("native_owned_pair_binding.py", 1, 2),
+ }
+ _SEMANTIC_LIMITS = {"setup.qualify_geometry_calculation": {
+-    "maximum_geometry_calculations": 5, "maximum_evaluations": 2, "maximum_driver_mutations": 1}}
++    "maximum_geometry_calculations": 5, "maximum_evaluations": 2, "maximum_driver_mutations": 1},
++    "setup.qualify_owned_pair_geometry": {"maximum_geometry_calculations": 10,
++        "maximum_evaluations": 2, "maximum_driver_mutations": 1, "maximum_update_graph_captures": 2}}
+ 
+ 
+ def _bridge_directory():
+diff --git a/cascadeur_side/cascadeur_complete/native_adapters.py b/cascadeur_side/cascadeur_complete/native_adapters.py
+--- a/cascadeur_side/cascadeur_complete/native_adapters.py
++++ b/cascadeur_side/cascadeur_complete/native_adapters.py
+@@ -268,16 +268,20 @@
+     working.parent.mkdir(parents=True, exist_ok=True)
+     from .native_scene_adapter import NativeSceneAdapter
+     serialization_anchor = None
++    def phase_guard():
++        current_admission()
++        if target is not scene:
++            original_unchanged()
+     if isinstance(adapter, NativeSceneAdapter):
+         from .native_serialization import pin_reference, compare_with_private_policy
+-        serialization_anchor = pin_reference(target)
++        serialization_anchor = pin_reference(target, phase_guard=phase_guard, expected_projection=expected_target)
+     current_admission()
+     checkpoint_file = _save_observed(target, backup)
+-    checkpoint_observation = (compare_with_private_policy(target, serialization_anchor, phase="checkpoint_save")
++    checkpoint_observation = (compare_with_private_policy(target, serialization_anchor, phase="checkpoint_save", phase_guard=phase_guard)
+                               if serialization_anchor is not None else None)
+     current_admission()
+     working_file = _save_observed(target, working)
+-    working_observation = (compare_with_private_policy(target, serialization_anchor, phase="working_save")
++    working_observation = (compare_with_private_policy(target, serialization_anchor, phase="working_save", phase_guard=phase_guard)
+                            if serialization_anchor is not None else None)
+     saved_projection = reader(target)
+     if ((serialization_anchor is None and saved_projection != expected_target)
+diff --git a/cascadeur_side/cascadeur_complete/native_checkpoint_restore.py b/cascadeur_side/cascadeur_complete/native_checkpoint_restore.py
+--- a/cascadeur_side/cascadeur_complete/native_checkpoint_restore.py
++++ b/cascadeur_side/cascadeur_complete/native_checkpoint_restore.py
+@@ -326,7 +326,7 @@
+ def _restore_native(scene, anchor, working):
+     """The same complete native primitive is used by qualification and dispatch."""
+     from .native_adapters import _WORKSPACES, _save_observed
+-    from .native_project_io import load_project_copy
++    from .native_serialization_binding import load_checkpoint_copy, bind_completed_clone
+     original_projection, original_path = read_scene(scene), str(scene.get_path_name())
+     def original_unchanged():
+         if read_scene(scene) != original_projection or str(scene.get_path_name()) != original_path:
+@@ -339,12 +339,10 @@
+     fixed = anchor.get("fixed_anchor")
+     serialization = None
+     try:
+-        target, load_observation = load_project_copy(path, working,
+-            expected_sha256=anchor["manifest"]["sha256"], expected_length=anchor["manifest"]["bytes"],
+-            source_guard=original_unchanged)
++        target, load_observation = load_checkpoint_copy(anchor, scene, working, source_guard=original_unchanged)
+         if fixed is not None:
+             from .native_serialization import compare_with_private_policy
+-            compare_with_private_policy(target, fixed["immutable_anchor"], phase="project_load")
++            compare_with_private_policy(target, fixed["immutable_anchor"], phase="project_load", phase_guard=original_unchanged)
+         elif read_scene(target) != anchor["projection"]:
+             raise ValueError("RECOVERY_NATIVE_READBACK_DIFFERS")
+         from .incident_admission import assert_request_admission
+@@ -352,7 +350,7 @@
+         original_unchanged()
+         saved = _save_observed(target, working)
+         if fixed is not None:
+-            serialization = compare_with_private_policy(target, fixed["immutable_anchor"], phase="restored_save")
++            serialization = compare_with_private_policy(target, fixed["immutable_anchor"], phase="restored_save", phase_guard=original_unchanged)
+         restored_projection = read_scene(target)
+         actual_path = str(target.get_path_name())
+         if ((fixed is None and restored_projection != anchor["projection"])
+@@ -366,6 +364,8 @@
+     if read_scene(scene) != original_projection or str(scene.get_path_name()) != original_path:
+         raise ValueError("RECOVERY_FAILED_SCENE_CHANGED")
+     guards.link_clone(scene, target)
++    if fixed is not None:
++        bind_completed_clone(fixed["immutable_anchor"], target)
+     after = dict(guards.scene_instance(target))
+     if after["scene_instance_id"] == before["scene_instance_id"] or after["document_lineage_id"] != before["document_lineage_id"]:
+         raise ValueError("RECOVERY_SUCCESSOR_IDENTITY_INVALID")
+diff --git a/cascadeur_side/cascadeur_complete/native_geometry_capture.py b/cascadeur_side/cascadeur_complete/native_geometry_capture.py
+--- a/cascadeur_side/cascadeur_complete/native_geometry_capture.py
++++ b/cascadeur_side/cascadeur_complete/native_geometry_capture.py
+@@ -62,6 +62,11 @@
+ 
+ def geometry_contract_status():
+     from .native_geometry_qualification import calibration_status
++    from .native_owned_pair_binding import pair_status
++    from . import runtime as rt
++    pair = pair_status(rt._scene_view())
++    if pair["qualified"]:
++        return {**pair, "prerequisite_calibration": calibration_status()}
+     return {"qualified": False, "code": "GEOMETRY_CALCULATION_CONTRACT_UNQUALIFIED",
+         "missing": ["known_transform_coordinate_calibration", "operation_correlated_synchronous_calculation",
+                     "qualified_dependency_and_transform_readers"],
+@@ -75,8 +80,9 @@
+     # This lookup is intentionally private and currently empty. A future
+     # code-owned calibration must bind actual SDK producer/dependency semantics
+     # before populating it; there is no generic registration/public flag here.
++    from .native_owned_pair_binding import pair_binding
+     key = (installed_build(), guards.LOADED_FINGERPRINT, guards.RUNTIME_EPOCH)
+-    contract = _CONTRACTS.get(key)
++    contract = pair_binding(scene, required=False) or _CONTRACTS.get(key)
+     if contract is None:
+         status = geometry_contract_status()
+         raise ValueError(status["code"] + ": " + ",".join(status["missing"]))
+@@ -106,10 +112,10 @@
+     if any(successor.get("binding", {}).get(key) != current[key] for key in ("scene_instance_id", "document_lineage_id")):
+         raise ValueError("GEOMETRY_ORIGIN_SCENE_CHANGED")
+     if arguments["origin_request_id"] != capture["evaluation"].get("request_id"):
+-        # Mutation origins need an explicit authenticated successor -> current
+-        # evaluation full-projection rebind. No such issuer exists yet.
+-        raise ValueError("GEOMETRY_ORIGIN_SUCCESSOR_REBIND_UNAVAILABLE")
+-    if guards.digest(receipt) != capture["evaluation_receipt_digest"]:
++        from .native_owned_pair_binding import pair_binding
++        from .native_scene_reader import read_scene
++        pair_binding(scene).require_origin_chain(arguments, capture, read_scene(scene))
++    elif guards.digest(receipt) != capture["evaluation_receipt_digest"]:
+         raise ValueError("GEOMETRY_ORIGIN_RECEIPT_DIFFERS")
+     return request, receipt, source, successor
+ 
+@@ -257,7 +263,13 @@
+         retained = 0
+         for index, window in enumerate(plan.windows):
+             unchanged()
+-            raw = np.ascontiguousarray(_sample_mesh_positions(domain, native_ids[window.mesh_id], list(window.frames), counts[window.mesh_id], context), dtype="<f4")
++            if callable(getattr(contract, "capture_window", None)):
++                observed = contract.capture_window(scene, window.mesh_id, window.frames, counts[window.mesh_id],
++                    request=request, before_calculation=unchanged)
++            else:
++                observed = _sample_mesh_positions(domain, native_ids[window.mesh_id], list(window.frames), counts[window.mesh_id], context)
++            raw = np.ascontiguousarray(observed, dtype="<f4")
++            del observed
+             canonical = np.empty(raw.shape, dtype="<f8")
+             for row, frame in enumerate(window.frames):
+                 world = np.empty(raw[row].shape, dtype="<f8")
+diff --git a/cascadeur_side/cascadeur_complete/native_motion_capture.py b/cascadeur_side/cascadeur_complete/native_motion_capture.py
+--- a/cascadeur_side/cascadeur_complete/native_motion_capture.py
++++ b/cascadeur_side/cascadeur_complete/native_motion_capture.py
+@@ -71,7 +71,7 @@
+     return identity, copy.deepcopy(receipt)
+ 
+ 
+-def _ownership(projection, ids, source):
++def _ownership(projection, ids, source, *, scene=None):
+     owners = {}
+     for obj in projection["objects"]:
+         for behaviour in obj["behaviours"]:
+@@ -94,6 +94,11 @@
+         if (len(ids)==1 and source.get("scope", {}).get("object_ids")==ids
+                 and declared in (None,ids[0]) and independent_projection_identity(projection,ids[0])):
+             return {ids[0]:ids[0]}
++        if scene is not None:
++            from .native_owned_pair_binding import pair_ownership
++            owned = pair_ownership(scene, projection, ids, source)
++            if owned is not None:
++                return owned
+         raise ValueError("CHARACTER_OWNERSHIP_UNVERIFIED: capture requires one unique actual RigInfo owner")
+     owner = next(iter(selected[0]))
+     declared = source.get("scope", {}).get("profile", {}).get("character_id")
+@@ -232,7 +237,7 @@
+     if context["frames"][-1] >= projection["frames"]:
+         raise ValueError("INCOMPLETE_CAPTURE: context frames exceed actual native timeline")
+     identity, evaluation = _evaluation(scene, projection)
+-    ownership = _ownership(projection, ids, source)
++    ownership = _ownership(projection, ids, source, scene=scene)
+     positions, rotations, validity, raw = _samples(projection, ids, context, space, basis, scale, set(required))
+     canonical = {"context": context, "object_ids": ids, "space": space, "position_m": positions,
+                  "rotation_wxyz": rotations, "channel_valid": validity, "source_binding": source}
+diff --git a/cascadeur_side/cascadeur_complete/native_owned_pair_binding.py b/cascadeur_side/cascadeur_complete/native_owned_pair_binding.py
+new file mode 100644
+--- /dev/null
++++ b/cascadeur_side/cascadeur_complete/native_owned_pair_binding.py
+@@ -0,0 +1,615 @@
++"""Explicit two-mesh setup and current-request integration.
++
++The installed extractor is a required code dependency, not a flag accepted
++from MCP. This proposal deliberately does not ship an unobserved SDK leaf.
++No binding is installed until the complete retained setup returns normally.
++"""
++from __future__ import annotations
++
++import hashlib
++import importlib
++import json
++
++from . import guarded_runtime as guards
++from .native_owned_pair_geometry import (
++    PairGeometryPositivePath, PROFILE, SETUP_OPERATION, LIMITS,
++    MutationEvaluationRebind, bind_native_authenticated_terminal_lookup,
++    native_read_pair_inputs, _expected,
++)
++from .native_update_capture import bind_native_update_runner, frozen_json
++
++_BINDINGS = {}
++_ACTIVATIONS = {}
++
++
++def installed_leaf(*, required=True):
++    """Project module to be implemented from the actual installed SDK.
++
++    Its sole mandatory function is extract_installed_update_facts. Optional
++    serialization_role_specs(scene) may return code-reviewed RoleSpec objects.
++    An absent classifier means exact-only comparison, never guessed roles.
++    The module must not register capabilities or execute SDK actions on import.
++    """
++    name = __package__ + ".native_installed_update_facts"
++    try:
++        module = importlib.import_module(name)
++    except ModuleNotFoundError as error:
++        if error.name != name:
++            raise
++        if not required:
++            return None
++        raise ValueError("INSTALLED_UPDATE_FACTS_IMPLEMENTATION_REQUIRED") from error
++    if not callable(getattr(module, "extract_installed_update_facts", None)):
++        raise ValueError("INSTALLED_UPDATE_FACTS_CALLABLE_MISSING")
++    return module
++
++
++def _key(scene):
++    return (guards.RUNTIME_EPOCH, guards.LOADED_FINGERPRINT,
++            guards.scene_instance(scene)["scene_instance_id"])
++
++
++def _context(scene):
++    from . import runtime as rt
++    from .native_adapters import installed_build
++    from .native_export import selection_observation
++    guards.assert_loaded_package()
++    if rt._scene_view() is not scene:
++        raise ValueError("PAIR_SCENE_NOT_ACTIVE")
++    return {"installed_build": installed_build(), "runtime_epoch": guards.RUNTIME_EPOCH,
++            "runtime_fingerprint": guards.LOADED_FINGERPRINT,
++            "scene": dict(guards.scene_instance(scene)),
++            "selection": selection_observation(scene),
++            "frame": int(rt._domain_scene(scene).get_current_frame(False))}
++
++
++def pair_status(scene=None):
++    binding = None if scene is None else _BINDINGS.get(_key(scene))
++    return {"qualified": binding is not None, "profile": PROFILE if binding else None,
++            "code": None if binding else "OWNED_PAIR_NATIVE_SETUP_NOT_COMPLETED",
++            "general_rig_supported": False,
++            "scope": None if binding is None else {"mesh_ids": list(binding.contract.mesh_ids),
++                "frames": [0, 1, 2], "maximum_vertices_per_mesh": 64},
++            "current_graph_checked_at_execution": True}
++
++
++def pair_binding(scene, *, required=True):
++    guards.assert_loaded_package()
++    binding = _BINDINGS.get(_key(scene))
++    if binding is None and required:
++        raise ValueError("OWNED_PAIR_NATIVE_SETUP_NOT_COMPLETED")
++    return binding
++
++
++def pair_ownership(scene, projection, ids, source):
++    binding = pair_binding(scene, required=False)
++    if binding is None:
++        return None
++    if (set(ids) != set(binding.contract.mesh_ids)
++            or set(source.get("scope", {}).get("object_ids", ())) != set(ids)
++            or source.get("scope", {}).get("profile", {}).get("character_id") is not None):
++        return None
++    binding.assert_current(scene, projection, {"mesh_ids": list(ids)})
++    # Identity ownership only; never invent a RigInfo or a shared character.
++    return {identifier: identifier for identifier in ids}
++
++
++class _PairBinding:
++    def __init__(self, scene, path, contract, original_scene, original_projection, setup_request_id):
++        self.scene, self.path, self.contract = scene, path, contract
++        self.original_scene, self.original_projection = original_scene, frozen_json(original_projection)
++        from .native_scene_reader import read_scene
++        self.initial_projection = frozen_json(read_scene(scene))
++        self.setup_request_id = setup_request_id
++        self.continuation_plan = None
++        self.normal_activation_started = False
++        from .handlers.scene import _tab_identity
++        self.fixture_tab_id, self.original_tab_id = _tab_identity(scene), _tab_identity(original_scene)
++        self.synchronous_calculation_evidence_digest = guards.digest(json.loads(contract.evidence_bytes))
++        self.rebind = None
++        self.pending = {}
++        self.last_mutation = None
++
++    def assert_continuation(self):
++        from . import runtime as rt
++        from .native_checkpoint_restore import _original_terminal
++        from .incident_admission import assert_request_admission
++        assert_request_admission()
++        request = getattr(guards._LOCAL, "request", None)
++        if request is None:
++            raise ValueError("PAIR_CURRENT_REQUEST_REQUIRED")
++        execution = request.get("execution_context") or {}
++        _, receipt = _original_terminal(rt.runtime_root(), self.setup_request_id)
++        # Normal admission has already checked all incident domains. It does
++        # not require entry into a legacy-only route to use a healthy fixture.
++        normal = execution.get("incident_route") is None and "finite_continuation" not in execution
++        if normal:
++            context = {"setup_request_id": self.setup_request_id,
++                "setup_receipt_digest": guards.digest(receipt),
++                "fixture_scene": dict(guards.scene_instance(self.scene)),
++                "original_scene": dict(guards.scene_instance(self.original_scene)),
++                "plan_digest": None, "normal_admission": True}
++        else:
++            context = execution.get("finite_continuation", {})
++            if (context.get("setup_request_id") != self.setup_request_id
++                    or context.get("fixture_scene") != dict(guards.scene_instance(self.scene))
++                    or context.get("original_scene") != dict(guards.scene_instance(self.original_scene))
++                    or not isinstance(context.get("plan_digest"), str)
++                    or len(context["plan_digest"]) != 64
++                    or self.continuation_plan is not None and self.continuation_plan != context["plan_digest"]):
++                raise ValueError("PAIR_CONTINUATION_SETUP_OR_PLAN_DIFFERS")
++        value = (receipt or {}).get("terminal_result") or {}
++        results = (value.get("result") or {}).get("steps", ())
++        observed = [row.get("result") for row in results if row.get("operation") == SETUP_OPERATION]
++        if (receipt is None or receipt.get("outcome") != "succeeded" or not value.get("ok")
++                or guards.digest(receipt) != context.get("setup_receipt_digest") or len(observed) != 1
++                or observed[0].get("setup_request_id") != self.setup_request_id
++                or observed[0].get("fixture_scene") != context["fixture_scene"]
++                or observed[0].get("original_scene") != context["original_scene"]
++                or set(observed[0].get("mesh_ids", ())) != set(self.contract.mesh_ids)
++                or observed[0].get("fixture_projection_digest") != hashlib.sha256(self.initial_projection).hexdigest()):
++            raise ValueError("PAIR_AUTHENTICATED_SETUP_TERMINAL_DIFFERS")
++        return context
++
++    def current_rebind(self, runner):
++        if self.rebind is None:
++            self.rebind = MutationEvaluationRebind(runner, bind_native_authenticated_terminal_lookup())
++        else:
++            # Snapshot ownership uses the shared native private store, while
++            # the read context and effect guard always belong to this request.
++            self.rebind.runner = runner
++        return self.rebind
++
++    def require_origin_chain(self, arguments, capture, projection):
++        """Read-only chain lookup; current graph is checked in capture_window."""
++        if self.rebind is None:
++            raise ValueError("GEOMETRY_ORIGIN_SUCCESSOR_REBIND_UNAVAILABLE")
++        record = self.rebind._evaluations.get(capture["evaluation"]["request_id"])
++        if (record is None or record["receipt"] is None
++                or record["origin_id"] != arguments["origin_request_id"]
++                or record["after"].projection_bytes != frozen_json(projection)
++                or record["post_source"] != frozen_json(arguments["motion_source_binding"])
++                or guards.digest(json.loads(record["receipt"])) != capture["evaluation_receipt_digest"]):
++            raise ValueError("GEOMETRY_ORIGIN_SUCCESSOR_REBIND_UNAVAILABLE")
++
++    def assert_current(self, scene, projection, arguments):
++        """Read-only preflight. Full graph is checked in the admitted Update.
++
++        This method must not trigger an Update while system.capture_source or
++        guards.assert_source is reading a source. Graph-only edits are rejected
++        by capture_window before any actual positions are published.
++        """
++        from .native_scene_reader import read_scene
++        self.assert_continuation()
++        if (scene is not self.scene or frozen_json(_context(scene)) != self.contract.scene_context_bytes
++                or set(arguments["mesh_ids"]) != set(self.contract.mesh_ids)
++                or read_scene(scene) != projection):
++            raise ValueError("PAIR_CURRENT_SCENE_OR_SCOPE_DIFFERS")
++        inputs = native_read_pair_inputs(scene, self.path._fixtures)
++        if frozen_json(self.path._static(inputs)) != self.contract.static_inputs_bytes:
++            raise ValueError("PAIR_STATIC_DEPENDENCY_CHANGED")
++
++    def coordinate_contract(self, context):
++        from .geometry_policy import CoordinateContract
++        return CoordinateContract(self.contract.raw_space, context["metres_per_scene_unit"],
++            tuple(tuple(row) for row in context["scene_to_solver_basis"]),
++            guards.digest(json.loads(self.contract.evidence_bytes)), guards.digest(context))
++
++    def mesh_to_world(self, scene, mesh_id, frame):
++        if scene is not self.scene or frame not in (0, 1, 2):
++            raise ValueError("PAIR_MATRIX_SCOPE_DIFFERS")
++        return native_read_pair_inputs(scene, self.path._fixtures)[mesh_id]["matrices"][frame]
++
++    def capture_window(self, scene, mesh_id, frames, count, *, request, before_calculation):
++        import numpy as np
++        if (scene is not self.scene or mesh_id not in self.contract.mesh_ids
++                or not frames or tuple(sorted(set(frames))) != tuple(frames)
++                or not set(frames) <= {0, 1, 2}):
++            raise ValueError("PAIR_WINDOW_SCOPE_DIFFERS")
++        from .incident_admission import assert_request_admission
++        def admitted():
++            assert_request_admission()
++            if getattr(guards._LOCAL, "request", None) is not request:
++                raise ValueError("PAIR_CURRENT_REQUEST_CHANGED")
++            before_calculation()
++        leaf = installed_leaf()
++        runner = bind_native_update_runner(scene, leaf.extract_installed_update_facts, admitted)
++        def assert_inputs(inputs, projection, facts):
++            self.assert_current(scene, projection, {"mesh_ids": list(self.contract.mesh_ids)})
++            if (guards.digest(facts.material()) != self.contract.graph_dtype_digest
++                    or len(inputs[mesh_id]["positions"]) != count):
++                raise ValueError("PAIR_CURRENT_GRAPH_OR_VERTEX_COUNT_CHANGED")
++        snapshot, (inputs, trials) = self.path._observe(
++            tuple((mesh_id, frame) for frame in frames), runner=runner,
++            before_calculation=admitted, assert_inputs=assert_inputs)
++        runner.require(snapshot)
++        arguments = request["operations"][0]["arguments"]
++        from .native_motion_capture import lookup_capture
++        capture = lookup_capture(arguments["motion_capture_digest"])
++        if arguments["origin_request_id"] != capture["evaluation"]["request_id"]:
++            self.current_rebind(runner).require_capture(arguments["origin_request_id"], capture,
++                arguments["motion_source_binding"], snapshot)
++        if any(row["raw"] != _expected(inputs[mesh_id], row["frame"], self.contract.raw_space)
++               for row in trials):
++            raise ValueError("PAIR_CURRENT_CALCULATION_FORMULA_DIFFERS")
++        return np.asarray([row["raw"] for row in trials], dtype=np.float32)
++
++
++def _adapter_evidence(adapter, evidence):
++    from .native_adapters import installed_build
++    adapter.evidence_bytes = frozen_json(evidence)
++    adapter.observed_build = installed_build
++    adapter.verification = {"runtime_fingerprint": guards.LOADED_FINGERPRINT,
++        "installed_build": installed_build(), "identity_stable": True,
++        "operations": evidence["operations"], "dispatch_semantics": "synchronous_no_yield",
++        "evidence_sha256": hashlib.sha256(adapter.evidence_bytes).hexdigest()}
++
++
++def qualify_owned_pair_geometry():
++    from .incident_admission import assert_setup_admission, _LOCAL as admission_local
++    from .native_fixture import create_disposable_scene
++    from .native_probe_retention import RetainedProbe, retained_probe_result
++    from .native_geometry_capture import NativeGeometryCaptureAdapter, OPERATION
++    grant = assert_setup_admission(SETUP_OPERATION)
++    setup_request_id = admission_local.setup["invocation_ref"]
++    if getattr(guards._LOCAL, "request", {}).get("request_id") != setup_request_id:
++        raise ValueError("PAIR_SETUP_REQUEST_ID_DIFFERS")
++    limits = {"maximum_geometry_calculations": 10, "maximum_evaluations": 2,
++              "maximum_driver_mutations": 1, "maximum_update_graph_captures": 2}
++    if any(getattr(grant, key, None) != value for key, value in limits.items()):
++        raise ValueError("PAIR_SETUP_SEMANTIC_LIMITS_DIFFER")
++    # Resolve the real leaf before a tab or file can be created.
++    leaf = installed_leaf()
++    prior = retained_probe_result("owned_pair_geometry")
++    if prior is not None:
++        if not any(value.contract.mesh_ids == tuple(prior["mesh_ids"]) for value in _BINDINGS.values()):
++            raise ValueError("PAIR_PRIOR_RESULT_HAS_NO_PRIVATE_BINDING")
++        return prior
++    if OPERATION in guards._ADAPTERS:
++        raise ValueError("PAIR_GEOMETRY_ADAPTER_ALREADY_REGISTERED")
++    retained = RetainedProbe("owned_pair_geometry")
++    original_scene, original_projection = retained.previous, retained.original_projection
++    error = None
++    completed = []
++    prior_adapters = {name: guards._ADAPTERS.get(name) for name in (
++        OPERATION, "animation.interpolation_refresh", "animation.transform_set", "scene.activate")}
++    installed_adapters = {}
++    try:
++        retained.before_new_tab()
++        scene = create_disposable_scene(retain_on_failure=True)
++        retained.track(scene, "owned-geometry-pair")
++        runner = bind_native_update_runner(scene, leaf.extract_installed_update_facts, retained.before_effect)
++        path = PairGeometryPositivePath(scene=scene, retained=retained, runner=runner)
++        def finish(evidence):
++            from .handlers.scene import _tab_identity
++            from .native_scene_reader import read_scene
++            fixture_projection_digest = guards.digest(read_scene(scene))
++            retention = retained.finish(None)
++            completed.append(retained.complete({"profile": PROFILE, "limits": LIMITS,
++                "mesh_ids": list(evidence["after"]), "retention": retention,
++                "fixture_scene": dict(guards.scene_instance(scene)), "frames": [0, 1, 2],
++                "setup_request_id": setup_request_id, "fixture_projection_digest": fixture_projection_digest,
++                "fixture_tab_id": _tab_identity(scene), "original_tab_id": _tab_identity(original_scene),
++                "original_scene": dict(guards.scene_instance(original_scene)),
++                "layer_ids": [row["layer_id"] for row in path._fixtures],
++                "general_rig_supported": False, "geometry_evidence_digest": guards.digest(evidence)}))
++        contract = path.initialize(finish)
++        binding = _PairBinding(scene, path, contract, original_scene, original_projection, setup_request_id)
++        if hashlib.sha256(binding.initial_projection).hexdigest() != completed[0]["fixture_projection_digest"]:
++            raise ValueError("PAIR_POST_RETENTION_FIXTURE_CHANGED")
++        _BINDINGS[_key(scene)] = binding
++        evidence = {"profile": PROFILE, "setup": json.loads(contract.evidence_bytes),
++                    "retention": completed[0]["retention"], "operations": [OPERATION]}
++        adapter = NativeGeometryCaptureAdapter()
++        _adapter_evidence(adapter, evidence)
++        retained.before_effect()
++        guards.register_adapter(OPERATION, adapter)
++        installed_adapters[OPERATION] = adapter
++        for name, finite in (("animation.interpolation_refresh", _PairEvaluationAdapter(binding)),
++                             ("animation.transform_set", _PairPositionAdapter(binding)),
++                             ("scene.activate", _PairActivationAdapter(binding))):
++            evaluator = _ProfileRouter(binding, finite, guards._ADAPTERS.get(name))
++            _adapter_evidence(evaluator, {**evidence, "operations": [name],
++                "previous_adapter": None if evaluator.previous is None else evaluator.previous.verification})
++            retained.before_effect()
++            guards.register_adapter(name, evaluator)
++            installed_adapters[name] = evaluator
++        return completed[0]
++    except Exception as exc:
++        error = exc
++        if "scene" in locals():
++            _BINDINGS.pop(_key(scene), None)
++        for name, installed in installed_adapters.items():
++            if guards._ADAPTERS.get(name) is installed:
++                if prior_adapters[name] is None:
++                    guards._ADAPTERS.pop(name)
++                else:
++                    guards._ADAPTERS[name] = prior_adapters[name]
++        raise
++    finally:
++        if not retained.finished:
++            retained.finish(error)
++
++
++class _ProfileRouter:
++    """Preserve prior exact scopes while selecting privately owned pair scenes."""
++    def __init__(self, binding, finite, previous):
++        self.binding, self.finite, self.previous = binding, finite, previous
++        self.previous_evidence = None if previous is None else bytes(previous.evidence_bytes)
++
++    def _select(self, scene):
++        if isinstance(self.finite, _PairActivationAdapter) and any(scene is value for value in (self.binding.scene, self.binding.original_scene)):
++            return self.finite
++        if scene is self.binding.scene and pair_binding(scene, required=False) is self.binding:
++            return self.finite
++        if self.previous is None:
++            raise ValueError("PAIR_PROFILE_REQUIRED_FOR_THIS_OPERATION")
++        proof = self.previous.verification
++        if (self.previous.evidence_bytes != self.previous_evidence
++                or proof["runtime_fingerprint"] != guards.LOADED_FINGERPRINT
++                or proof["installed_build"] != self.previous.observed_build()
++                or proof["evidence_sha256"] != hashlib.sha256(self.previous_evidence).hexdigest()):
++            raise ValueError("PREVIOUS_ADAPTER_EVIDENCE_CHANGED")
++        return self.previous
++
++    def required_scope(self, scene, scope):
++        return self._select(scene).required_scope(scene, scope)
++
++    def capture(self, scene, scope):
++        return self._select(scene).capture(scene, scope)
++
++    def execute(self, scene, arguments, request):
++        return self._select(scene).execute(scene, arguments, request)
++
++
++class _PairEvaluationAdapter:
++    """Finite evaluation and authenticated mutation-successor bookends."""
++    adapter_id = "native-owned-pair-evaluation-v1"
++
++    def __init__(self, binding):
++        self.binding = binding
++
++    def required_scope(self, scene, scope):
++        from .native_scene_reader import read_scene
++        if scope.get("operation_name") != "animation.interpolation_refresh" or scope.get("operation_arguments") != {}:
++            raise ValueError("PAIR_EVALUATION_OPERATION_DIFFERS")
++        projection = read_scene(scene)
++        self.binding.assert_current(scene, projection, {"mesh_ids": list(self.binding.contract.mesh_ids)})
++        return {"operation_name": "animation.interpolation_refresh", "operation_arguments": {},
++            "operation_arguments_digest": guards.digest({}), "adapter_id": self.adapter_id,
++            "object_ids": [row["id"] for row in projection["objects"]],
++            "layer_ids": [row["id"] for row in projection["layers"]], "frames": [0, 2]}
++
++    def capture(self, scene, scope):
++        from .native_scene_reader import read_scene
++        self.required_scope(scene, scope)
++        projection = read_scene(scene)
++        return {"coverage_complete": True, "authored_projection": projection, "sample_projection": projection}
++
++    def execute(self, scene, arguments, request):
++        from .native_scene_adapter import _EVALUATIONS
++        from .incident_admission import assert_request_admission
++        if self.binding.rebind is not None and len(self.binding.rebind._evaluations) >= 64:
++            raise ValueError("PAIR_EVALUATION_RECORD_BUDGET")
++        source = request["source_binding"]
++        guards.assert_source(scene, source, operation_name="animation.interpolation_refresh", arguments={})
++        leaf = installed_leaf()
++        def admitted():
++            assert_request_admission()
++            if getattr(guards._LOCAL, "request", None) is not request:
++                raise ValueError("PAIR_CURRENT_REQUEST_CHANGED")
++            guards.assert_source(scene, source)
++        runner = bind_native_update_runner(scene, leaf.extract_installed_update_facts, admitted)
++        def refresh(_model, _update, updater, projection, facts):
++            self.binding.assert_current(scene, projection, {"mesh_ids": list(self.binding.contract.mesh_ids)})
++            if guards.digest(facts.material()) != self.binding.contract.graph_dtype_digest:
++                raise ValueError("PAIR_CURRENT_GRAPH_CHANGED")
++            interpolator = updater.get_interpolator()
++            interpolator.reload()
++            interpolator.interpolate()
++        before, after, _ = runner.transition(refresh)
++        rebind = self.binding.current_rebind(runner)
++        if self.binding.last_mutation is not None:
++            rebind.stage_evaluation(self.binding.last_mutation, request, before, after)
++            self.binding.pending[request["request_id"]] = ("evaluation", after)
++        identity = dict(guards.scene_instance(scene))
++        value = {"projection_digest": guards.digest(after.projection), "runtime_epoch": guards.RUNTIME_EPOCH,
++                 "request_id": request["request_id"], "frames": [0, 2], "native_completion": "observed"}
++        _EVALUATIONS[identity["scene_instance_id"]] = value
++        guards.observe_effect("animation.interpolation_refresh", "completed", scene_before=identity,
++            scene_after=identity, detail={"projection_digest": value["projection_digest"]})
++        return {"native_completion": "observed", "evaluation": dict(value)}, []
++
++
++class _PairPositionAdapter:
++    """One explicit local-position write to an existing key in the owned pair."""
++    adapter_id = "native-owned-pair-position-v1"
++
++    def __init__(self, binding):
++        self.binding = binding
++
++    def required_scope(self, scene, scope):
++        import numpy as np
++        from .native_scene_reader import read_scene
++        arguments = scope.get("operation_arguments")
++        if (scope.get("operation_name") != "animation.transform_set"
++                or not isinstance(arguments, dict) or set(arguments) != {"ids", "position", "frame", "space"}
++                or type(arguments["ids"]) is not list or len(arguments["ids"]) != 1
++                or arguments["ids"][0] not in self.binding.contract.mesh_ids
++                or type(arguments["frame"]) is not int or arguments["frame"] not in (0, 1, 2)
++                or arguments["space"] != "local"
++                or type(arguments["position"]) is not list or len(arguments["position"]) != 3
++                or any(type(value) not in (int, float) for value in arguments["position"])):
++            raise ValueError("PAIR_POSITION_SCOPE_INVALID")
++        value = np.asarray(arguments["position"], dtype=np.float32)
++        if not np.isfinite(value).all():
++            raise ValueError("PAIR_POSITION_FLOAT32_RANGE_INVALID")
++        projection = read_scene(scene)
++        self.binding.assert_current(scene, projection, {"mesh_ids": list(self.binding.contract.mesh_ids)})
++        return {"operation_name": "animation.transform_set", "operation_arguments": arguments,
++            "operation_arguments_digest": guards.digest(arguments), "adapter_id": self.adapter_id,
++            "object_ids": [row["id"] for row in projection["objects"]],
++            "layer_ids": [row["id"] for row in projection["layers"]], "frames": [0, 2]}
++
++    def capture(self, scene, scope):
++        from .native_scene_reader import read_scene
++        self.required_scope(scene, scope)
++        projection = read_scene(scene)
++        return {"coverage_complete": True, "authored_projection": projection, "sample_projection": projection}
++
++    def execute(self, scene, arguments, request):
++        import csc
++        import numpy as np
++        from .incident_admission import assert_request_admission
++        if self.binding.rebind is not None and len(self.binding.rebind._origins) >= 64:
++            raise ValueError("PAIR_MUTATION_RECORD_BUDGET")
++        source = request["source_binding"]
++        guards.assert_source(scene, source, operation_name="animation.transform_set", arguments=arguments)
++        self.required_scope(scene, source["scope"])
++        leaf = installed_leaf()
++        def admitted():
++            assert_request_admission()
++            if getattr(guards._LOCAL, "request", None) is not request:
++                raise ValueError("PAIR_CURRENT_REQUEST_CHANGED")
++            guards.assert_source(scene, source)
++        runner = bind_native_update_runner(scene, leaf.extract_installed_update_facts, admitted)
++        fixture = next(row for row in self.binding.path._fixtures if row["object_id"] == arguments["ids"][0])
++        data_id, frame = fixture["position_data_ids"]["local"], arguments["frame"]
++        value = np.asarray(arguments["position"], dtype=np.float32).reshape(3, 1)
++        def mutate(model, _update, _updater, projection, facts):
++            self.binding.assert_current(scene, projection, {"mesh_ids": list(self.binding.contract.mesh_ids)})
++            if guards.digest(facts.material()) != self.binding.contract.graph_dtype_digest:
++                raise ValueError("PAIR_CURRENT_GRAPH_CHANGED")
++            model.data_editor().set_data_value(csc.model.DataId(data_id), frame, value)
++        before, after, _ = runner.transition(mutate)
++        rows = {row["id"]: row for row in after.projection["data"]}
++        observed = np.asarray(rows[data_id]["values"][frame], dtype=np.float32)
++        if not np.array_equal(observed, value):
++            raise ValueError("PAIR_POSITION_READBACK_DIFFERS")
++        self.binding.current_rebind(runner)
++        self.binding.pending[request["request_id"]] = ("mutation", after)
++        identity = dict(guards.scene_instance(scene))
++        guards.observe_effect("animation.transform_set", "completed", scene_before=identity,
++            scene_after=identity, detail={"data_id": data_id, "frame": frame,
++                "projection_digest": guards.digest(after.projection)})
++        return {"native_completion": "observed", "data_id": data_id, "frame": frame,
++                "position": value[:, 0].tolist()}, []
++
++
++def finalize_pair_operation(scene, request, result, receipt):
++    """Only memory sealing after runtime has durably issued its real terminal."""
++    _ACTIVATIONS.pop(request.get("request_id"), None)
++    binding = pair_binding(scene, required=False)
++    if binding is None:
++        return
++    pending = binding.pending.pop(request.get("request_id"), None)
++    if pending is None:
++        return
++    if (not result.get("ok") or result.get("outcome") != "succeeded"
++            or receipt.get("phase") != "terminal" or receipt.get("outcome") != "succeeded"):
++        return
++    kind, snapshot = pending
++    if kind == "mutation":
++        successor = result["result"]["post_source_binding"]
++        binding.rebind.stage_mutation(request, successor, snapshot)
++        binding.rebind.seal_mutation(request["request_id"])
++        binding.last_mutation = request["request_id"]
++    else:
++        binding.rebind.seal_evaluation(request["request_id"])
++        binding.last_mutation = None
++
++
++class _PairActivationAdapter:
++    """Switch between the two exact retained tabs; preserve both documents."""
++    adapter_id = "native-owned-pair-activation-v1"
++
++    def __init__(self, binding):
++        self.binding = binding
++
++    def _state(self, scene, arguments):
++        import csc
++        from .native_scene_reader import read_scene
++        from .handlers.scene import _tab_identity
++        binding = self.binding
++        context = binding.assert_continuation()
++        if not isinstance(arguments, dict) or set(arguments) != {"tab_id"}:
++            raise ValueError("PAIR_ACTIVATION_EXACT_TAB_REQUIRED")
++        targets = {binding.fixture_tab_id: binding.scene, binding.original_tab_id: binding.original_scene}
++        if arguments["tab_id"] not in targets:
++            raise ValueError("PAIR_ACTIVATION_TARGET_NOT_PRIVATELY_RETAINED")
++        manager = csc.app.get_application().get_scene_manager()
++        tabs = tuple(manager.scenes())
++        if (manager.current_scene() is not scene
++                or not any(scene is value for value in targets.values())
++                or any(not any(value is live for live in tabs) for value in targets.values())
++                or frozen_json(read_scene(binding.original_scene)) != binding.original_projection):
++            raise ValueError("PAIR_ACTIVATION_RETAINED_SCENES_CHANGED")
++        target = targets[arguments["tab_id"]]
++        if binding.continuation_plan is None and not binding.normal_activation_started:
++            if (target is not binding.scene or scene is not binding.original_scene
++                    or frozen_json(read_scene(binding.scene)) != binding.initial_projection):
++                raise ValueError("PAIR_INITIAL_ACTIVATION_BASELINE_CHANGED")
++        projection = {"original": read_scene(binding.original_scene), "fixture": read_scene(binding.scene),
++            "active_tab_id": _tab_identity(scene),
++            "tabs": [{"tab_id": _tab_identity(value), "path": str(value.get_path_name())} for value in tabs]}
++        return manager, target, projection
++
++    def required_scope(self, scene, scope):
++        if scope.get("operation_name") != "scene.activate":
++            raise ValueError("PAIR_ACTIVATION_OPERATION_DIFFERS")
++        arguments = scope.get("operation_arguments")
++        _, _, projection = self._state(scene, arguments)
++        fixture = projection["fixture"]
++        return {"operation_name": "scene.activate", "operation_arguments": arguments,
++            "operation_arguments_digest": guards.digest(arguments), "adapter_id": self.adapter_id,
++            "object_ids": [row["id"] for row in fixture["objects"]],
++            "layer_ids": [row["id"] for row in fixture["layers"]], "frames": [0, 2],
++            "retained_scene_ids": [guards.scene_instance(self.binding.original_scene)["scene_instance_id"],
++                                   guards.scene_instance(self.binding.scene)["scene_instance_id"]]}
++
++    def capture(self, scene, scope):
++        self.required_scope(scene, scope)
++        _, _, projection = self._state(scene, scope["operation_arguments"])
++        return {"coverage_complete": True, "authored_projection": projection, "sample_projection": projection}
++
++    def execute(self, scene, arguments, request):
++        source = request["source_binding"]
++        guards.assert_source(scene, source, operation_name="scene.activate", arguments=arguments)
++        manager, target, before = self._state(scene, arguments)
++        source_identity, target_identity = dict(guards.scene_instance(scene)), dict(guards.scene_instance(target))
++        guards.before_write()
++        # Reserve this private fixture for the exact admitted continuation
++        # before switching tabs; a failed switch cannot authorize another plan.
++        admission = self.binding.assert_continuation()
++        if admission.get("normal_admission"):
++            self.binding.normal_activation_started = True
++        else:
++            self.binding.continuation_plan = admission["plan_digest"]
++        manager.set_current_scene(target)
++        _, observed_target, after = self._state(target, arguments)
++        if (observed_target is not target or any(before[key] != after[key] for key in ("original", "fixture", "tabs"))
++                or after["active_tab_id"] != arguments["tab_id"]):
++            raise ValueError("PAIR_ACTIVATION_CURRENT_TAB_OR_DOCUMENTS_DIFFER")
++        record = {"request_digest": guards.digest(request), "from": source_identity, "to": target_identity,
++                  "before": frozen_json(before), "after": frozen_json(after), "target": target, "binding": self.binding}
++        _ACTIVATIONS[request["request_id"]] = record
++        guards.finish_write()
++        guards.observe_effect("scene.activate", "completed", scene_before=source_identity, scene_after=target_identity,
++            detail={"tab_id": arguments["tab_id"], "documents_preserved": True})
++        return {"native_completion": "observed", "tab_id": arguments["tab_id"],
++                "scene": target_identity, "previous_tab_id": before["active_tab_id"]}, []
++
++
++def approve_pair_activation_successor(request, source, successor, result, observation):
++    """Runtime-only approval of the actual same-request tab switch."""
++    record = _ACTIVATIONS.get(request.get("request_id"))
++    if (record is None or record["request_digest"] != guards.digest(request)
++            or request.get("operations", [{}])[0].get("name") != "scene.activate"
++            or source.get("binding", {}).get("scene_instance_id") != record["from"]["scene_instance_id"]
++            or successor.get("binding", {}).get("scene_instance_id") != record["to"]["scene_instance_id"]
++            or result.get("result", {}).get("native_completion") != "observed"
++            or observation.get("completion") != "completed"):
++        return False
++    adapter = _PairActivationAdapter(record["binding"])
++    _, target, current = adapter._state(record["target"], request["operations"][0]["arguments"])
++    return target is record["target"] and frozen_json(current) == record["after"]
+diff --git a/cascadeur_side/cascadeur_complete/native_owned_pair_geometry.py b/cascadeur_side/cascadeur_complete/native_owned_pair_geometry.py
+new file mode 100644
+--- /dev/null
++++ b/cascadeur_side/cascadeur_complete/native_owned_pair_geometry.py
+@@ -0,0 +1,566 @@
++"""Proposed finite two-mesh native implementation; explicit setup only.
++
++Actual SDK calls below are copied/lowered from pinned current source. The new
++two-object composition, calc inside Update callback, graph extractor and effect
++contract have NOT been run/qualified. Importing this file performs no SDK work.
++The reference registry is not the production _CONTRACTS or guards._ADAPTERS.
++"""
++from __future__ import annotations
++
++from dataclasses import dataclass
++import json
++import math
++from typing import Any, Callable
++
++from .serialization_equivalence import canonical_digest
++from .native_update_capture import UpdateCaptureRunner, UpdateSnapshot, frozen_json
++
++PROFILE = "owned_two_self_bound_translation_meshes_v1"
++SETUP_OPERATION = "setup.qualify_owned_pair_geometry"  # PROPOSED, not registered.
++KEYS = (
++    ((0, (0., 0., 0.)), (1, (2., 1., 0.)), (2, (0., 2., 1.))),
++    ((0, (8., 0., 0.)), (1, (9., 1., 0.)), (2, (10., 2., 1.))),
++)
++CALIBRATION_FRAMES = (0, 2, 1, 0)
++LIMITS = {"tabs": 1, "casc_files": 2, "mesh_calculations": 10,
++          "evaluations": 2, "driver_mutations": 1, "objects": 2,
++          "maximum_vertices_per_mesh": 64, "maximum_frames": 3,
++          "maximum_projection_bytes": 2 * 1024**2,
++          "graph_capture_callbacks": 2}
++
++
++def native_create_owned_pair(scene, retained) -> tuple[dict[str, Any], ...]:
++    """New finite helper using existing SDK calls, not the single-object helper.
++
++    create_independent_transform/set_independent_keys explicitly reject a second
++    object. This function preserves that API and composes the underlying observed
++    commands in a separately admitted owned scene. Its composition needs native
++    qualification; no success of the old cube helper is reused as pair evidence.
++    """
++    import csc
++    import numpy as np
++    from commands.add.add_transform import add_transform_mod
++    from common.mesh import set_mesh_object_data
++    from cascadeur_complete import runtime as rt
++    from cascadeur_complete.native_fixture import _owned, _modify
++    state, domain = _owned(scene)
++    if state["objects"]:
++        raise ValueError("PAIR_FIXTURE_REQUIRES_EMPTY_OWNED_SCENE")
++    created = []
++    def create(model, update, callback_scene, session):
++        for index in range(2):
++            retained.before_effect()
++            obj = add_transform_mod(model, update, callback_scene, session, True)
++            model.set_object_name(obj, "MCPOwnedGeometryPair" + str(index))
++            created.append(str(obj))
++    _modify(domain.modify_with_session, "Create two owned geometry Transforms", create)
++    actual = {str(obj): obj for obj in domain.model_viewer().get_objects()}
++    if len(created) != 2 or len(set(created)) != 2 or set(created) != set(actual):
++        raise ValueError("PAIR_FIXTURE_OBJECT_CLOSURE_DIFFERS")
++    state["objects"].update(created)
++    _owned(scene)
++    bv, dv, lv = domain.behaviour_viewer(), domain.data_viewer(), domain.layers_viewer()
++    fixtures = []
++    for index, identifier in enumerate(created):
++        obj = actual[identifier]
++        transform = bv.get_behaviour_by_name(obj, "Transform")
++        layer = lv.layer_id_by_obj_id_or_null(obj)
++        if transform.is_null() or layer.is_null():
++            raise ValueError("PAIR_FIXTURE_TYPED_TRANSFORM_OR_LAYER_MISSING")
++        data = {space: bv.get_behaviour_data(transform, space + "_position")
++                for space in ("local", "global")}
++        if any(key.is_null() or dv.get_data(key).object_id != obj
++               or dv.get_data(key).mode.name != "Animation" for key in data.values()):
++            raise ValueError("PAIR_FIXTURE_TYPED_POSITION_OWNERSHIP_DIFFERS")
++        fixtures.append({"object_id": identifier, "layer_id": str(layer),
++                         "position_data_ids": {k: str(v) for k, v in data.items()},
++                         "frames_count": 3, "index": index})
++    if len({row["layer_id"] for row in fixtures}) != 2:
++        raise ValueError("PAIR_FIXTURE_SHARED_LAYER_UNSUPPORTED")
++    def author(model, update, callback_scene):
++        for fixture in fixtures:
++            retained.before_effect()
++            obj = actual[fixture["object_id"]]
++            layer = lv.layer_id_by_obj_id_or_null(obj)
++            sections = {}
++            for frame in range(3):
++                section = csc.layers.layer.Section()
++                section.interval.interpolation = csc.layers.layer.Interpolation.LINEAR
++                section.interval.common.fixation = csc.layers.layer.Fixation.Free
++                section.interval.common.ik_fk = csc.layers.layer.IkFk.FK
++                section.key.common.fixation = csc.layers.layer.Fixation.Free
++                section.key.common.ik_fk = csc.layers.layer.IkFk.FK
++                section.key.label = csc.layers.layer.Key.no_label_id()
++                section.key.tangents = csc.layers.layer.Tangents.Continuous
++                sections[frame] = section
++            model.layers_editor().set_sections(sections, layer)
++        model.fit_animation_size_by_layers()
++        for fixture in fixtures:
++            for identifier in fixture["position_data_ids"].values():
++                for frame, position in KEYS[fixture["index"]]:
++                    retained.before_effect()
++                    model.data_editor().set_data_value(csc.model.DataId(identifier), frame,
++                                                       np.asarray(position, dtype=np.float32).reshape(3, 1))
++            retained.before_effect()
++            obj = actual[fixture["object_id"]]
++            mesh = csc.domain.assets.AssetsManager.get_cube_mesh(2.0)
++            dependency = csc.domain.assets.MeshDependency(mesh)
++            set_mesh_object_data(callback_scene, model, update, update.get_object_by_id(obj),
++                                 mesh, dependency, [obj], create_default_material=False)
++    _modify(domain.modify, "Author and attach the owned geometry pair", author)
++    if int(domain.layers_viewer().frames_count()) != 3:
++        raise ValueError("PAIR_FIXTURE_TIMELINE_DIFFERS")
++    for fixture in fixtures:
++        obj = actual[fixture["object_id"]]
++        layer = domain.layers_viewer().layer(domain.layers_viewer().layer_id_by_obj_id_or_null(obj))
++        if (list(map(int, layer.key_frame_indices())) != [0, 1, 2]
++                or any(layer.interval(f).interpolation.name != "LINEAR" for f in (0, 1))):
++            raise ValueError("PAIR_FIXTURE_KEY_GRID_OR_INTERPOLATION_DIFFERS")
++    return tuple(fixtures)
++
++
++def native_read_pair_inputs(scene, fixtures) -> dict[str, Any]:
++    """Two-object specialization of _fixture_inputs, using its exact getters.
++
++    The existing _fixture_inputs returns domain,obj,positions,matrices,inputs
++    and rejects len(objects)!=1. It must NOT be called with a fake one-object
++    viewer, monkeypatched, or weakened globally to make this helper pass.
++    """
++    import csc
++    import numpy as np
++    from cascadeur_complete import runtime as rt
++    from cascadeur_complete.native_scene_reader import native_value
++    domain = rt._domain_scene(scene)
++    mv, bv, dv = domain.model_viewer(), domain.behaviour_viewer(), domain.data_viewer()
++    objects = {str(obj): obj for obj in mv.get_objects()}
++    if len(fixtures) != 2 or set(objects) != {f["object_id"] for f in fixtures}:
++        raise ValueError("PAIR_OBJECT_CLOSURE_DIFFERS")
++    if int(domain.layers_viewer().frames_count()) != 3:
++        raise ValueError("PAIR_FRAME_CLOSURE_DIFFERS")
++    result = {}
++    for fixture in fixtures:
++        identifier = fixture["object_id"]
++        obj = objects[identifier]
++        names = [str(bv.get_behaviour_name(b)) for b in bv.get_behaviours(obj)]
++        if len(names) != len(set(names)) or set(names) != {"Basic", "Node3d", "Transform", "FbxExport", "MeshObject"}:
++            raise ValueError("PAIR_BEHAVIOUR_PROFILE_UNSUPPORTED")
++        basic = bv.get_behaviour_by_name(obj, "Basic")
++        if not bv.get_behaviour_object(basic, "parent").is_null():
++            raise ValueError("PAIR_PARENT_PROFILE_UNSUPPORTED")
++        node = bv.get_behaviour_by_name(obj, "Node3d")
++        matrix_id = bv.get_behaviour_data(node, "global_matrix")
++        if (matrix_id.is_null() or dv.get_data(matrix_id).object_id != obj
++                or dv.get_data(matrix_id).mode.name != "Animation"):
++            raise ValueError("PAIR_GLOBAL_MATRIX_OWNERSHIP_UNSUPPORTED")
++        mesh_b = bv.get_behaviour_by_name(obj, "MeshObject")
++        if (list(bv.get_behaviour_objects_range(mesh_b, "linked_objects")) != [obj]
++                or bv.get_behaviour_data(mesh_b, "bindShapeMatrix") != matrix_id):
++            raise ValueError("PAIR_SELF_BINDING_PROFILE_UNSUPPORTED")
++        mesh_id, dependency_id = (bv.get_behaviour_asset(mesh_b, key) for key in ("mesh", "mesh_dependency"))
++        manager = domain.assets_manager()
++        mesh, dependency = manager.at(mesh_id), manager.at(dependency_id)
++        if not isinstance(mesh, csc.domain.assets.Mesh) or not isinstance(dependency, csc.domain.assets.MeshDependency):
++            raise ValueError("PAIR_TYPED_ASSET_PROFILE_UNSUPPORTED")
++        positions = np.asarray(mesh.positions())
++        if positions.ndim == 3 and positions.shape[1:] == (4, 1):
++            positions = positions[:, :, 0]
++        inverse = np.asarray(dependency.inverse_bind_matrices())
++        weights = list(dependency.vertices_weights())
++        if (positions.dtype != np.dtype("float32") or positions.ndim != 2 or positions.shape[1] != 4
++                or not 3 <= len(positions) <= 64 or not np.isfinite(positions).all()
++                or not np.array_equal(positions[:, 3], np.ones(len(positions)))
++                or inverse.dtype != np.dtype("float32") or inverse.shape != (1, 4, 4)
++                or not np.array_equal(inverse[0], np.eye(4))
++                or len(weights) != len(positions)
++                or any(len(w) != 1 or w[0].index != 0 or w[0].weight != 1.0 for w in weights)):
++            raise ValueError("PAIR_GEOMETRY_OR_SKIN_PROFILE_UNSUPPORTED")
++        matrices = []
++        for frame in range(3):
++            matrix = np.asarray(dv.get_data_value(matrix_id, frame))
++            if (matrix.dtype != np.dtype("float32") or matrix.shape != (4, 4)
++                    or not np.isfinite(matrix).all() or not np.array_equal(matrix[3], [0, 0, 0, 1])
++                    or not np.array_equal(matrix[:3, :3], np.eye(3))):
++                raise ValueError("PAIR_NON_TRANSLATION_MATRIX_UNSUPPORTED")
++            matrices.append(matrix.copy())
++        result[identifier] = {"object_id": identifier, "mesh_behaviour_id": str(mesh_b),
++            "mesh_asset_id": str(mesh_id), "dependency_asset_id": str(dependency_id),
++            "global_matrix_data_id": str(matrix_id), "positions": native_value(positions[:, :3].copy()),
++            "matrices": native_value(matrices), "inverse_bind_matrices": native_value(inverse),
++            "weights": [[[int(w.index), float(w.weight)] for w in row] for row in weights]}
++    return result
++
++
++def native_calculate_one(scene, object_id: str, frame: int, count: int):
++    import csc
++    import numpy as np
++    from cascadeur_complete import runtime as rt
++    domain = rt._domain_scene(scene)
++    obj = {str(key): key for key in domain.model_viewer().get_objects()}[object_id]
++    # Actual installed namespace and return normalization, not an invented API.
++    returned = csc.domain.calc_skinned_mesh(domain, obj, frame)
++    raw = np.asarray(returned.positions)
++    if raw.shape == (count, 3, 1):
++        raw = raw[:, :, 0]
++    if raw.dtype != np.dtype("float32") or raw.shape != (count, 3) or not np.isfinite(raw).all():
++        raise ValueError("PAIR_CALCULATION_RETURN_TYPE_UNSUPPORTED")
++    return np.array(raw, dtype=np.float32, copy=True, order="C").tolist()
++
++
++def native_evaluate_pair(scene, retained) -> None:
++    from cascadeur_complete import runtime as rt
++    from cascadeur_complete.native_fixture import _modify
++    def refresh(_model, _update, updater):
++        retained.before_effect()
++        interpolator = updater.get_interpolator()
++        interpolator.reload()
++        interpolator.interpolate()
++    retained.before_effect()
++    _modify(rt._domain_scene(scene).modify_update, "Evaluate owned geometry pair", refresh)
++
++
++def native_perturb_first_driver(scene, fixtures, retained) -> None:
++    import csc
++    import numpy as np
++    from cascadeur_complete import runtime as rt
++    from cascadeur_complete.native_fixture import _modify
++    def mutate(model, _update, _callback_scene):
++        retained.before_effect()
++        model.data_editor().set_data_value(csc.model.DataId(fixtures[0]["position_data_ids"]["local"]),
++            1, np.asarray([2.25, .75, .25], dtype=np.float32).reshape(3, 1))
++    retained.before_effect()
++    _modify(rt._domain_scene(scene).modify, "Perturb one owned pair driver", mutate)
++
++
++def _expected(row: dict[str, Any], frame: int, raw_space: str):
++    import struct
++    if raw_space == "native_mesh_local":
++        return row["positions"]
++    translation = [row["matrices"][frame][axis][3] for axis in range(3)]
++    # The finite fixture uses exactly representable dyadic values. Round only
++    # to the native declared float32 output type; do not introduce a tolerance.
++    def f32(value):
++        return struct.unpack("!f", struct.pack("!f", value))[0]
++    return [[f32(value + translation[axis]) for axis, value in enumerate(vertex)]
++            for vertex in row["positions"]]
++
++
++@dataclass(frozen=True)
++class PairContract:
++    scene_context_bytes: bytes
++    graph_dtype_digest: str
++    raw_space: str
++    mesh_ids: tuple[str, str]
++    fixture_bytes: bytes
++    static_inputs_bytes: bytes
++    evidence_bytes: bytes
++
++
++class PairGeometryPositivePath:
++    """Bounded real-calculation path with an actual positive private registry.
++
++    The registry is limited to the EXACT owned two-mesh scene/profile and epoch,
++    not arbitrary objects that merely look like Transform/MeshObject by name.
++    It is useful to qualify the existing nonempty-pair route without changing
++    the public pairs schema. No production capability is granted by this class.
++    """
++    def __init__(self, *, scene, retained, runner: UpdateCaptureRunner):
++        self.scene, self.retained, self.runner = scene, retained, runner
++        self._contracts: dict[tuple[str, str, str], PairContract] = {}
++        self._fixtures: tuple[dict[str, Any], ...] = ()
++        self._used_setup = False
++
++    def _observe(self, schedule: tuple[tuple[str, int], ...], *, runner: UpdateCaptureRunner,
++                 before_calculation: Callable, assert_inputs: Callable | None = None):
++        if len(schedule) > 8 or any(type(frame) is not int or frame not in (0, 1, 2)
++                                   for _, frame in schedule):
++            raise ValueError("PAIR_CAPTURE_CALCULATION_BUDGET")
++        def sample(_model, _update, _updater, projection, facts):
++            if len(frozen_json(projection)) > LIMITS["maximum_projection_bytes"]:
++                raise ValueError("PAIR_CAPTURE_PROJECTION_BUDGET")
++            graph = json.loads(facts.graph_bytes)
++            if graph.get("external_links") != [] or not graph.get("nodes"):
++                raise ValueError("PAIR_CLOSED_TYPED_GRAPH_UNOBSERVED")
++            owners = {row.data_id: row.owner_id for row in facts.data}
++            if any(owners[key] != row.owner_id for row in facts.data for key in row.upstream_data_ids):
++                raise ValueError("PAIR_CROSS_OBJECT_GRAPH_UNSUPPORTED")
++            inputs = native_read_pair_inputs(self.scene, self._fixtures)
++            if assert_inputs is not None:
++                assert_inputs(inputs, projection, facts)
++            trials = []
++            for mesh_id, frame in schedule:
++                if mesh_id not in inputs:
++                    raise ValueError("PAIR_CAPTURE_MESH_SCOPE")
++                before_calculation()
++                raw = native_calculate_one(self.scene, mesh_id, frame, len(inputs[mesh_id]["positions"]))
++                trials.append({"mesh_id": mesh_id, "frame": frame, "raw": raw})
++            if native_read_pair_inputs(self.scene, self._fixtures) != inputs:
++                raise ValueError("PAIR_INPUTS_CHANGED_DURING_CALCULATION")
++            return inputs, trials
++        # CONDITIONAL: calc inside this callback must be explicitly qualified
++        # by this helper. There is no assumed SDK reentrancy/async completion.
++        return runner.run(sample)
++
++    @staticmethod
++    def _key(context: dict[str, Any]) -> tuple[str, str, str]:
++        return context["runtime_epoch"], context["runtime_fingerprint"], context["scene"]["scene_instance_id"]
++
++    @staticmethod
++    def _static(inputs):
++        return {key: {name: value for name, value in row.items() if name != "matrices"}
++                for key, row in inputs.items()}
++
++    def initialize(self, complete_retained_setup: Callable[[dict], None]) -> PairContract:
++        from cascadeur_complete.native_scene_reader import read_scene
++        if self._used_setup:
++            raise ValueError("PAIR_SETUP_ALREADY_ATTEMPTED_NO_AUTORETRY")
++        self._used_setup = True
++        self._fixtures = native_create_owned_pair(self.scene, self.retained)
++        ids = tuple(row["object_id"] for row in self._fixtures)
++        native_evaluate_pair(self.scene, self.retained)
++        # The owner saves fixture-before.casc here using retained.save_fixture.
++        # The binding in the document supplies this at complete step boundaries.
++        self.retained.save_fixture(self.scene, "fixture-before.casc", read_scene)
++        first, (before_inputs, trials) = self._observe(
++            tuple((mesh, frame) for mesh in ids for frame in CALIBRATION_FRAMES),
++            runner=self.runner, before_calculation=self.retained.before_effect)
++        for index, mesh_id in enumerate(ids):
++            if any([before_inputs[mesh_id]["matrices"][frame][axis][3] for axis in range(3)] != list(position)
++                   for frame, position in KEYS[index]):
++                raise ValueError("PAIR_INITIAL_DRIVER_MATRIX_EFFECT_UNOBSERVED")
++        native_perturb_first_driver(self.scene, self._fixtures, self.retained)
++        native_evaluate_pair(self.scene, self.retained)
++        second, (after_inputs, changed) = self._observe(tuple((mesh, 1) for mesh in ids),
++            runner=self.runner, before_calculation=self.retained.before_effect)
++        if (first.context_bytes != second.context_bytes
++                or frozen_json(first.facts.material()) != frozen_json(second.facts.material())
++                or self._static(before_inputs) != self._static(after_inputs)):
++            raise ValueError("PAIR_SETUP_CONTEXT_GRAPH_OR_STATIC_ASSET_CHANGED")
++        spaces = []
++        for space in ("native_mesh_local", "native_global"):
++            if all(row["raw"] == _expected(before_inputs[row["mesh_id"]], row["frame"], space) for row in trials):
++                spaces.append(space)
++        if len(spaces) != 1:
++            raise ValueError("PAIR_COORDINATE_CONVENTION_UNRESOLVED")
++        raw_space = spaces[0]
++        for mesh in ids:
++            repeated = [row for row in trials if row["mesh_id"] == mesh and row["frame"] == 0]
++            if len(repeated) != 2 or repeated[0]["raw"] != repeated[1]["raw"]:
++                raise ValueError("PAIR_FRAME_ORDER_DEPENDENCY")
++        if (before_inputs[ids[1]] != after_inputs[ids[1]]
++                or before_inputs[ids[0]]["matrices"][1] == after_inputs[ids[0]]["matrices"][1]
++                or any(before_inputs[ids[0]]["matrices"][frame] != after_inputs[ids[0]]["matrices"][frame]
++                       for frame in (0, 2))
++                or [after_inputs[ids[0]]["matrices"][1][i][3] for i in range(3)] != [2.25, .75, .25]):
++            raise ValueError("PAIR_DRIVER_EFFECT_OR_NEGATIVE_CONTROL_DIFFERS")
++        if any(row["raw"] != _expected(after_inputs[row["mesh_id"]], 1, raw_space) for row in changed):
++            raise ValueError("PAIR_PERTURBATION_COORDINATE_OR_FRESHNESS_DIFFERS")
++        self.retained.save_fixture(self.scene, "fixture-after.casc", read_scene)
++        evidence = {"profile": PROFILE, "limits": LIMITS, "raw_space": raw_space,
++                    "before": before_inputs, "after": after_inputs, "trials": trials + changed,
++                    "typed_graph": first.facts.material(), "context": json.loads(first.context_bytes),
++                    "production_general_rig_qualified": False}
++        # This callback must finish actual retention and return only after its
++        # durable setup outcome. Failure leaves _contracts empty, no fake issuer.
++        complete_retained_setup(evidence)
++        contract = PairContract(first.context_bytes, canonical_digest(first.facts.material()), raw_space,
++                                ids, frozen_json(list(self._fixtures)), frozen_json(self._static(after_inputs)),
++                                frozen_json(evidence))
++        self._contracts[self._key(json.loads(first.context_bytes))] = contract
++        # Only data/contract survive setup. Later capture obtains its own guard
++        # and runner; old setup admission cannot accidentally be consulted.
++        self.retained = None
++        self.runner = None
++        return contract
++
++    def status(self, current_context: dict[str, Any]) -> dict[str, Any]:
++        contract = self._contracts.get(self._key(current_context))
++        return {"native_execution_required": True, "registered": contract is not None,
++                "profile": PROFILE if contract else None,
++                "general_rig_supported": False, "requires_current_graph_capture": True}
++
++    def capture(self, *, mesh_ids: tuple[str, str], pairs: tuple[tuple[str, str], ...],
++                frames: tuple[int, ...], context: dict[str, Any], max_calculations: int,
++                runner: UpdateCaptureRunner, before_calculation: Callable):
++        # A NEW admitted capture request supplies these two bindings. Never use
++        # self.runner/self.retained here: their setup grant has already ended.
++        if (tuple(sorted(frames)) != frames or len(frames) != len(set(frames))
++                or not frames or not set(frames) <= {0, 1, 2}
++                or len(mesh_ids) != 2 or len(set(mesh_ids)) != 2
++                or len(pairs) != 1 or set(pairs[0]) != set(mesh_ids)
++                or tuple(context.get("frames", ())) != frames
++                or type(max_calculations) is not int or len(frames) * 2 > max_calculations):
++            raise ValueError("PAIR_CAPTURE_SCOPE_OR_BUDGET_INVALID")
++        current = runner._read_context()
++        contract = self._contracts.get(self._key(current))
++        if (contract is None or set(mesh_ids) != set(contract.mesh_ids)
++                or frozen_json(current) != contract.scene_context_bytes):
++            raise ValueError("PAIR_CAPTURE_CONTRACT_UNAVAILABLE")
++        def assert_current(inputs, _projection, facts):
++            if (canonical_digest(facts.material()) != contract.graph_dtype_digest
++                    or frozen_json(self._static(inputs)) != contract.static_inputs_bytes):
++                raise ValueError("PAIR_CAPTURE_CURRENT_CONTRACT_DIFFERS")
++        schedule = tuple((mesh, frame) for mesh in sorted(mesh_ids) for frame in frames)
++        snapshot, (inputs, trials) = self._observe(schedule, runner=runner,
++            before_calculation=before_calculation, assert_inputs=assert_current)
++        current = json.loads(snapshot.context_bytes)
++        contract = self._contracts.get(self._key(current))
++        if (contract is None or set(mesh_ids) != set(contract.mesh_ids)
++                or snapshot.context_bytes != contract.scene_context_bytes
++                or canonical_digest(snapshot.facts.material()) != contract.graph_dtype_digest
++                or frozen_json(self._static(inputs)) != contract.static_inputs_bytes):
++            raise ValueError("PAIR_CAPTURE_CURRENT_CONTRACT_DIFFERS")
++        basis, scale = context["scene_to_solver_basis"], context["metres_per_scene_unit"]
++        if (type(scale) not in (float, int) or not math.isfinite(scale) or scale <= 0
++                or len(basis) != 3 or any(len(row) != 3 for row in basis)
++                or any(type(v) not in (float, int) or not math.isfinite(v) for row in basis for v in row)):
++            raise ValueError("PAIR_DECLARED_CONVERSION_POLICY_INVALID")
++        if any(abs(sum(basis[k][i] * basis[k][j] for k in range(3)) - (1.0 if i == j else 0.0)) > 1e-10
++               for i in range(3) for j in range(3)):
++            raise ValueError("PAIR_DECLARED_BASIS_NOT_ORTHONORMAL")
++        determinant = sum(basis[0][i] * (basis[1][(i+1)%3] * basis[2][(i+2)%3]
++                          - basis[1][(i+2)%3] * basis[2][(i+1)%3]) for i in range(3))
++        if abs(determinant - 1.0) > 1e-10:
++            raise ValueError("PAIR_DECLARED_BASIS_NOT_PROPER")
++        canonical = []
++        for row in trials:
++            if row["raw"] != _expected(inputs[row["mesh_id"]], row["frame"], contract.raw_space):
++                raise ValueError("PAIR_CAPTURE_FINITE_FORMULA_MISMATCH")
++            matrix = inputs[row["mesh_id"]]["matrices"][row["frame"]]
++            points = []
++            for vertex in row["raw"]:
++                world = [vertex[i] + (matrix[i][3] if contract.raw_space == "native_mesh_local" else 0.0) for i in range(3)]
++                points.append([scale * sum(basis[i][j] * world[j] for j in range(3)) for i in range(3)])
++            if any(not math.isfinite(value) for point in points for value in point):
++                raise ValueError("PAIR_CANONICAL_OVERFLOW")
++            canonical.append({**row, "canonical_positions_m": points})
++        return {"native_execution_required": True, "profile": PROFILE, "raw_space": contract.raw_space,
++                "rows": canonical, "full_projection_digest": canonical_digest(snapshot.projection),
++                "graph_dtype_digest": contract.graph_dtype_digest,
++                "coordinate_evidence_digest": canonical_digest(json.loads(contract.evidence_bytes))}
++
++
++def bind_native_authenticated_terminal_lookup():
++    from cascadeur_complete import runtime as rt
++    from cascadeur_complete.native_checkpoint_restore import _original_terminal
++    return lambda request_id: _original_terminal(rt.runtime_root(), request_id)
++
++
++class MutationEvaluationRebind:
++    """Actual observed full state bridges DIFFERENT operation scopes.
++
++    Calls belong to native dispatch/finalizers, not MCP. Historical origin
++    source is authenticated by its signed original request and terminal; it is
++    never passed to assert_source against the post-mutation current scene.
++    Finalizers seal memory only. Unknown/missing terminals never become success.
++    """
++    def __init__(self, runner: UpdateCaptureRunner, authenticated_terminal: Callable):
++        self.runner = runner
++        self._terminal = authenticated_terminal
++        self._origins: dict[str, dict] = {}
++        self._evaluations: dict[str, dict] = {}
++
++    @staticmethod
++    def _full_source(source, snapshot: UpdateSnapshot):
++        context = json.loads(snapshot.context_bytes)
++        scope_digest = canonical_digest(source["scope"])
++        binding = source["binding"]
++        if (source["sample_digest"] != canonical_digest(snapshot.projection)
++                or binding["scope_digest"] != scope_digest
++                or binding["content_revision"] != canonical_digest({"scope_digest": scope_digest,
++                                                                    "content": snapshot.projection})
++                or source["adapter_fingerprint"] != context["runtime_fingerprint"]
++                or binding["runtime_epoch"] != context["runtime_epoch"]
++                or any(binding[k] != context["scene"][k] for k in ("scene_instance_id", "document_lineage_id"))):
++            raise ValueError("REBIND_REQUIRES_ACTUAL_COMPLETE_PROJECTION_SOURCE")
++
++    def _success(self, request_id: str):
++        request, receipt = self._terminal(request_id)
++        result = (receipt or {}).get("terminal_result") or {}
++        data = result.get("result") or {}
++        if (not isinstance(request, dict) or receipt is None
++                or receipt.get("phase") != "terminal" or receipt.get("outcome") != "succeeded"
++                or not result.get("ok") or result.get("outcome") != "succeeded"
++                or receipt.get("request_digest") != canonical_digest(request)
++                or receipt.get("result_digest") != canonical_digest(result)
++                or data.get("native_completion") != "observed"
++                or not isinstance(data.get("post_source_binding"), dict)
++                or receipt.get("scene_after") != data["post_source_binding"]["binding"]):
++            raise ValueError("REBIND_AUTHENTICATED_NATIVE_SUCCESS_UNAVAILABLE")
++        return request, receipt, data["post_source_binding"]
++
++    def stage_mutation(self, request: dict, successor: dict, snapshot: UpdateSnapshot) -> None:
++        self.runner.require(snapshot)
++        self._full_source(successor, snapshot)
++        if request["request_id"] in self._origins or len(self._origins) >= 64:
++            raise ValueError("REBIND_ORIGIN_REPLAY_OR_BUDGET")
++        self._origins[request["request_id"]] = {"request": frozen_json(request),
++            "successor": frozen_json(successor), "snapshot": snapshot, "receipt": None}
++
++    def seal_mutation(self, request_id: str) -> None:
++        pending = self._origins.get(request_id)
++        if pending is None:
++            raise ValueError("REBIND_ORIGIN_CANDIDATE_UNAVAILABLE")
++        request, receipt, successor = self._success(request_id)
++        context = json.loads(pending["snapshot"].context_bytes)
++        if (pending["request"] != frozen_json(request) or pending["successor"] != frozen_json(successor)
++                or receipt.get("runtime_epoch") != context["runtime_epoch"]):
++            raise ValueError("REBIND_ORIGIN_TERMINAL_DIFFERS")
++        pending["receipt"] = frozen_json(receipt)
++
++    def stage_evaluation(self, origin_id: str, request: dict, before: UpdateSnapshot,
++                         after: UpdateSnapshot) -> None:
++        self.runner.require(before)
++        self.runner.require(after)
++        origin = self._origins.get(origin_id)
++        if origin is None or origin["receipt"] is None:
++            raise ValueError("REBIND_ORIGIN_NOT_SEALED")
++        prior = origin["snapshot"]
++        if (request.get("operations") != [{"name": "animation.interpolation_refresh", "arguments": {}}]
++                or before.projection_bytes != prior.projection_bytes
++                or before.context_bytes != prior.context_bytes
++                or frozen_json(before.facts.material()) != frozen_json(prior.facts.material())
++                or before.context_bytes != after.context_bytes
++                or frozen_json(before.facts.material()) != frozen_json(after.facts.material())
++                or request["source_binding"]["inputs_digest"] != json.loads(origin["successor"])["inputs_digest"]):
++            raise ValueError("REBIND_MUTATION_SUCCESSOR_TO_EVALUATION_PRESTATE_DIFFERS")
++        self._full_source(request["source_binding"], before)
++        request_id = request["request_id"]
++        if request_id in self._evaluations or len(self._evaluations) >= 64:
++            raise ValueError("REBIND_EVALUATION_REPLAY_OR_BUDGET")
++        self._evaluations[request_id] = {"origin_id": origin_id, "request": frozen_json(request),
++            "before": before, "after": after, "receipt": None, "post_source": None}
++
++    def seal_evaluation(self, request_id: str) -> None:
++        pending = self._evaluations.get(request_id)
++        if pending is None:
++            raise ValueError("REBIND_EVALUATION_CANDIDATE_UNAVAILABLE")
++        request, receipt, post_source = self._success(request_id)
++        if pending["request"] != frozen_json(request):
++            raise ValueError("REBIND_EVALUATION_TERMINAL_DIFFERS")
++        self._full_source(post_source, pending["after"])
++        pending["receipt"], pending["post_source"] = frozen_json(receipt), frozen_json(post_source)
++
++    def require_capture(self, origin_id: str, private_capture: dict,
++                        motion_source: dict, current: UpdateSnapshot) -> dict:
++        self.runner.require(current)
++        evaluation_id = private_capture["evaluation"]["request_id"]
++        record = self._evaluations.get(evaluation_id)
++        if record is None or record["receipt"] is None or record["origin_id"] != origin_id:
++            raise ValueError("GEOMETRY_ORIGIN_SUCCESSOR_REBIND_UNAVAILABLE")
++        after = record["after"]
++        receipt_digest = canonical_digest(json.loads(record["receipt"]))
++        if (current.projection_bytes != after.projection_bytes or current.context_bytes != after.context_bytes
++                or frozen_json(current.facts.material()) != frozen_json(after.facts.material())
++                or frozen_json(motion_source) != record["post_source"]
++                or private_capture["evaluation_receipt_digest"] != receipt_digest
++                or private_capture["full_projection_digest"] != canonical_digest(current.projection)
++                or private_capture["canonical_batch"]["source_binding"] != motion_source
++                or private_capture["evaluation"]["post_source_digest"] != canonical_digest(motion_source)):
++            raise ValueError("GEOMETRY_ORIGIN_EVALUATION_CAPTURE_CHAIN_DIFFERS")
++        origin = self._origins[origin_id]
++        return {"native_execution_required": True, "origin_request_id": origin_id,
++                "origin_receipt_digest": canonical_digest(json.loads(origin["receipt"])),
++                "evaluation_request_id": evaluation_id, "evaluation_receipt_digest": receipt_digest,
++                "successor_pre_evaluation_projection_digest": canonical_digest(record["before"].projection),
++                "evaluated_projection_digest": canonical_digest(after.projection),
++                "current_graph_dtype_digest": canonical_digest(current.facts.material())}
+diff --git a/cascadeur_side/cascadeur_complete/native_probe_retention.py b/cascadeur_side/cascadeur_complete/native_probe_retention.py
+--- a/cascadeur_side/cascadeur_complete/native_probe_retention.py
++++ b/cascadeur_side/cascadeur_complete/native_probe_retention.py
+@@ -17,18 +17,21 @@
+     "finite_models": {"new_tabs": 1, "files": 2},
+     "position_writer": {"new_tabs": 1, "files": 2},
+     "geometry_calculation": {"new_tabs": 1, "files": 2},
++    "owned_pair_geometry": {"new_tabs": 1, "files": 2},
+ }
+ _SETUP_OPERATIONS = {
+     "native_adapter": "setup.qualify_native_adapter",
+     "finite_models": "setup.qualify_independent_models",
+     "position_writer": "setup.qualify_independent_position_writer",
+     "geometry_calculation": "setup.qualify_geometry_calculation",
++    "owned_pair_geometry": "setup.qualify_owned_pair_geometry",
+ }
+ _FILENAMES = {
+     "native_adapter": {"source.casc", "backup.casc", "working.casc", "next-backup.casc", "next-working.casc"},
+     "finite_models": {"fixture-before.casc", "fixture-after.casc"},
+     "position_writer": {"fixture-before.casc", "fixture-after.casc"},
+     "geometry_calculation": {"fixture-before.casc", "fixture-after.casc"},
++    "owned_pair_geometry": {"fixture-before.casc", "fixture-after.casc"},
+ }
+ 
+ 
+diff --git a/cascadeur_side/cascadeur_complete/native_serialization.py b/cascadeur_side/cascadeur_complete/native_serialization.py
+--- a/cascadeur_side/cascadeur_complete/native_serialization.py
++++ b/cascadeur_side/cascadeur_complete/native_serialization.py
+@@ -53,11 +53,15 @@
+         return json.loads(self.observation_bytes)
+ 
+ 
+-def pin_reference(scene):
++def pin_reference(scene, *, phase_guard=None, expected_projection=None):
+     """Read P0 once; its raw identity is never replaced by a later save."""
+     from .native_adapters import installed_build
+     guards.assert_loaded_package()
+     projection = read_scene(scene)
++    if expected_projection is not None and projection != expected_projection:
++        raise ValueError("SERIALIZATION_PRE_SAVE_SOURCE_DIFFERS")
++    from .native_serialization_binding import prepare_reference, register_reference
++    typed = prepare_reference(scene, projection, phase_guard=phase_guard)
+     raw = _bytes(projection)
+     if len(raw) > 64 * 1024**2:
+         raise ValueError("SERIALIZATION_REFERENCE_BUDGET_EXCEEDED")
+@@ -65,7 +69,11 @@
+                 "runtime_epoch": guards.RUNTIME_EPOCH,
+                 "runtime_fingerprint": guards.LOADED_FINGERPRINT,
+                 "installed_build": installed_build()}
+-    key = guards.digest(identity)
++    key_material = dict(identity)
++    if typed is not None:
++        key_material.update(typed_graph_digest=typed[1].facts_digest,
++                            typed_scene=dict(guards.scene_instance(scene)))
++    key = guards.digest(key_material)
+     anchor = ImmutableCheckpointAnchor(raw, **identity, checkpoint_anchor_digest=key)
+     prior = _ANCHORS.get(key)
+     if prior is not None and prior != anchor:
+@@ -73,6 +81,7 @@
+     if prior is not None:
+         return prior
+     _ANCHORS[key] = anchor
++    register_reference(anchor, typed)
+     return anchor
+ 
+ 
+@@ -89,27 +98,38 @@
+     return anchor
+ 
+ 
+-def compare_with_private_policy(scene, anchor, *, phase):
++def compare_with_private_policy(scene, anchor, *, phase, phase_guard=None):
+     """Read the actual phase result and compare directly with private P0."""
+     require_anchor(anchor)
+     if phase not in _PHASES:
+         raise ValueError("SERIALIZATION_PHASE_UNSUPPORTED")
+-    actual = read_scene(scene)
+-    policy_key = (anchor.installed_build, anchor.runtime_fingerprint,
+-                  role_layout_digest(anchor.reference_projection))
+-    policy = _POLICIES.get(policy_key)
+-    candidate = compare_projections(anchor.reference_projection, actual,
+-        expected_before_digest=anchor.reference_projection_digest,
+-        installed_build=anchor.installed_build, loaded_fingerprint=anchor.runtime_fingerprint,
+-        policy=policy)
+-    if not candidate.accepted:
+-        raise ValueError("SERIALIZATION_EQUIVALENCE_UNAVAILABLE: " + ",".join(candidate.failure_codes))
++    from .native_serialization_binding import compare_phase
++    typed = compare_phase(scene, anchor, phase, phase_guard=phase_guard)
++    if typed is not None:
++        actual = json.loads(typed.actual_projection_bytes)
++        candidate = json.loads(typed.observation_bytes)
++        comparison_kind = candidate["comparison_kind"]
++        policy_digest = candidate["serialization_policy_digest"]
++        exact_fields_digest = candidate["exact_fields_digest"]
++    else:
++        actual = read_scene(scene)
++        policy_key = (anchor.installed_build, anchor.runtime_fingerprint,
++                      role_layout_digest(anchor.reference_projection))
++        policy = _POLICIES.get(policy_key)
++        candidate = compare_projections(anchor.reference_projection, actual,
++            expected_before_digest=anchor.reference_projection_digest,
++            installed_build=anchor.installed_build, loaded_fingerprint=anchor.runtime_fingerprint,
++            policy=policy)
++        if not candidate.accepted:
++            raise ValueError("SERIALIZATION_EQUIVALENCE_UNAVAILABLE: " + ",".join(candidate.failure_codes))
++        comparison_kind, policy_digest = candidate.kind, candidate.policy_digest
++        exact_fields_digest = candidate.exact_fields_digest
+     observation = {"schema_version": 1, "kind": "private-serialization-observation",
+         "phase": phase, "checkpoint_anchor_digest": anchor.checkpoint_anchor_digest,
+         "reference_projection_digest": anchor.reference_projection_digest,
+-        "observed_projection_digest": guards.digest(actual), "comparison_kind": candidate.kind,
+-        "serialization_policy_digest": candidate.policy_digest,
+-        "exact_fields_digest": candidate.exact_fields_digest,
++        "observed_projection_digest": guards.digest(actual), "comparison_kind": comparison_kind,
++        "serialization_policy_digest": policy_digest,
++        "exact_fields_digest": exact_fields_digest,
+         "scene": dict(guards.scene_instance(scene)), "runtime_epoch": guards.RUNTIME_EPOCH,
+         "runtime_fingerprint": guards.LOADED_FINGERPRINT, "installed_build": anchor.installed_build}
+     record = NativeSerializationObservation(_bytes(actual), _bytes(observation))
+diff --git a/cascadeur_side/cascadeur_complete/native_serialization_binding.py b/cascadeur_side/cascadeur_complete/native_serialization_binding.py
+new file mode 100644
+--- /dev/null
++++ b/cascadeur_side/cascadeur_complete/native_serialization_binding.py
+@@ -0,0 +1,137 @@
++"""Code-owned bridge from existing checkpoints to fresh Update observations.
++
++Missing installed facts preserves the existing exact comparator. A present
++binding is never bypassed after it fails. P0 stays immutable across all phases.
++"""
++from __future__ import annotations
++
++from contextlib import contextmanager
++import json
++
++from . import guarded_runtime as guards
++from .native_scene_reader import read_scene
++from .native_update_capture import SerializationPositivePath, bind_native_update_runner, frozen_json
++from .native_owned_pair_binding import installed_leaf
++
++_SESSIONS = {}
++_LOADS = {}
++
++
++@contextmanager
++def _phase_window(scene, phase_guard):
++    """Internal current-request guard for an already executed save/load phase.
++
++    The original P0 source is historical after save/load. Only these concrete
++    checkpoint callers may advance the guarded read window. The phase's actual
++    raw state is frozen before Update and compared to private P0 afterwards.
++    No scope, approval, or request is changed and no caller flag issues proof.
++    """
++    from .incident_admission import assert_request_admission
++    if not callable(phase_guard):
++        raise ValueError("SERIALIZATION_CURRENT_PHASE_GUARD_REQUIRED")
++    request = getattr(guards._LOCAL, "request", None)
++    if request is None:
++        raise ValueError("SERIALIZATION_CURRENT_REQUEST_REQUIRED")
++    operations = request.get("operations") or []
++    if len(operations) != 1 or operations[0]["name"] not in (
++            "safety.bootstrap", "safety.checkpoint", "safety.rollback"):
++        raise ValueError("SERIALIZATION_PHASE_OPERATION_UNSUPPORTED")
++    assert_request_admission()
++    phase_guard()
++    raw = frozen_json(read_scene(scene))
++    identity = dict(guards.scene_instance(scene))
++    prior = getattr(guards._LOCAL, "guard", None)
++    def guard():
++        assert_request_admission()
++        phase_guard()
++        if (getattr(guards._LOCAL, "request", None) is not request
++                or dict(guards.scene_instance(scene)) != identity
++                or frozen_json(read_scene(scene)) != raw):
++            raise ValueError("SERIALIZATION_PHASE_SOURCE_CHANGED")
++    guard()
++    guards.set_write_guard(guard)
++    try:
++        yield guard
++    finally:
++        # This is a same-thread synchronous scope, not a reusable phase permit.
++        changed = getattr(guards._LOCAL, "guard", None) is not guard
++        guards.set_write_guard(prior)
++        if changed:
++            raise ValueError("SERIALIZATION_PHASE_GUARD_REPLACED")
++
++
++def prepare_reference(scene, projection, *, phase_guard):
++    leaf = installed_leaf(required=False)
++    if leaf is None:
++        return None
++    roles = getattr(leaf, "serialization_role_specs", None)
++    specs = () if roles is None else tuple(roles(scene))
++    with _phase_window(scene, phase_guard) as guard:
++        runner = bind_native_update_runner(scene, leaf.extract_installed_update_facts, guard)
++        path = SerializationPositivePath(runner, specs)
++        anchor = path.initialize_anchor()
++    if anchor.projection_bytes != frozen_json(projection):
++        raise ValueError("SERIALIZATION_REFERENCE_CHANGED_DURING_INITIALIZATION")
++    return path, anchor
++
++
++def register_reference(native_anchor, session):
++    if session is None:
++        return
++    key = native_anchor.checkpoint_anchor_digest
++    if key in _SESSIONS:
++        raise ValueError("SERIALIZATION_TYPED_ANCHOR_ALREADY_REGISTERED")
++    _SESSIONS[key] = session
++
++
++def compare_phase(scene, native_anchor, phase, *, phase_guard):
++    session = _SESSIONS.get(native_anchor.checkpoint_anchor_digest)
++    if session is None:
++        return None
++    path, anchor = session
++    leaf = installed_leaf()
++    with _phase_window(scene, phase_guard) as guard:
++        runner = path.bind_current_request_runner(anchor, scene,
++            extract_installed_update_facts=leaf.extract_installed_update_facts,
++            assert_admitted_effect=guard)
++        observation = path.observe_phase(anchor, phase, runner=runner)
++    path.verify(anchor, observation, json.loads(observation.actual_projection_bytes))
++    return observation
++
++
++def load_checkpoint_copy(record, parent_scene, working, *, source_guard):
++    """Exactly one real load, then privately bind its returned native scene."""
++    from .native_project_io import load_project_copy
++    from .incident_admission import assert_request_admission
++    fixed = record.get("fixed_anchor")
++    native_anchor = None if fixed is None else fixed["immutable_anchor"]
++    session = None if native_anchor is None else _SESSIONS.get(native_anchor.checkpoint_anchor_digest)
++    manifest = record["manifest"]
++    if session is None:
++        return load_project_copy(manifest["path"], working,
++            expected_sha256=manifest["sha256"], expected_length=manifest["bytes"], source_guard=source_guard)
++    path, anchor = session
++    leaf = installed_leaf()
++    def admitted():
++        assert_request_admission()
++        source_guard()
++    # load_checkpoint_copy itself makes no Update; graph observations follow
++    # in project_load/restored_save under a fresh current-phase window.
++    target, observation, runner = path.load_checkpoint_copy(anchor, guards.digest(manifest),
++        parent_scene, working, source_guard=source_guard,
++        extract_installed_update_facts=leaf.extract_installed_update_facts,
++        assert_admitted_effect=admitted)
++    _LOADS[(native_anchor.checkpoint_anchor_digest, id(target))] = (path, anchor, runner, target)
++    return target, observation
++
++
++def bind_completed_clone(native_anchor, target):
++    loaded = _LOADS.pop((native_anchor.checkpoint_anchor_digest, id(target)), None)
++    if loaded is None:
++        if native_anchor.checkpoint_anchor_digest in _SESSIONS:
++            raise ValueError("SERIALIZATION_ACTUAL_CLONE_LOAD_UNAVAILABLE")
++        return
++    path, anchor, runner, original_target = loaded
++    if original_target is not target:
++        raise ValueError("SERIALIZATION_CLONE_OBJECT_CHANGED")
++    path.bind_completed_clone_identity(anchor, runner)
+diff --git a/cascadeur_side/cascadeur_complete/native_setup_dependencies.py b/cascadeur_side/cascadeur_complete/native_setup_dependencies.py
+new file mode 100644
+--- /dev/null
++++ b/cascadeur_side/cascadeur_complete/native_setup_dependencies.py
+@@ -0,0 +1,57 @@
++"""Static dependency declarations for the exact owned-pair setup helper.
++
++This module never imports the installed leaf, imports csc, queries a scene,
++creates a directory, claims admission, or executes a qualification callback.
++Presence and Python shape are prerequisites, not native completion evidence.
++"""
++from __future__ import annotations
++
++import ast
++import hashlib
++from pathlib import Path
++
++_PAIR_HELPER = "setup.qualify_owned_pair_geometry"
++_LEAF = "native_installed_update_facts.py"
++_MAXIMUM_SOURCE_BYTES = 2 * 1024**2
++
++
++def validate_declared_pair_dependency(plan, bridge_directory, loaded_fingerprint):
++    """Consume an already authenticated exact setup sidecar before its claim.
++
++    Returns False when the plan does not contain the pair helper. The caller
++    supplies the native package directory from its own __file__, never wire
++    input. A declaration match does not enable any native adapter.
++    """
++    if not isinstance(plan, dict) or not isinstance(plan.get("steps"), list):
++        raise ValueError("AUTHENTICATED_SETUP_PLAN_REQUIRED")
++    if not any(step.get("operation") == _PAIR_HELPER for step in plan["steps"]):
++        return False
++    if plan.get("loaded_fingerprint") != loaded_fingerprint:
++        raise ValueError("PAIR_SETUP_LOADED_PACKAGE_DIFFERS")
++    expected = plan.get("helper_files", {}).get(_LEAF)
++    if not isinstance(expected, str) or len(expected) != 64:
++        raise ValueError("INSTALLED_UPDATE_FACTS_IMPLEMENTATION_REQUIRED")
++    path = Path(bridge_directory) / _LEAF
++    if not path.is_file() or path.is_symlink():
++        raise ValueError("INSTALLED_UPDATE_FACTS_IMPLEMENTATION_REQUIRED")
++    with path.open("rb") as stream:
++        raw = stream.read(_MAXIMUM_SOURCE_BYTES + 1)
++    if len(raw) > _MAXIMUM_SOURCE_BYTES:
++        raise ValueError("INSTALLED_UPDATE_FACTS_SOURCE_BUDGET_EXCEEDED")
++    if hashlib.sha256(raw).hexdigest() != expected:
++        raise ValueError("INSTALLED_UPDATE_FACTS_DECLARED_BYTES_DIFFER")
++    try:
++        tree = ast.parse(raw, filename=str(path), feature_version=(3, 11))
++    except (SyntaxError, ValueError) as error:
++        raise ValueError("INSTALLED_UPDATE_FACTS_DECLARATION_INVALID") from error
++    functions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
++                 and node.name == "extract_installed_update_facts"]
++    if len(functions) != 1 or not isinstance(functions[0], ast.FunctionDef):
++        raise ValueError("INSTALLED_UPDATE_FACTS_SYNCHRONOUS_DECLARATION_REQUIRED")
++    function = functions[0]
++    arguments = function.args
++    positional = arguments.posonlyargs + arguments.args
++    if (function.decorator_list or [argument.arg for argument in positional] != ["model", "update", "updater"]
++            or arguments.defaults or arguments.vararg or arguments.kwarg or arguments.kwonlyargs):
++        raise ValueError("INSTALLED_UPDATE_FACTS_EXACT_DECLARATION_REQUIRED")
++    return True
+diff --git a/cascadeur_side/cascadeur_complete/native_update_capture.py b/cascadeur_side/cascadeur_complete/native_update_capture.py
+new file mode 100644
+--- /dev/null
++++ b/cascadeur_side/cascadeur_complete/native_update_capture.py
+@@ -0,0 +1,470 @@
++"""Proposed native Update capture and private serialization control flow.
++
++The pure control flow is complete. Native role extraction is deliberately an
++injected CODE-OWNED leaf: its installed SDK getter names remain unconfirmed.
++Calling a reference constructor does not qualify that leaf. See the companion
++document for its exact output and empirical prerequisites. No csc import runs
++at module import, and this file has not been executed against Cascadeur.
++"""
++from __future__ import annotations
++
++from dataclasses import dataclass
++import json
++from typing import Any, Callable
++
++from .serialization_equivalence import (
++    DerivedPolicy, DerivedRule, canonical_digest, compare_projections,
++    role_layout_digest, _validate_binding, _validate_rule,
++)
++
++# Only the native binding factory shares this store across request-scoped
++# runners. It is not deserialized or populated by a public register function.
++_NATIVE_SNAPSHOT_STORES: dict[tuple[str, str, str], dict[int, "UpdateSnapshot"]] = {}
++
++
++def frozen_json(value: Any) -> bytes:
++    canonical_digest(value)  # Reject non-JSON/non-finite values before freezing.
++    return json.dumps(value, sort_keys=True, ensure_ascii=False,
++                      separators=(",", ":"), allow_nan=False).encode("utf-8")
++
++
++@dataclass(frozen=True)
++class NativeDataFact:
++    """Actual Update observation, not a classification inferred from a name.
++
++    producer_kind must identify the installed typed producer implementation.
++    authored_storage=False must be observed from that producer/input contract;
++    None is unknown. An Animation mode or absent display-name match is neither.
++    """
++    data_id: str
++    owner_id: str
++    native_dtype: str
++    sample_shape: tuple[int, ...]
++    producer_id: str | None
++    producer_kind: str | None
++    authored_storage: bool | None
++    upstream_data_ids: tuple[str, ...]
++    consumer_ids: tuple[str, ...]
++
++
++@dataclass(frozen=True)
++class UpdateFacts:
++    # Canonical full graph: nodes, typed ports, all edges, external links,
++    # producer implementation identities and all data/setting dependencies.
++    # This is an extractor result, NEVER a graph dictionary accepted over MCP.
++    graph_bytes: bytes
++    data: tuple[NativeDataFact, ...]
++
++    def validate(self, projection: dict[str, Any]) -> None:
++        graph = json.loads(self.graph_bytes)
++        if frozen_json(graph) != self.graph_bytes or len(self.graph_bytes) > 2 * 1024**2:
++            raise ValueError("UPDATE_GRAPH_ENCODING_OR_BUDGET_INVALID")
++        ids = [row.data_id for row in self.data]
++        actual = {row["id"] for row in projection["data"]}
++        if len(ids) != len(set(ids)) or set(ids) != actual:
++            raise ValueError("UPDATE_DATA_CLOSURE_INCOMPLETE")
++        for row in self.data:
++            if (not row.data_id or not row.owner_id or not row.native_dtype
++                    or type(row.authored_storage) not in (bool, type(None))
++                    or len(row.sample_shape) > 3
++                    or any(type(n) is not int or not 1 <= n <= 16 for n in row.sample_shape)
++                    or len(row.upstream_data_ids) != len(set(row.upstream_data_ids))
++                    or not set(row.upstream_data_ids) <= actual):
++                raise ValueError("UPDATE_TYPED_DATA_INVALID")
++        # Completeness of graph enumeration is a property of the installed leaf
++        # implementation, not a caller-provided `complete=True` flag.
++
++    def material(self) -> dict[str, Any]:
++        return {"graph": json.loads(self.graph_bytes), "data": [
++            {"id": f.data_id, "owner": f.owner_id, "dtype": f.native_dtype,
++             "shape": list(f.sample_shape), "producer": f.producer_id,
++             "producer_kind": f.producer_kind, "authored_storage": f.authored_storage,
++             "upstream": list(f.upstream_data_ids), "consumers": list(f.consumer_ids)}
++            for f in sorted(self.data, key=lambda item: item.data_id)]}
++
++
++@dataclass(frozen=True)
++class UpdateSnapshot:
++    projection_bytes: bytes
++    facts: UpdateFacts
++    context_bytes: bytes
++
++    @property
++    def projection(self) -> dict[str, Any]:
++        return json.loads(self.projection_bytes)
++
++
++class UpdateCaptureRunner:
++    """One observed Update callback, immutable result, exact outer readback.
++
++    Constructor callables are installed code bindings, never user data. `invoke`
++    must be the existing guarded transact/modify_update route. The native leaf
++    must first qualify no-yield callback completion and absence of post-return
++    graph work for this finite profile; the runner cannot prove that from JSON.
++    """
++    def __init__(self, *, invoke: Callable, read_projection: Callable,
++                 read_context: Callable, extract: Callable,
++                 private_snapshot_store: dict[int, UpdateSnapshot] | None = None):
++        self._invoke = invoke
++        self._read_projection = read_projection
++        self._read_context = read_context
++        self._extract = extract
++        self._issued = {} if private_snapshot_store is None else private_snapshot_store
++        self._active = False
++
++    def require(self, snapshot: UpdateSnapshot) -> UpdateSnapshot:
++        if self._issued.get(id(snapshot)) is not snapshot:
++            raise ValueError("UPDATE_SNAPSHOT_NOT_PRIVATELY_ISSUED")
++        if snapshot.context_bytes != frozen_json(self._read_context()):
++            raise ValueError("UPDATE_SNAPSHOT_CONTEXT_CHANGED")
++        return snapshot
++
++    def run(self, body: Callable | None = None, *, allow_projection_change: bool = False
++            ) -> tuple[UpdateSnapshot, Any]:
++        if self._active or len(self._issued) >= 256:
++            raise ValueError("UPDATE_CAPTURE_REENTRANT_OR_RECORD_BUDGET")
++        context = frozen_json(self._read_context())
++        outer_before = frozen_json(self._read_projection())
++        retained: list[tuple[UpdateSnapshot, Any]] = []
++        self._active = True
++        def capture(model, update, updater):
++            if not self._active or retained:
++                raise ValueError("UPDATE_CALLBACK_EXPIRED_OR_REPLAYED")
++            if frozen_json(self._read_context()) != context:
++                raise ValueError("UPDATE_CONTEXT_CHANGED")
++            before = self._read_projection()
++            if frozen_json(before) != outer_before:
++                raise ValueError("UPDATE_CHANGED_SOURCE_BEFORE_OBSERVATION")
++            facts = self._extract(model, update, updater)
++            if not isinstance(facts, UpdateFacts):
++                raise ValueError("UPDATE_EXTRACTOR_RETURN_TYPE_INVALID")
++            facts.validate(before)
++            value = None if body is None else body(model, update, updater, before, facts)
++            after = self._read_projection()
++            after_facts = self._extract(model, update, updater)
++            if not isinstance(after_facts, UpdateFacts):
++                raise ValueError("UPDATE_EXTRACTOR_RETURN_TYPE_INVALID")
++            after_facts.validate(after)
++            if frozen_json(after_facts.material()) != frozen_json(facts.material()):
++                raise ValueError("UPDATE_GRAPH_OR_DTYPE_CHANGED_WITHIN_CALLBACK")
++            if not allow_projection_change and frozen_json(after) != outer_before:
++                raise ValueError("UPDATE_OBSERVATION_CHANGED_RAW_STATE")
++            if frozen_json(self._read_context()) != context:
++                raise ValueError("UPDATE_CONTEXT_CHANGED")
++            retained.append((UpdateSnapshot(frozen_json(after), after_facts, context), value))
++        try:
++            self._invoke(capture)
++        finally:
++            self._active = False
++        if len(retained) != 1:
++            raise ValueError("UPDATE_CALLBACK_COMPLETION_UNOBSERVED")
++        snapshot, value = retained[0]
++        if (frozen_json(self._read_projection()) != snapshot.projection_bytes
++                or frozen_json(self._read_context()) != context):
++            raise ValueError("UPDATE_POST_RETURN_STATE_DIFFERS")
++        self._issued[id(snapshot)] = snapshot
++        return snapshot, value
++
++    def transition(self, body: Callable) -> tuple[UpdateSnapshot, UpdateSnapshot, Any]:
++        """Two actual bookends of ONE already-authorized evaluation callback.
++
++        The pre-state becomes privately issued only after that same callback
++        and exact outer readback complete. Never manufacture it from a receipt.
++        """
++        if len(self._issued) > 254:
++            raise ValueError("UPDATE_TRANSITION_BOOKEND_BUDGET")
++        before_values: list[UpdateSnapshot] = []
++        def observe(model, update, updater, projection, facts):
++            before_values.append(UpdateSnapshot(frozen_json(projection), facts,
++                                               frozen_json(self._read_context())))
++            return body(model, update, updater, projection, facts)
++        after, value = self.run(observe, allow_projection_change=True)
++        if len(before_values) != 1 or len(self._issued) >= 256:
++            raise ValueError("UPDATE_TRANSITION_BOOKEND_UNAVAILABLE")
++        before = before_values[0]
++        self._issued[id(before)] = before
++        return before, after, value
++
++
++def bind_native_update_runner(scene, extract_installed_update_facts: Callable,
++                              assert_admitted_effect: Callable) -> UpdateCaptureRunner:
++    """CONDITIONAL native binding; imports are all existing source symbols.
++
++    `extract_installed_update_facts` is the one missing SDK leaf. This binding is
++    never installed by module import and may not be called as a read operation.
++    `assert_admitted_effect` must check the ORIGINAL request's effect/admission,
++    epoch, owned scene, callback allowance, and exact source before entry.
++    """
++    from cascadeur_complete import runtime as rt, guarded_runtime as guards
++    from cascadeur_complete.handler_registry import transact
++    from cascadeur_complete.native_adapters import installed_build
++    from cascadeur_complete.native_export import selection_observation
++    from cascadeur_complete.native_scene_reader import read_scene
++    domain = rt._domain_scene(scene)
++    def context():
++        guards.assert_loaded_package()
++        if rt._scene_view() is not scene:
++            raise ValueError("UPDATE_SCENE_NOT_ACTIVE")
++        return {"installed_build": installed_build(), "runtime_epoch": guards.RUNTIME_EPOCH,
++                "runtime_fingerprint": guards.LOADED_FINGERPRINT,
++                "scene": dict(guards.scene_instance(scene)),
++                "selection": selection_observation(scene),
++                "frame": int(domain.get_current_frame(False))}
++    def invoke(callback):
++        assert_admitted_effect()
++        transact(domain.modify_update, "Cascadeur Complete: bounded typed graph capture",
++                 callback, before_write=assert_admitted_effect)
++    observed = context()
++    store_key = (observed["installed_build"], observed["runtime_epoch"], observed["runtime_fingerprint"])
++    snapshot_store = _NATIVE_SNAPSHOT_STORES.setdefault(store_key, {})
++    return UpdateCaptureRunner(invoke=invoke, read_projection=lambda: read_scene(scene),
++        read_context=context, extract=extract_installed_update_facts, private_snapshot_store=snapshot_store)
++
++
++@dataclass(frozen=True)
++class RoleSpec:
++    """Code-reviewed installed producer rule and preselected numeric budget.
++
++    These values are fixed BEFORE any save/load comparison, never fitted to the
++    observed Cascy discrepancy. Only float32 component rules are enabled here;
++    quaternion sign/norm semantics need an independent producer contract.
++    """
++    data_id: str
++    data_owner_id: str
++    behaviour_owner_id: str
++    behaviour_id: str
++    property_name: str
++    property_kind: str
++    property_index: int | None
++    producer_kind: str
++    sample_shape: tuple[int, ...]
++    units: str
++    max_ulps: int
++    max_absolute_native: float
++
++
++@dataclass(frozen=True)
++class Anchor:
++    projection_bytes: bytes
++    exact_digest: str
++    context_bytes: bytes
++    facts_digest: str
++    policy: DerivedPolicy | None
++
++
++@dataclass(frozen=True)
++class PhaseObservation:
++    anchor_digest: str
++    actual_projection_bytes: bytes
++    observation_bytes: bytes
++
++
++class SerializationPositivePath:
++    """Issuer -> registration -> current Update read -> fixed-P0 consumer.
++
++    Positive numeric acceptance exists after actual leaf qualification and
++    source-bound role capture. This reference registry grants no native rights.
++    """
++    PHASES = frozenset({"checkpoint_save", "working_save", "project_load", "restored_save"})
++
++    def __init__(self, runner: UpdateCaptureRunner, role_specs: tuple[RoleSpec, ...]):
++        if len(role_specs) > 64 or len({x.data_id for x in role_specs}) != len(role_specs):
++            raise ValueError("SERIALIZATION_ROLE_SPEC_BUDGET")
++        self.runner = runner
++        self.role_specs = role_specs
++        self._anchors: dict[int, Anchor] = {}
++        self._policies: dict[tuple[str, str, str, str], DerivedPolicy] = {}
++        self._observations: dict[int, PhaseObservation] = {}
++        self._phase_runners: dict[int, dict[int, bytes]] = {}
++        self._loads: dict[int, tuple[Any, Any, bytes]] = {}
++
++    def initialize_anchor(self) -> Anchor:
++        snapshot, _ = self.runner.run()
++        self.runner.require(snapshot)
++        projection = snapshot.projection
++        context = json.loads(snapshot.context_bytes)
++        facts = {row.data_id: row for row in snapshot.facts.data}
++        facts_digest = canonical_digest(snapshot.facts.material())
++        rules = []
++        rows = {row["id"]: row for row in projection["data"]}
++        for spec in self.role_specs:
++            fact = facts.get(spec.data_id)
++            if (fact is None or fact.authored_storage is not False
++                    or fact.native_dtype != "float32" or fact.sample_shape != spec.sample_shape
++                    or fact.owner_id != spec.data_owner_id or not fact.producer_id
++                    or fact.producer_kind != spec.producer_kind or not fact.upstream_data_ids):
++                raise ValueError("SERIALIZATION_INSTALLED_DERIVED_ROLE_UNOBSERVED")
++            native_type = canonical_digest({"dtype": fact.native_dtype,
++                                           "shape": list(fact.sample_shape), "data": fact.data_id})
++            rule = DerivedRule(spec.data_id, spec.data_owner_id, spec.behaviour_owner_id,
++                spec.behaviour_id, spec.property_name, spec.property_kind, spec.property_index,
++                spec.sample_shape, "float32_components", native_type, facts_digest, spec.units,
++                spec.max_ulps, spec.max_absolute_native, 0.0, 0.0)
++            _validate_rule(rule)
++            _validate_binding(projection, rows[spec.data_id], rule)
++            rules.append(rule)
++        policy = None
++        if rules:
++            policy = DerivedPolicy(1, context["installed_build"], context["runtime_fingerprint"],
++                facts_digest, role_layout_digest(projection), tuple(rules), 2_000_000)
++        anchor = Anchor(snapshot.projection_bytes, canonical_digest(projection),
++                        snapshot.context_bytes, facts_digest, policy)
++        if len(self._anchors) >= 64:
++            raise ValueError("SERIALIZATION_ANCHOR_BUDGET")
++        self._anchors[id(anchor)] = anchor
++        self._phase_runners[id(anchor)] = {id(self.runner): frozen_json(context["scene"])}
++        if policy is not None:
++            self._policies[(context["runtime_epoch"], anchor.exact_digest,
++                            facts_digest, policy.expected_role_layout_digest)] = policy
++        return anchor
++
++    def status(self, anchor: Anchor) -> dict[str, Any]:
++        private = self._anchors.get(id(anchor)) is anchor
++        return {"native_execution_required": True, "anchor_registered": private,
++                "typed_numeric_path_registered": private and anchor.policy is not None,
++                "requires_fresh_update_at_each_use": True}
++
++    def bind_current_request_runner(self, anchor: Anchor, scene, *,
++                                    extract_installed_update_facts: Callable,
++                                    assert_admitted_effect: Callable) -> UpdateCaptureRunner:
++        """Fresh current-dispatch guard, for an already privately bound scene.
++
++        Never reuse the anchor request's grant/closure. A new instance must go
++        through load_checkpoint_copy first; this method only refreshes a request
++        binding for an existing actual native identity, not a wire scene dict.
++        """
++        from cascadeur_complete import guarded_runtime as guards
++        if self._anchors.get(id(anchor)) is not anchor:
++            raise ValueError("SERIALIZATION_PRIVATE_ANCHOR_UNAVAILABLE")
++        identity = frozen_json(dict(guards.scene_instance(scene)))
++        if identity not in self._phase_runners[id(anchor)].values():
++            raise ValueError("SERIALIZATION_SCENE_HAS_NO_PRIVATE_LOAD_BINDING")
++        runner = bind_native_update_runner(scene, extract_installed_update_facts,
++                                           assert_admitted_effect)
++        self._phase_runners[id(anchor)][id(runner)] = identity
++        return runner
++
++    def observe_phase(self, anchor: Anchor, phase: str,
++                      *, runner: UpdateCaptureRunner) -> PhaseObservation:
++        if self._anchors.get(id(anchor)) is not anchor or phase not in self.PHASES:
++            raise ValueError("SERIALIZATION_PRIVATE_ANCHOR_OR_PHASE_INVALID")
++        expected_scene = self._phase_runners[id(anchor)].get(id(runner))
++        if expected_scene is None:
++            raise ValueError("SERIALIZATION_RUNNER_HAS_NO_PRIVATE_LOAD_BINDING")
++        snapshot, _ = runner.run()
++        runner.require(snapshot)
++        # Deliberately no cached graph-revision shortcut. Every use re-reads it.
++        context = json.loads(snapshot.context_bytes)
++        original_context = json.loads(anchor.context_bytes)
++        if any(context[k] != original_context[k] for k in (
++                "installed_build", "runtime_epoch", "runtime_fingerprint")):
++            raise ValueError("SERIALIZATION_ANCHOR_CONTEXT_CHANGED")
++        if frozen_json(context["scene"]) != expected_scene:
++            raise ValueError("SERIALIZATION_SCENE_HAS_NO_PRIVATE_LOAD_BINDING")
++        if canonical_digest(snapshot.facts.material()) != anchor.facts_digest:
++            raise ValueError("SERIALIZATION_CURRENT_PRODUCER_GRAPH_OR_DTYPE_CHANGED")
++        policy = anchor.policy
++        if policy is not None:
++            key = (context["runtime_epoch"], anchor.exact_digest, anchor.facts_digest,
++                   policy.expected_role_layout_digest)
++            if self._policies.get(key) is not policy:
++                raise ValueError("SERIALIZATION_PRIVATE_POLICY_UNAVAILABLE")
++        candidate = compare_projections(json.loads(anchor.projection_bytes), snapshot.projection,
++            expected_before_digest=anchor.exact_digest,
++            installed_build=context["installed_build"], loaded_fingerprint=context["runtime_fingerprint"],
++            policy=policy)
++        if not candidate.accepted:
++            raise ValueError("SERIALIZATION_EQUIVALENCE_UNAVAILABLE:" + ",".join(candidate.failure_codes))
++        value = {"native_execution_required": True, "phase": phase, "reference_projection_digest": anchor.exact_digest,
++                 "observed_projection_digest": candidate.after_digest, "comparison_kind": candidate.kind,
++                 "serialization_policy_digest": candidate.policy_digest,
++                 "exact_fields_digest": candidate.exact_fields_digest,
++                 "current_graph_dtype_digest": anchor.facts_digest,
++                 "observed_scene": context["scene"]}
++        observation = PhaseObservation(anchor.exact_digest, snapshot.projection_bytes, frozen_json(value))
++        if len(self._observations) >= 256:
++            raise ValueError("SERIALIZATION_OBSERVATION_BUDGET")
++        self._observations[id(observation)] = observation
++        return observation
++
++    def load_checkpoint_copy(self, anchor: Anchor, checkpoint_digest: str, parent_scene,
++                             working_path, *, source_guard: Callable,
++                             extract_installed_update_facts: Callable,
++                             assert_admitted_effect: Callable):
++        """CONDITIONAL native bridge: actual private file -> actual new scene.
++
++        Replace the existing load_project_copy call at _restore_native, do NOT
++        run this as a second load. No wire load observation/identity is accepted.
++        Existing restore permit/source/lifecycle checks remain with the caller.
++        """
++        from cascadeur_complete import guarded_runtime as guards
++        from cascadeur_complete.native_checkpoint_restore import _CHECKPOINTS
++        from cascadeur_complete.native_serialization import require_anchor
++        from cascadeur_complete.native_project_io import load_project_copy
++        if self._anchors.get(id(anchor)) is not anchor:
++            raise ValueError("SERIALIZATION_PRIVATE_ANCHOR_UNAVAILABLE")
++        record = _CHECKPOINTS.get(checkpoint_digest)
++        fixed = None if record is None else record.get("fixed_anchor")
++        if fixed is None:
++            raise ValueError("SERIALIZATION_PRIVATE_CHECKPOINT_UNAVAILABLE")
++        native_anchor = require_anchor(fixed["immutable_anchor"])
++        original_context = json.loads(anchor.context_bytes)
++        if (native_anchor.reference_bytes != anchor.projection_bytes
++                or native_anchor.reference_projection_digest != anchor.exact_digest
++                or native_anchor.installed_build != original_context["installed_build"]
++                or native_anchor.runtime_epoch != original_context["runtime_epoch"]
++                or native_anchor.runtime_fingerprint != original_context["runtime_fingerprint"]):
++            raise ValueError("SERIALIZATION_LOAD_FIXED_ANCHOR_DIFFERS")
++        manifest = record["manifest"]
++        parent_identity = dict(guards.scene_instance(parent_scene))
++        if (manifest["working_scene_instance_id"] != parent_identity["scene_instance_id"]
++                or manifest["document_lineage_id"] != parent_identity["document_lineage_id"]):
++            raise ValueError("SERIALIZATION_LOAD_PARENT_IS_NOT_PRIVATE_WORKSPACE")
++        assert_admitted_effect()
++        source_guard()
++        target, observation = load_project_copy(manifest["path"], working_path,
++            expected_sha256=manifest["sha256"], expected_length=manifest["bytes"],
++            source_guard=source_guard)
++        source_guard()
++        if (observation.get("native_completion") != "observed"
++                or observation["source_file"]["sha256"] != manifest["sha256"]
++                or observation["source_file"]["length"] != manifest["bytes"]
++                or observation["working_file"]["sha256"] != manifest["sha256"]
++                or observation["working_file"]["length"] != manifest["bytes"]):
++            raise ValueError("SERIALIZATION_ACTUAL_PROJECT_LOAD_UNOBSERVED")
++        runner = bind_native_update_runner(target, extract_installed_update_facts,
++                                           assert_admitted_effect)
++        target_identity = dict(guards.scene_instance(target))
++        if target_identity["scene_instance_id"] == parent_identity["scene_instance_id"]:
++            raise ValueError("SERIALIZATION_LOAD_DID_NOT_CREATE_NEW_INSTANCE")
++        self._phase_runners[id(anchor)][id(runner)] = frozen_json(target_identity)
++        self._loads[id(runner)] = (parent_scene, target, frozen_json({
++            "parent": parent_identity, "provisional_target": target_identity,
++            "checkpoint_digest": checkpoint_digest, "load": observation}))
++        return target, observation, runner
++
++    def bind_completed_clone_identity(self, anchor: Anchor, runner: UpdateCaptureRunner) -> None:
++        """Memory-only continuation AFTER existing guards.link_clone succeeds.
++
++        _restore_native currently links lineage only after both comparisons and
++        original-tab restoration. Preserve that order and record the provisional
++        load identity separately; never edit P0 or rewrite the earlier observation.
++        """
++        from cascadeur_complete import guarded_runtime as guards
++        if self._anchors.get(id(anchor)) is not anchor or id(runner) not in self._loads:
++            raise ValueError("SERIALIZATION_PRIVATE_LOAD_UNAVAILABLE")
++        parent, target, raw = self._loads[id(runner)]
++        retained = json.loads(raw)
++        current = dict(guards.scene_instance(target))
++        if (dict(guards.scene_instance(parent)) != retained["parent"]
++                or current["scene_instance_id"] != retained["provisional_target"]["scene_instance_id"]
++                or current["document_lineage_id"] != retained["parent"]["document_lineage_id"]):
++            raise ValueError("SERIALIZATION_COMPLETED_CLONE_IDENTITY_DIFFERS")
++        self._phase_runners[id(anchor)][id(runner)] = frozen_json(current)
++
++    def verify(self, anchor: Anchor, observation: PhaseObservation, actual_projection: dict) -> None:
++        if (self._anchors.get(id(anchor)) is not anchor
++                or self._observations.get(id(observation)) is not observation
++                or observation.anchor_digest != anchor.exact_digest
++                or frozen_json(actual_projection) != observation.actual_projection_bytes):
++            raise ValueError("SERIALIZATION_OBSERVATION_NOT_PRIVATE_OR_RAW_STATE_DIFFERS")
+diff --git a/cascadeur_side/cascadeur_complete/runtime.py b/cascadeur_side/cascadeur_complete/runtime.py
+--- a/cascadeur_side/cascadeur_complete/runtime.py
++++ b/cascadeur_side/cascadeur_complete/runtime.py
+@@ -1486,7 +1486,9 @@
+         if not isinstance(op, dict) or not isinstance(op.get("name"), str) or not isinstance(op.get("arguments") or {}, dict):
+             return "mixed"
+         name, args = op["name"], op.get("arguments") or {}
+-        if name.startswith("io.export_") or name in {"scene.save", "system.observe_geometry_capture", "animation.mesh_sample"}:
++        if name == "system.observe_geometry_capture":
++            effects.append("mixed")
++        elif name.startswith("io.export_") or name in {"scene.save", "animation.mesh_sample"}:
+             effects.append("file")
+         elif name.startswith("io.import_") or name.startswith("safety."):
+             effects.append("mixed")
+@@ -1532,6 +1534,14 @@
+         terminal = guards.previous_terminal(root, request)
+         if terminal is not None:
+             return terminal
++        operations = request.get("operations")
++        if (isinstance(operations, list) and len(operations) == 1 and isinstance(operations[0], dict)
++                and operations[0].get("name") in admission.SETUP_IDS):
++            preview = admission.validate_unclaimed(root, request)
++            from .native_setup_dependencies import validate_declared_pair_dependency
++            if validate_declared_pair_dependency(preview["setup"], Path(__file__).parent,
++                                                guards.LOADED_FINGERPRINT):
++                guards.assert_loaded_package()
+         with admission.admitted_request(root, request) as sidecar:
+             admitted = True
+             if admission.diagnostic_request(request):
+@@ -1683,6 +1693,9 @@
+                         approved_restore = approve(request, source, post_source, result, observation) is True
+                     except Exception:
+                         approved_restore = False
++            if old_id != new_id and name == "scene.activate" and observation is not None:
++                from .native_owned_pair_binding import approve_pair_activation_successor
++                approved_restore = approve_pair_activation_successor(request, source, post_source, result, observation)
+             if old_id != new_id and name != "safety.bootstrap" and not approved_restore:
+                 outcome = "outcome_unknown"
+                 result["ok"] = False
+@@ -1768,6 +1781,8 @@
+     finalize_insertion(_scene_view() or scene, request, result, receipt)
+     from .native_geometry_capture import finalize_geometry_capture
+     finalize_geometry_capture(_scene_view() or scene, request, result, receipt)
++    from .native_owned_pair_binding import finalize_pair_operation
++    finalize_pair_operation(_scene_view() or scene, request, result, receipt)
+     return result
+ 
+ 
+diff --git a/src/cascadeur_complete/effects.py b/src/cascadeur_complete/effects.py
+--- a/src/cascadeur_complete/effects.py
++++ b/src/cascadeur_complete/effects.py
+@@ -20,7 +20,8 @@
+ def classify_effect(operation_name: str, normalized_arguments: dict | None = None) -> str:
+     args = normalized_arguments or {}
+     if operation_name == "system.observe_geometry_capture":
+-        return "file"
++        # The owned-pair backend observes its graph inside an admitted Update.
++        return "mixed"
+     if operation_name == "animation.interpolation_refresh":
+         return "evaluation"
+     if operation_name == "animation.transform_get" and args.get("refresh", False):
+diff --git a/src/cascadeur_complete/incident_admission.py b/src/cascadeur_complete/incident_admission.py
+--- a/src/cascadeur_complete/incident_admission.py
++++ b/src/cascadeur_complete/incident_admission.py
+@@ -24,7 +24,8 @@
+ SETUP_IDS = {"setup.qualify_native_adapter": (2, 5),
+              "setup.qualify_independent_models": (1, 2),
+              "setup.qualify_independent_position_writer": (1, 2),
+-             "setup.qualify_geometry_calculation": (1, 2)}
++             "setup.qualify_geometry_calculation": (1, 2),
++             "setup.qualify_owned_pair_geometry": (1, 2)}
+ 
+ 
+ class PersistedEvidence:
+@@ -261,6 +262,7 @@
+     maximum_geometry_calculations: int | None = None
+     maximum_evaluations: int | None = None
+     maximum_driver_mutations: int | None = None
++    maximum_update_graph_captures: int | None = None
+ 
+ 
+ def assert_setup_admission(setup_id, setup_invocation_ref=None):
+@@ -352,6 +354,9 @@
+             elif setup_id == "setup.qualify_independent_position_writer":
+                 from .native_independent_position import qualify_independent_position_writer
+                 result = qualify_independent_position_writer()
++            elif setup_id == "setup.qualify_owned_pair_geometry":
++                from .native_owned_pair_binding import qualify_owned_pair_geometry
++                result = qualify_owned_pair_geometry()
+             elif setup_id == "setup.qualify_geometry_calculation":
+                 from .native_geometry_qualification import qualify_geometry_calculation
+                 result = qualify_geometry_calculation()
+diff --git a/src/cascadeur_complete/incident_effects.py b/src/cascadeur_complete/incident_effects.py
+--- a/src/cascadeur_complete/incident_effects.py
++++ b/src/cascadeur_complete/incident_effects.py
+@@ -20,7 +20,8 @@
+ def classify_effect(operation_name: str, normalized_arguments: dict | None = None) -> str:
+     args = normalized_arguments or {}
+     if operation_name == "system.observe_geometry_capture":
+-        return "file"
++        # The owned-pair backend observes its graph inside an admitted Update.
++        return "mixed"
+     if operation_name == "animation.interpolation_refresh":
+         return "evaluation"
+     if operation_name == "animation.transform_get" and args.get("refresh", False):
+diff --git a/src/cascadeur_complete/incident_setup.py b/src/cascadeur_complete/incident_setup.py
+--- a/src/cascadeur_complete/incident_setup.py
++++ b/src/cascadeur_complete/incident_setup.py
+@@ -21,9 +21,12 @@
+     "setup.qualify_independent_models": ("native_interpolation_qualification.py", 1, 2),
+     "setup.qualify_independent_position_writer": ("native_independent_position.py", 1, 2),
+     "setup.qualify_geometry_calculation": ("native_geometry_qualification.py", 1, 2),
++    "setup.qualify_owned_pair_geometry": ("native_owned_pair_binding.py", 1, 2),
+ }
+ _SEMANTIC_LIMITS = {"setup.qualify_geometry_calculation": {
+-    "maximum_geometry_calculations": 5, "maximum_evaluations": 2, "maximum_driver_mutations": 1}}
++    "maximum_geometry_calculations": 5, "maximum_evaluations": 2, "maximum_driver_mutations": 1},
++    "setup.qualify_owned_pair_geometry": {"maximum_geometry_calculations": 10,
++        "maximum_evaluations": 2, "maximum_driver_mutations": 1, "maximum_update_graph_captures": 2}}
+ 
+ 
+ def _bridge_directory():
+diff --git a/src/cascadeur_complete/recipe_authorization.py b/src/cascadeur_complete/recipe_authorization.py
+--- a/src/cascadeur_complete/recipe_authorization.py
++++ b/src/cascadeur_complete/recipe_authorization.py
+@@ -1,6 +1,8 @@
+ """Exact step authorization and finite cumulative resource accounting."""
+ 
+ from __future__ import annotations
++
++from .effects import classify_effect
+ 
+ import time
+ import math
+@@ -124,7 +126,8 @@
+                 or source.scope.get("operation_name") != step.operation_name
+                 or source.scope.get("operation_arguments") != arguments
+                 or source.scope.get("operation_arguments_digest") != digest(arguments)
+-                or stage_effect.effect_class != "file" or step.allowed_channels != ("file",)
++                or stage_effect.effect_class != classify_effect(step.operation_name, arguments)
++                or step.allowed_channels != ("file", "evaluation")
+                 or set(value.mesh_ids) != set(step.target.object_ids)):
+             raise RecipeConflict("GEOMETRY_CAPTURE_AUTHORIZATION_MISMATCH")
+         return
+diff --git a/src/cascadeur_complete/recipe_native_service.py b/src/cascadeur_complete/recipe_native_service.py
+--- a/src/cascadeur_complete/recipe_native_service.py
++++ b/src/cascadeur_complete/recipe_native_service.py
+@@ -10,6 +10,7 @@
+ from pathlib import Path
+ 
+ from .models import Operation, SourceBinding
++from .effects import classify_effect
+ from .recipe_models import digest
+ from .recipe_store import RecipeConflict, file_sha256
+ from .stage_contracts import BootstrapGrant, CheckpointObservation, DerivedTargetMapping, FileManifest, RecipeTargetObservation, StageEffect
+@@ -604,7 +605,7 @@
+         return StageEffect(step_id=step.step_id, declaration_digest=step.fixed_parameters_digest,
+             lowering_rule_id=step.lowering_rule_id, lowering_rule_digest=step.lowering_rule_digest,
+             feature_id=step.feature_id, operation_name=step.operation_name,
+-            effect_class="mixed" if stage in {"checkpoint", "initial_checkpoint"} else "file" if stage in {"export_stage", "geometry_capture"} else "evaluation" if stage in {"evaluation", "insertion_evaluation"} else "scene",
++            effect_class=classify_effect(step.operation_name, args),
+             arguments=args, arguments_digest=digest(args), operation_digest=digest([{"name": step.operation_name, "arguments": args}]),
+             effect_bounds_digest=digest(step.max_effect_from_baseline),
+             source_binding=source, input_files=tuple(inputs), output_paths=tuple(outputs), target_object_ids=ids,
+diff --git a/src/cascadeur_complete/recipe_planning.py b/src/cascadeur_complete/recipe_planning.py
+--- a/src/cascadeur_complete/recipe_planning.py
++++ b/src/cascadeur_complete/recipe_planning.py
+@@ -121,7 +121,7 @@
+     add("baseline_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
+     if spec.geometry_capture is not None:
+         add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
+-            {"after": "baseline_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
++            {"after": "baseline_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file", "evaluation"),
+             postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
+             objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
+     add("analyze", "motion_analysis", "motion.analyze", "host_compute", postconditions=("required_metric_eligibility",))
+@@ -159,7 +159,7 @@
+         if spec.geometry_capture is not None:
+             add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
+                 {"after": "actual_readback", "cleanup_index": index,
+-                 "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
++                 "policy": spec.geometry_capture.model_dump(mode="json")}, ("file", "evaluation"),
+                 postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
+                 objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
+             add("actual_verify", "motion_quality", "motion.quality", "host_compute", {"cleanup_index": index},
+@@ -171,7 +171,7 @@
+             channels=("evaluation",), postconditions=("evaluation_settled",))
+         add("quality_capture", "transform_get", "motion.capture", "read", postconditions=("complete_actual_capture",))
+         add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
+-            {"after": "quality_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
++            {"after": "quality_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file", "evaluation"),
+             postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
+             objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
+     add("quality", "motion_quality", "motion.quality", "host_compute", postconditions=("actual_required_metrics_pass",))

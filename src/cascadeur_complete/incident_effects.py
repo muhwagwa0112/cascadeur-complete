@@ -20,7 +20,8 @@ READ_ONLY_OPERATIONS = frozenset({
 def classify_effect(operation_name: str, normalized_arguments: dict | None = None) -> str:
     args = normalized_arguments or {}
     if operation_name == "system.observe_geometry_capture":
-        return "file"
+        # The owned-pair backend observes its graph inside an admitted Update.
+        return "mixed"
     if operation_name == "animation.interpolation_refresh":
         return "evaluation"
     if operation_name == "animation.transform_get" and args.get("refresh", False):

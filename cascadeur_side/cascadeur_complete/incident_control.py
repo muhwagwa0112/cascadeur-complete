@@ -422,3 +422,23 @@ class IncidentControlMixin:
 
     def incident_retirement_commit(self, plan_digest, operator_authorization):
         return retirement_commit(self.paths.root, plan_digest, operator_authorization)
+
+    def manual_setup_prepare(self, steps, workspace):
+        from .incident_manual_setup import prepare_with_runtime
+        return prepare_with_runtime(self.paths.root, steps, workspace)
+
+    def manual_setup_commit(self, plan_digest):
+        from .incident_manual_setup import dispatch
+        return dispatch(self.paths.root, plan_digest)
+
+    def pair_continuation_prepare(self, setup_plan_digest, context, mutation=None):
+        from .incident_pair_continuation import prepare
+        return prepare(self.paths.root, setup_plan_digest, context, mutation)
+
+    def pair_continuation_commit(self, plan_digest):
+        from .incident_pair_continuation import run
+        return run(self.paths.root, plan_digest)
+
+    def incident_producer_observation(self, request_id):
+        from .producer_observation import read_producer_observation
+        return read_producer_observation(self.paths.root, request_id)

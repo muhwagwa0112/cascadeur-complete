@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from .models import Operation, SourceBinding
+from .effects import classify_effect
 from .recipe_models import digest
 from .recipe_store import RecipeConflict, file_sha256
 from .stage_contracts import BootstrapGrant, CheckpointObservation, DerivedTargetMapping, FileManifest, RecipeTargetObservation, StageEffect
@@ -604,7 +605,7 @@ class RecipeNativeServiceMixin:
         return StageEffect(step_id=step.step_id, declaration_digest=step.fixed_parameters_digest,
             lowering_rule_id=step.lowering_rule_id, lowering_rule_digest=step.lowering_rule_digest,
             feature_id=step.feature_id, operation_name=step.operation_name,
-            effect_class="mixed" if stage in {"checkpoint", "initial_checkpoint"} else "file" if stage in {"export_stage", "geometry_capture"} else "evaluation" if stage in {"evaluation", "insertion_evaluation"} else "scene",
+            effect_class=classify_effect(step.operation_name, args),
             arguments=args, arguments_digest=digest(args), operation_digest=digest([{"name": step.operation_name, "arguments": args}]),
             effect_bounds_digest=digest(step.max_effect_from_baseline),
             source_binding=source, input_files=tuple(inputs), output_paths=tuple(outputs), target_object_ids=ids,

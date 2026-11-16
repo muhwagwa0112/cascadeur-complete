@@ -108,6 +108,68 @@ def setup_commit(plan_digest: str, operator_authorization: dict) -> dict:
         return _invalid(str(exc))
 
 
+@mcp.tool()
+def manual_setup_prepare(steps: list[str], workspace: str) -> dict:
+    """Draft one bounded setup for the exact two legacy incidents; issue no approval.
+
+    Original outcomes remain unknown. Review residual risks and the exact plan
+    through the local approve-manual-setup command before manual_setup_commit.
+    """
+    try:
+        return service().manual_setup_prepare(steps, workspace)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def manual_setup_commit(plan_digest: str) -> dict:
+    """Consume stored local approval for that exact setup, or observe its old request.
+
+    This never approves residual risk, closes a legacy incident, or retries an
+    effect. Caller-provided approval dictionaries and request IDs are not used.
+    """
+    try:
+        return service().manual_setup_commit(plan_digest)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def pair_continuation_prepare(setup_plan_digest: str, context: dict[str, Any],
+                              mutation: dict[str, Any] | None = None) -> dict:
+    """Draft the finite pair sequence from an actual succeeded retained setup.
+
+    Context is an explicit units/basis/FPS policy, not observed SDK metadata.
+    Local approve-pair-continuation must review the complete plan separately.
+    """
+    try:
+        return service().pair_continuation_prepare(setup_plan_digest, context, mutation)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def pair_continuation_commit(plan_digest: str) -> dict:
+    """Run a locally approved finite pair plan once; existing requests are observed.
+
+    A pending, failed, or unknown step stops the sequence without replay or
+    automatic cleanup. Only the final restore receipt proves original tab return.
+    """
+    try:
+        return service().pair_continuation_commit(plan_digest)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
+@mcp.tool()
+def incident_producer_observation(request_id: str) -> dict:
+    """Read recorded future-request process facts; partial facts grant no closure."""
+    try:
+        return service().incident_producer_observation(request_id)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _invalid(str(exc))
+
+
 def _invalid(message: str) -> dict[str, Any]:
     return {"ok": False, "error_code": ErrorCode.INVALID_REQUEST, "error_message": message}
 

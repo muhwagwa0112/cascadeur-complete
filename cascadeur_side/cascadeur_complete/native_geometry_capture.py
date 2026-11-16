@@ -17,6 +17,8 @@ from pathlib import Path
 
 from . import guarded_runtime as guards
 from .geometry_policy import CoordinateContract, ReadBoundary, assert_read_compute_read, plan_capture, _validated_basis
+from .native_update_source import (assert_historical_source, graph_scope, MODE,
+    require_callback_check, latest_closed_snapshot, post_source_from_snapshot)
 
 OPERATION = "system.observe_geometry_capture"
 _FIELDS = {"capture_id", "motion_source_binding", "motion_capture_digest", "origin_request_id", "context",
@@ -62,6 +64,11 @@ def validate_arguments(arguments):
 
 def geometry_contract_status():
     from .native_geometry_qualification import calibration_status
+    from .native_owned_pair_binding import pair_status
+    from . import runtime as rt
+    pair = pair_status(rt._scene_view())
+    if pair["qualified"]:
+        return {**pair, "prerequisite_calibration": calibration_status()}
     return {"qualified": False, "code": "GEOMETRY_CALCULATION_CONTRACT_UNQUALIFIED",
         "missing": ["known_transform_coordinate_calibration", "operation_correlated_synchronous_calculation",
                     "qualified_dependency_and_transform_readers"],
@@ -75,8 +82,9 @@ def require_geometry_contract(scene, projection, arguments):
     # This lookup is intentionally private and currently empty. A future
     # code-owned calibration must bind actual SDK producer/dependency semantics
     # before populating it; there is no generic registration/public flag here.
+    from .native_owned_pair_binding import pair_binding
     key = (installed_build(), guards.LOADED_FINGERPRINT, guards.RUNTIME_EPOCH)
-    contract = _CONTRACTS.get(key)
+    contract = pair_binding(scene, required=False) or _CONTRACTS.get(key)
     if contract is None:
         status = geometry_contract_status()
         raise ValueError(status["code"] + ": " + ",".join(status["missing"]))
@@ -106,10 +114,10 @@ def _origin(scene, arguments, capture):
     if any(successor.get("binding", {}).get(key) != current[key] for key in ("scene_instance_id", "document_lineage_id")):
         raise ValueError("GEOMETRY_ORIGIN_SCENE_CHANGED")
     if arguments["origin_request_id"] != capture["evaluation"].get("request_id"):
-        # Mutation origins need an explicit authenticated successor -> current
-        # evaluation full-projection rebind. No such issuer exists yet.
-        raise ValueError("GEOMETRY_ORIGIN_SUCCESSOR_REBIND_UNAVAILABLE")
-    if guards.digest(receipt) != capture["evaluation_receipt_digest"]:
+        from .native_owned_pair_binding import pair_binding
+        from .native_scene_reader import read_scene
+        pair_binding(scene).require_origin_chain(arguments, capture, read_scene(scene))
+    elif guards.digest(receipt) != capture["evaluation_receipt_digest"]:
         raise ValueError("GEOMETRY_ORIGIN_RECEIPT_DIFFERS")
     return request, receipt, source, successor
 
@@ -119,7 +127,7 @@ def _inputs(scene, arguments):
     from .native_motion_capture import lookup_capture
     validate_arguments(arguments)
     guards.assert_loaded_package()
-    guards.assert_source(scene, arguments["motion_source_binding"])
+    assert_historical_source(scene, arguments["motion_source_binding"])
     capture = lookup_capture(arguments["motion_capture_digest"])
     if (capture is None or capture["canonical_batch"]["context"] != arguments["context"]
             or capture["canonical_batch"]["source_binding"] != arguments["motion_source_binding"]):
@@ -176,18 +184,24 @@ def _write_file(path, write, *, remaining):
 
 
 class NativeGeometryCaptureAdapter:
-    """Adapter-only file effect. No legacy observer may execute this route."""
+    """Adapter-only mixed graph/calculation/file effect, no legacy observer."""
     adapter_id = "native-actual-geometry-v1"
+
+    def accepts_update_boundary_source(self, scene, scope):
+        from .native_owned_pair_binding import pair_binding
+        binding = pair_binding(scene, required=False)
+        return (binding is not None and scope.get("validation_mode") == MODE
+                and scope.get("expected_graph_dtype_digest") == binding.contract.graph_dtype_digest)
 
     def required_scope(self, scene, scope):
         arguments = scope.get("operation_arguments")
         if scope.get("operation_name") != OPERATION:
             raise ValueError("GEOMETRY_OPERATION_INVALID")
-        projection, _capture, _origin_value, _contract = _inputs(scene, arguments)
-        return {"adapter_id": self.adapter_id, "operation_name": OPERATION,
+        projection, _capture, _origin_value, contract = _inputs(scene, arguments)
+        return graph_scope({"adapter_id": self.adapter_id, "operation_name": OPERATION,
             "operation_arguments": copy.deepcopy(arguments), "operation_arguments_digest": guards.digest(arguments),
             "object_ids": [row["id"] for row in projection["objects"]],
-            "layer_ids": [row["id"] for row in projection["layers"]], "frames": [0, projection["frames"]-1]}
+            "layer_ids": [row["id"] for row in projection["layers"]], "frames": [0, projection["frames"]-1]}, contract.contract.graph_dtype_digest)
 
     def capture(self, scene, scope):
         projection, _capture, _origin_value, _contract = _inputs(scene, scope["operation_arguments"])
@@ -201,7 +215,7 @@ class NativeGeometryCaptureAdapter:
         if request.get("operations") != [{"name": OPERATION, "arguments": arguments}]:
             raise ValueError("GEOMETRY_OPERATION_INVALID")
         source = request.get("source_binding")
-        guards.assert_source(scene, source, operation_name=OPERATION, arguments=arguments)
+        assert_historical_source(scene, source, operation_name=OPERATION, arguments=arguments)
         projection, capture, origin, contract = _inputs(scene, arguments)
         before = _boundary(scene, arguments, capture, projection, contract)
         assert_read_compute_read(before, before, expected_source_digest=guards.digest(arguments["motion_source_binding"]),
@@ -246,18 +260,26 @@ class NativeGeometryCaptureAdapter:
                 or not np.array_equal(basis,arguments["context"]["scene_to_solver_basis"])):
             raise ValueError("GEOMETRY_DECLARED_CONVERSION_POLICY_DIFFERS")
         def unchanged():
-            guards.assert_source(scene, source, operation_name=OPERATION, arguments=arguments)
+            assert_historical_source(scene, source, operation_name=OPERATION, arguments=arguments)
             current_projection, current_capture, _, _ = _inputs(scene, arguments)
             after = _boundary(scene, arguments, current_capture, current_projection, contract)
             assert_read_compute_read(before, after, expected_source_digest=before.source_digest,
                 expected_motion_capture_digest=before.motion_capture_digest, expected_context_digest=before.context_digest)
-        guards.before_write(unchanged)
-        folder.mkdir(parents=True, exist_ok=False)
         windows = {key: [] for key in plan.mesh_ids}
         retained = 0
         for index, window in enumerate(plan.windows):
             unchanged()
-            raw = np.ascontiguousarray(_sample_mesh_positions(domain, native_ids[window.mesh_id], list(window.frames), counts[window.mesh_id], context), dtype="<f4")
+            if callable(getattr(contract, "capture_window", None)):
+                observed = contract.capture_window(scene, window.mesh_id, window.frames, counts[window.mesh_id],
+                    request=request, before_calculation=unchanged)
+            else:
+                raise ValueError("GEOMETRY_FRESH_TYPED_CALLBACK_READER_REQUIRED")
+            require_callback_check(scene, request)
+            if not folder.exists():
+                guards.before_write(unchanged)
+                folder.mkdir(parents=True, exist_ok=False)
+            raw = np.ascontiguousarray(observed, dtype="<f4")
+            del observed
             canonical = np.empty(raw.shape, dtype="<f8")
             for row, frame in enumerate(window.frames):
                 world = np.empty(raw[row].shape, dtype="<f8")
@@ -321,7 +343,10 @@ class NativeGeometryCaptureAdapter:
         identity = dict(guards.scene_instance(scene))
         guards.observe_effect(OPERATION, "completed", scene_before=identity, scene_after=identity,
                               detail={"candidate_digest": guards.digest(candidate), "calculation_count": plan.calculation_count})
+        successor = post_source_from_snapshot(scene, request, latest_closed_snapshot(scene,
+            expected_graph_dtype_digest=source["scope"]["expected_graph_dtype_digest"]))
         return {"geometry_capture_id": identifier, "candidate_digest": guards.digest(candidate),
+                "source_binding": successor, "native_completion": "observed",
                 "request_id": request["request_id"], "state": "awaiting_terminal_receipt"}, []
 
 

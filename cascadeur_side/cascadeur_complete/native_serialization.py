@@ -53,11 +53,17 @@ class NativeSerializationObservation:
         return json.loads(self.observation_bytes)
 
 
-def pin_reference(scene):
+def pin_reference(scene, *, phase_guard=None, expected_projection=None):
     """Read P0 once; its raw identity is never replaced by a later save."""
     from .native_adapters import installed_build
     guards.assert_loaded_package()
     projection = read_scene(scene)
+    if expected_projection is not None and projection != expected_projection:
+        raise ValueError("SERIALIZATION_PRE_SAVE_SOURCE_DIFFERS")
+    if len(_ANCHORS) >= 64:
+        raise ValueError("SERIALIZATION_NATIVE_ANCHOR_BUDGET")
+    from .native_serialization_binding import prepare_reference, register_reference
+    typed = prepare_reference(scene, projection, phase_guard=phase_guard)
     raw = _bytes(projection)
     if len(raw) > 64 * 1024**2:
         raise ValueError("SERIALIZATION_REFERENCE_BUDGET_EXCEEDED")
@@ -65,7 +71,11 @@ def pin_reference(scene):
                 "runtime_epoch": guards.RUNTIME_EPOCH,
                 "runtime_fingerprint": guards.LOADED_FINGERPRINT,
                 "installed_build": installed_build()}
-    key = guards.digest(identity)
+    key_material = dict(identity)
+    if typed is not None:
+        key_material.update(typed_graph_digest=typed[1].facts_digest,
+                            typed_scene=dict(guards.scene_instance(scene)))
+    key = guards.digest(key_material)
     anchor = ImmutableCheckpointAnchor(raw, **identity, checkpoint_anchor_digest=key)
     prior = _ANCHORS.get(key)
     if prior is not None and prior != anchor:
@@ -73,6 +83,7 @@ def pin_reference(scene):
     if prior is not None:
         return prior
     _ANCHORS[key] = anchor
+    register_reference(anchor, typed)
     return anchor
 
 
@@ -89,27 +100,40 @@ def require_anchor(anchor):
     return anchor
 
 
-def compare_with_private_policy(scene, anchor, *, phase):
+def compare_with_private_policy(scene, anchor, *, phase, phase_guard=None):
     """Read the actual phase result and compare directly with private P0."""
     require_anchor(anchor)
     if phase not in _PHASES:
         raise ValueError("SERIALIZATION_PHASE_UNSUPPORTED")
-    actual = read_scene(scene)
-    policy_key = (anchor.installed_build, anchor.runtime_fingerprint,
-                  role_layout_digest(anchor.reference_projection))
-    policy = _POLICIES.get(policy_key)
-    candidate = compare_projections(anchor.reference_projection, actual,
-        expected_before_digest=anchor.reference_projection_digest,
-        installed_build=anchor.installed_build, loaded_fingerprint=anchor.runtime_fingerprint,
-        policy=policy)
-    if not candidate.accepted:
-        raise ValueError("SERIALIZATION_EQUIVALENCE_UNAVAILABLE: " + ",".join(candidate.failure_codes))
+    if len(_OBSERVATIONS) >= 256:
+        raise ValueError("SERIALIZATION_NATIVE_OBSERVATION_BUDGET")
+    from .native_serialization_binding import compare_phase
+    typed = compare_phase(scene, anchor, phase, phase_guard=phase_guard)
+    if typed is not None:
+        actual = json.loads(typed.actual_projection_bytes)
+        candidate = json.loads(typed.observation_bytes)
+        comparison_kind = candidate["comparison_kind"]
+        policy_digest = candidate["serialization_policy_digest"]
+        exact_fields_digest = candidate["exact_fields_digest"]
+    else:
+        actual = read_scene(scene)
+        policy_key = (anchor.installed_build, anchor.runtime_fingerprint,
+                      role_layout_digest(anchor.reference_projection))
+        policy = _POLICIES.get(policy_key)
+        candidate = compare_projections(anchor.reference_projection, actual,
+            expected_before_digest=anchor.reference_projection_digest,
+            installed_build=anchor.installed_build, loaded_fingerprint=anchor.runtime_fingerprint,
+            policy=policy)
+        if not candidate.accepted:
+            raise ValueError("SERIALIZATION_EQUIVALENCE_UNAVAILABLE: " + ",".join(candidate.failure_codes))
+        comparison_kind, policy_digest = candidate.kind, candidate.policy_digest
+        exact_fields_digest = candidate.exact_fields_digest
     observation = {"schema_version": 1, "kind": "private-serialization-observation",
         "phase": phase, "checkpoint_anchor_digest": anchor.checkpoint_anchor_digest,
         "reference_projection_digest": anchor.reference_projection_digest,
-        "observed_projection_digest": guards.digest(actual), "comparison_kind": candidate.kind,
-        "serialization_policy_digest": candidate.policy_digest,
-        "exact_fields_digest": candidate.exact_fields_digest,
+        "observed_projection_digest": guards.digest(actual), "comparison_kind": comparison_kind,
+        "serialization_policy_digest": policy_digest,
+        "exact_fields_digest": exact_fields_digest,
         "scene": dict(guards.scene_instance(scene)), "runtime_epoch": guards.RUNTIME_EPOCH,
         "runtime_fingerprint": guards.LOADED_FINGERPRINT, "installed_build": anchor.installed_build}
     record = NativeSerializationObservation(_bytes(actual), _bytes(observation))

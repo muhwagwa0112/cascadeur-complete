@@ -16,8 +16,8 @@ $runtimeOwnership = Join-Path $RuntimeRoot 'state\install-ownership.json'
 if ((Test-Path -LiteralPath $RuntimeRoot) -and -not (Test-Path -LiteralPath $runtimeOwnership)) {
     throw 'An unmanaged Cascadeur MCP runtime already exists at the install target. Back it up and remove it before installing.'
 }
-$targets = [ordered]@{ runtime = $RuntimeRoot; bridge = $BridgeRoot; events = $EventsRoot }
-$targetState = [ordered]@{}
+$targets = [ordered]@{ bridge = $BridgeRoot; events = $EventsRoot }
+$targetState = [ordered]@{ runtime = (Backup-CascadeurRuntimeCode $RuntimeRoot $backupRoot) }
 foreach ($entry in $targets.GetEnumerator()) {
     $source = [IO.Path]::GetFullPath([string]$entry.Value)
     $exists = Test-Path -LiteralPath $source
@@ -37,7 +37,8 @@ if ($codexExisted) {
     Copy-Item -LiteralPath $codexConfig -Destination (Join-Path $backupRoot 'codex-config.toml')
 }
 $manifest = [ordered]@{
-    schema = 1
+    schema = 2
+    runtime_mode = 'code-in-place'
     backup_root = $backupRoot
     targets = $targetState
     cascadeur_settings = [pscustomobject]@{ path = $settings; existed = $settingsExisted }

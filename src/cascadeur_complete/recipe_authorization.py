@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .effects import classify_effect
+
 import time
 import math
 from dataclasses import dataclass
@@ -124,7 +126,8 @@ def validate_step_authorization(
                 or source.scope.get("operation_name") != step.operation_name
                 or source.scope.get("operation_arguments") != arguments
                 or source.scope.get("operation_arguments_digest") != digest(arguments)
-                or stage_effect.effect_class != "file" or step.allowed_channels != ("file",)
+                or stage_effect.effect_class != classify_effect(step.operation_name, arguments)
+                or step.allowed_channels != ("file", "evaluation")
                 or set(value.mesh_ids) != set(step.target.object_ids)):
             raise RecipeConflict("GEOMETRY_CAPTURE_AUTHORIZATION_MISMATCH")
         return

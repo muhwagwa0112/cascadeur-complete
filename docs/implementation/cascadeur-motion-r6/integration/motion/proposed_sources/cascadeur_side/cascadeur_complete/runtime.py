@@ -1,0 +1,2147 @@
+from __future__ import annotations
+
+import hashlib
+import hmac
+import inspect
+import json
+import os
+import re
+import shutil
+import subprocess
+import time
+import traceback
+import uuid
+from contextlib import suppress
+from pathlib import Path
+
+import csc
+
+from . import handlers as _handlers  # noqa: F401
+from . import guarded_runtime as guards
+from .handler_registry import declared_postconditions, transact
+from .handler_registry import dispatch as dispatch_registered
+
+PROTOCOL_VERSION = "3.0"
+READ_ONLY_OPERATIONS = {
+    "system.incident_diagnostic", "system.incident_observe_original", "system.get_geometry_capture",
+    "system.rebind_source", "system.verify_observation", "system.native_adapter_status",
+    "system.observe_motion_inputs", "system.observe_key_layout", "system.observe_motion_capture", "system.observe_recipe_target",
+    "system.observe_retarget_inputs", "system.observe_controller_targets",
+    "system.verify_key_insertion", "system.verify_key_topology",
+    "system.status",
+    "system.logs",
+    "system.view_mode_get",
+    "system.tools",
+    "system.introspect",
+    "scene.summary",
+    "scene.objects",
+    "scene.list",
+    "scene.validate",
+    "selection.get",
+    "selection.filter",
+    "object.hierarchy",
+    "object.properties",
+    "object.behaviors",
+    "timeline.get",
+    "timeline.range",
+    "animation.transform_get",
+    "animation.key_list",
+    "animation.graph_query",
+    "animation.cycle_query",
+    "layer.list",
+    "render.viewport_state",
+    "render.camera_catalog",
+    "generation.state",
+    "physics.state",
+    "physics.auto_state",
+    "rig.state",
+    "rig.constraint_drivers",
+}
+
+
+# Postconditions asserted by the inline operations below. Each id is enforced by
+# the operation body (an AssertionError is raised when the observed state
+# differs), so a normal return means every listed id was observed.
+INLINE_POSTCONDITIONS = {
+    "system.status": ("scene_identity", "runtime_tools"),
+    "scene.summary": ("scene_revision",),
+    "scene.objects": ("pagination_contract",),
+    "scene.open": ("stable_scene_path",),
+    "scene.save": ("save_completed",),
+    "timeline.set_frame": ("frame_equals_requested",),
+    "timeline.get": ("unclamped_frame",),
+    "animation.transform_get": ("transform_payload",),
+    "animation.transform_set": ("transform_equals_requested",),
+    "selection.get": ("selection_payload",),
+    "selection.filter": ("filter_matches",),
+    "selection.set": ("selection_equals_requested",),
+    "selection.add": ("selection_contains_requested",),
+    "selection.remove": ("selection_excludes_requested",),
+    "layer.list": ("layer_payload",),
+    "animation.key_list": ("key_payload",),
+    "layer.create": ("layer_present",),
+    "layer.delete": ("layer_absent",),
+    "layer.visibility": ("visibility_equals_requested",),
+    "layer.lock": ("lock_equals_requested",),
+    "animation.key_add": ("key_present",),
+    "animation.key_delete": ("key_absent",),
+    "io.import_fbx": ("scene_changed",),
+    "system.introspect": ("schema_counts",),
+}
+
+
+def operation_postconditions(name, arguments, result):
+    """Return the postcondition ids proven by a successfully returned operation."""
+    if isinstance(result, dict) and isinstance(result.get("observed_postconditions"), (list, tuple)):
+        return tuple(str(item) for item in result["observed_postconditions"])
+    if name in ("system.undo", "system.redo", "system.action_invoke"):
+        return ("scene_revision_changed",) if bool((arguments or {}).get("expect_change", True)) else ()
+    declared = declared_postconditions(name)
+    if declared:
+        return declared
+    return INLINE_POSTCONDITIONS.get(name, ())
+
+
+class BridgeAuthenticationError(PermissionError):
+    pass
+
+
+def runtime_root():
+    """The host's RuntimePaths rule: CASCADEUR_MCP_ROOT, else the real user Local AppData."""
+    configured = os.environ.get("CASCADEUR_MCP_ROOT")
+    if configured:
+        return Path(configured).resolve()
+    profile = os.environ.get("USERPROFILE")
+    local = Path(profile) / "AppData" / "Local" if profile else None
+    if local is None or not local.is_dir():
+        local = Path(os.environ["LOCALAPPDATA"])
+    return (local / "CascadeurMCP" / "cascadeur-complete").resolve()
+
+
+def ensure_dirs():
+    root = runtime_root()
+    from .installation_guard import hold_runtime_lease
+    hold_runtime_lease(root)
+    for relative in (
+        "state/requests",
+        "state/responses",
+        "state/jobs",
+        "state/tokens",
+        "state/seen",
+        "snapshots",
+        "logs",
+    ):
+        (root / relative).mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _canonical_payload(payload):
+    unsigned = {key: value for key, value in payload.items() if key != "mac"}
+    return json.dumps(
+        unsigned,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _bridge_key(root):
+    path = root / "state" / "bridge.key"
+    value = path.read_bytes()
+    if len(value) < 32:
+        raise BridgeAuthenticationError("Bridge authentication key is invalid")
+    return value
+
+
+def _session_id(secret):
+    return hashlib.sha256(b"cascadeur-complete-bridge-session\0" + secret).hexdigest()[:32]
+
+
+def _sign_message(payload, secret):
+    return hmac.new(secret, _canonical_payload(payload), hashlib.sha256).hexdigest()
+
+
+def _verify_message(payload, secret):
+    supplied = payload.get("mac")
+    if not isinstance(supplied, str) or len(supplied) != 64:
+        raise BridgeAuthenticationError("Queue message is unsigned")
+    if not hmac.compare_digest(supplied, _sign_message(payload, secret)):
+        raise BridgeAuthenticationError("Queue message authentication failed")
+    if payload.get("session_id") != _session_id(secret):
+        raise BridgeAuthenticationError("Queue session does not match this installation")
+    nonce = payload.get("nonce")
+    if not isinstance(nonce, str) or not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", nonce):
+        raise BridgeAuthenticationError("Queue nonce is invalid")
+    request_id = str(payload.get("request_id", ""))
+    try:
+        if str(uuid.UUID(request_id)) != request_id.casefold():
+            raise ValueError
+    except ValueError as exc:
+        raise BridgeAuthenticationError("Queue request id is invalid") from exc
+
+
+def _claim_request_nonce(root, request):
+    marker = root / "state" / "seen" / ("request-" + request["nonce"])
+    try:
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise BridgeAuthenticationError("Queue request was already processed") from exc
+    with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+        stream.write(str(request["request_id"]) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _operation_is_mutating(operation):
+    name = str(operation.get("name", ""))
+    args = operation.get("arguments") or {}
+    if name == "animation.transform_get" and args.get("refresh", False):
+        return True
+    if name in ("system.view_mode", "system.view_mode_get"):
+        # The shared view-mode handler applies any supplied mode, whatever the action says.
+        if args.get("mode") is not None:
+            return True
+        return name == "system.view_mode" and str(args.get("action", "get")) not in {"get", "list"}
+    if name in READ_ONLY_OPERATIONS:
+        return False
+    return name not in {"system.capture_source", "system.validate_source"}
+
+
+def _confirmation_signature(nonce, record, secret):
+    approval = {
+        "schema_version": record.get("schema_version"),
+        "feature_id": record.get("feature_id"),
+        "scene_id": record.get("scene_id"),
+        "scene_revision": record.get("scene_revision"),
+        "selection_fingerprint": record.get("selection_fingerprint"),
+        "operation": record.get("operation"),
+        "impact": record.get("impact"),
+        "backup_path": record.get("backup_path"),
+        "expires_at": record.get("expires_at"),
+    }
+    canonical = json.dumps(
+        approval,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    if record.get("schema_version") == 3:
+        for name in ("mutation_request_id", "source_binding", "scene_binding", "execution_context",
+                     "snapshot_manifest_id", "adapter_fingerprint"):
+            approval[name] = record.get(name)
+        canonical = json.dumps(approval, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    message = ("cascadeur-complete-change-v" + str(record.get("schema_version")) + ":" + nonce + ":").encode() + canonical.encode("utf-8")
+    return hmac.new(secret, message, hashlib.sha256).hexdigest()
+
+
+def _verify_confirmation(root, request, before):
+    operations = request.get("operations") or []
+    if not any(_operation_is_mutating(item) for item in operations):
+        return
+    safety = request.get("safety_context") or {}
+    token = safety.get("confirmation_token")
+    if not isinstance(token, str):
+        raise BridgeAuthenticationError("Mutating operations require a consumed confirmation token")
+    try:
+        nonce, signature = token.split(".", 1)
+    except ValueError as exc:
+        raise BridgeAuthenticationError("Malformed confirmation token") from exc
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", nonce) or not re.fullmatch(r"[0-9a-f]{64}", signature):
+        raise BridgeAuthenticationError("Malformed confirmation token")
+    token_path = root / "state" / "tokens" / (nonce + ".used")
+    try:
+        record = json.loads(token_path.read_text(encoding="utf-8"))
+        secret = (root / "state" / "confirmation.key").read_bytes()
+    except (OSError, ValueError) as exc:
+        raise BridgeAuthenticationError("Consumed confirmation token is unavailable") from exc
+    expected = _confirmation_signature(nonce, record, secret)
+    if not hmac.compare_digest(signature, expected) or record.get("token") != token or not record.get("used"):
+        raise BridgeAuthenticationError("Confirmation token authentication failed")
+    if float(record.get("expires_at", 0)) < time.time():
+        raise BridgeAuthenticationError("Confirmation token expired")
+    if record.get("schema_version") != 3:
+        raise BridgeAuthenticationError("PROTOCOL_MISMATCH: legacy token requires reprepare")
+    if record.get("mutation_request_id") != request.get("request_id"):
+        raise BridgeAuthenticationError("Confirmation token request binding differs")
+    if record.get("source_binding") != request.get("source_binding"):
+        raise BridgeAuthenticationError("Confirmation token source binding differs")
+    if record.get("adapter_fingerprint") != guards.LOADED_FINGERPRINT:
+        raise BridgeAuthenticationError("Confirmation token loaded adapter differs")
+    if record.get("execution_context") != request.get("execution_context"):
+        raise BridgeAuthenticationError("Confirmation token execution context differs")
+    if record.get("feature_id") != request.get("feature_id"):
+        raise BridgeAuthenticationError("Confirmation token feature binding differs")
+    approved_name = str((record.get("operation") or {}).get("name", ""))
+    # Playback only moves the playhead (part of the revision): identity binding only.
+    playhead_only = record.get("scene_revision") is None and approved_name == "timeline.playback"
+    if record.get("scene_id") != before.get("scene_id") or record.get("scene_binding") != (request.get("source_binding") or {}).get("binding"):
+        raise BridgeAuthenticationError("Confirmation token scene binding differs")
+    if record.get("selection_fingerprint") is not None and record.get("selection_fingerprint") != before.get("selection_fingerprint"):
+        raise BridgeAuthenticationError("Confirmation token selection binding differs")
+    approved = record.get("operation") or {}
+    requested = operations[0] if len(operations) == 1 else None
+    if approved != requested:
+        ui_alias = (
+            approved.get("name") == "system.ui_file_flow"
+            and requested
+            and requested.get("name") == "system.action_dispatch"
+            and (approved.get("arguments") or {}).get("action_id")
+            == (requested.get("arguments") or {}).get("action_id")
+        )
+        if not ui_alias:
+            raise BridgeAuthenticationError("Confirmation token operation or arguments differ")
+    marker = root / "state" / "seen" / ("confirmation-" + nonce)
+    try:
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise BridgeAuthenticationError("Confirmation token was already executed by Cascadeur") from exc
+    with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+        stream.write(str(request["request_id"]) + ":" + str(request["nonce"]) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _finite(value):
+    """Replace NaN/Infinity (not valid JSON for the signed channel) with null."""
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return None
+    if isinstance(value, dict):
+        return {key: _finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(item) for item in value]
+    return value
+
+
+def atomic_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name("." + path.name + "." + uuid.uuid4().hex + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+        json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def json_safe(value, depth=0):
+    if depth > 8:
+        return {"type": type(value).__name__, "repr": repr(value)[:300], "truncated": True}
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, bytes):
+        return {"type": "bytes", "length": len(value), "sha256": hashlib.sha256(value).hexdigest()}
+    if isinstance(value, dict):
+        return {str(key): json_safe(item, depth + 1) for key, item in list(value.items())[:1000]}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [json_safe(item, depth + 1) for item in list(value)[:1000]]
+    for method in ("to_string", "name"):
+        attribute = getattr(value, method, None)
+        if callable(attribute):
+            try:
+                return {"type": type(value).__name__, "value": str(attribute())}
+            except Exception:
+                pass
+        elif isinstance(attribute, str):
+            return {"type": type(value).__name__, "value": attribute}
+    return {"type": type(value).__name__, "repr": repr(value)[:1000]}
+
+
+def _domain_scene(scene):
+    method = getattr(scene, "domain_scene", None)
+    return method() if callable(method) else scene
+
+
+def _scene_view():
+    app = csc.app.get_application()
+    if not app:
+        return None
+    # SceneManager is the authority used by Cascadeur's load/activate API.
+    # app.current_scene() can lag one tab behind immediately after a scene
+    # transition, which is enough to make a correctly bound queued request
+    # fail its identity guard.
+    with suppress(Exception):
+        manager = app.get_scene_manager()
+        current = manager.current_scene()
+        if current is not None:
+            return current
+    return app.current_scene()
+
+
+def _normalized_path(path):
+    return os.path.normcase(os.path.abspath(str(path))) if path else ""
+
+
+def _load_scene_verified(path, *, prefer_other_open=False, close_previous=False):
+    """Activate or load a scene and verify the exact path.
+
+    Cascadeur permits the same file to be loaded into multiple tabs.  A duplicate
+    receives a ``(1)`` display name but can still report the original path, and a
+    subsequent in-place save opens a Save As dialog.  Rollback therefore prefers
+    an already-open *other* copy of the snapshot and retires the failed working
+    tab after switching.
+    """
+    requested = os.path.normcase(os.path.abspath(str(path)))
+    app = csc.app.get_application()
+    manager = app.get_scene_manager()
+    previous = manager.current_scene()
+    matches = [item for item in manager.scenes() if _normalized_path(item.get_path_name()) == requested]
+    target = None
+    if prefer_other_open:
+        target = next((item for item in matches if item != previous), None)
+    elif matches:
+        target = matches[0]
+    result = None
+    activated_existing = target is not None
+    if target is not None:
+        manager.set_current_scene(target)
+    else:
+        result = app.get_data_source_manager().load_scene(str(path))
+    current = _scene_view()
+    state = scene_state(current)
+    observed_path = state.get("path")
+    observed = _normalized_path(observed_path)
+    if observed != requested:
+        raise AssertionError("POSTCONDITION_FAILED: active scene path differs after load")
+    closed_previous = False
+    if close_previous and previous is not None and previous != current:
+        manager.remove_application_scene(previous)
+        closed_previous = previous not in list(manager.scenes())
+        if not closed_previous:
+            raise AssertionError("POSTCONDITION_FAILED: replaced working scene tab remains open")
+    return {
+        "path": observed_path,
+        "loaded": True,
+        "activated_existing": activated_existing,
+        "closed_previous": closed_previous,
+        "revision": state.get("revision"),
+        "return_value": json_safe(result),
+    }
+
+
+def _license_state(app):
+    """Report the license tier that gates Pro features.
+
+    Cascadeur's own ``is_pro_features_available`` decides the tier. The log's
+    "Actual license type" is a license term ("perpetual", "basic"), not a tier,
+    so it is only a fallback when the application API is unavailable.
+    """
+    if app is not None:
+        with suppress(Exception):
+            return "Pro" if bool(app.is_pro_features_available()) else "Basic"
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        log_path = Path(local_app_data) / "Nekki Limited" / "Cascadeur" / "logs" / "cascadeur_log.log"
+        if log_path.is_file():
+            with suppress(Exception):
+                size = log_path.stat().st_size
+                with log_path.open("rb") as stream:
+                    stream.seek(max(0, size - 262144))
+                    tail = stream.read().decode("utf-8", errors="replace")
+                matches = re.findall(r"Actual license type:\s*([^\r\n]+)", tail, flags=re.IGNORECASE)
+                if matches:
+                    return matches[-1].strip().title()
+    return "Pro" if bool(app and app.is_pro_features_available()) else "Basic"
+
+
+def _id_string(value):
+    method = getattr(value, "to_string", None)
+    return str(method()) if callable(method) else str(value)
+
+
+def _read_member(value, name):
+    member = getattr(value, name)
+    return member() if callable(member) else member
+
+
+def _guid(value):
+    return csc.Guid(str(value))
+
+
+def _object_id(value):
+    return csc.model.ObjectId(str(value))
+
+
+def _float_list(value):
+    """Normalize Cascadeur/numpy vector values without importing host-only packages."""
+    if value is None:
+        return None
+    converter = getattr(value, "tolist", None)
+    if callable(converter):
+        value = converter()
+    if isinstance(value, (list, tuple)):
+        return [float(item) for item in value]
+    return None
+
+
+def _quaternion_list(rotation):
+    if rotation is None:
+        return None
+    converter = getattr(rotation, "to_quaternion", None)
+    quaternion = converter() if callable(converter) else rotation
+    components = []
+    for name in ("w", "x", "y", "z"):
+        member = getattr(quaternion, name, None)
+        if member is None:
+            return None
+        components.append(float(member() if callable(member) else member))
+    return components
+
+
+def _rotation_payload(rotation):
+    if rotation is None:
+        return None
+    euler = None
+    converter = getattr(rotation, "to_euler_angles_x_y_z", None)
+    if callable(converter):
+        with suppress(Exception):
+            euler = _float_list(converter())
+    return {"euler_xyz_radians": euler, "quaternion_wxyz": _quaternion_list(rotation)}
+
+
+def _transform_data_ids(domain, object_id, space):
+    behaviour_viewer = domain.behaviour_viewer()
+    transform = behaviour_viewer.get_behaviour_by_name(object_id, "Transform")
+    if transform.is_null():
+        return None
+    prefix = "global" if space == "global" else "local"
+    result = {
+        "position": behaviour_viewer.get_behaviour_data(transform, prefix + "_position"),
+        "rotation": behaviour_viewer.get_behaviour_data(transform, prefix + "_rotation"),
+    }
+    if space == "local":
+        result["scale"] = behaviour_viewer.get_behaviour_data(transform, "local_scale")
+    return result
+
+
+def _read_transforms(domain, ids, frame, space="local"):
+    if space not in ("local", "global"):
+        raise ValueError("space must be local or global")
+    model_viewer = domain.model_viewer()
+    data_viewer = domain.data_viewer()
+    result = []
+    for raw_id in ids:
+        object_id = raw_id if isinstance(raw_id, csc.model.ObjectId) else _object_id(raw_id)
+        data_ids = _transform_data_ids(domain, object_id, space)
+        if data_ids is None:
+            raise ValueError("Object has no Transform behaviour: " + _id_string(object_id))
+        values = {}
+        for component, data_id in data_ids.items():
+            if data_id.is_null():
+                values[component] = None
+                continue
+            value = data_viewer.get_data_value(data_id, frame)
+            values[component] = _rotation_payload(value) if component == "rotation" else _float_list(value)
+        result.append(
+            {
+                "id": _id_string(object_id),
+                "name": str(model_viewer.get_object_name(object_id)),
+                "type": str(model_viewer.get_object_type_name(object_id)),
+                "frame": int(frame),
+                "space": space,
+                **values,
+            }
+        )
+    return result
+
+
+def _transform_fingerprint(domain, frame):
+    """Hash current-frame transforms so revision checks catch direct manipulator edits."""
+    behaviour_viewer = domain.behaviour_viewer()
+    data_viewer = domain.data_viewer()
+    rows = []
+    for transform in behaviour_viewer.get_behaviours("Transform"):
+        owner = behaviour_viewer.get_behaviour_owner(transform)
+        row = [_id_string(owner)]
+        for name in ("local_position", "local_rotation", "local_scale"):
+            data_id = behaviour_viewer.get_behaviour_data(transform, name)
+            if data_id.is_null():
+                row.append(None)
+                continue
+            value = data_viewer.get_data_value(data_id, frame)
+            row.append(_quaternion_list(value) or _float_list(value) or repr(value)[:200])
+        rows.append(row)
+    rows.sort(key=lambda item: item[0])
+    raw = json.dumps(rows, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _model_data_fingerprint(domain, frame):
+    """Hash model structure and property links, excluding evaluated values."""
+    model_viewer = domain.model_viewer()
+    behaviour_viewer = model_viewer.behaviour_viewer()
+    digest = hashlib.sha256()
+
+    def feed(kind, identifier, value):
+        payload = json.dumps(
+            [kind, _id_string(identifier), json_safe(value)],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest.update(payload.encode("utf-8", errors="replace"))
+
+    for object_id in sorted(model_viewer.get_objects(), key=_id_string):
+        behaviour_ids = sorted(behaviour_viewer.get_behaviours(object_id), key=_id_string)
+        for behaviour_id in behaviour_ids:
+            behaviour_name = str(behaviour_viewer.get_behaviour_name(behaviour_id))
+            feed(
+                "behaviour",
+                behaviour_id,
+                {
+                    "owner": _id_string(object_id),
+                    "name": behaviour_name,
+                    "hidden": bool(behaviour_viewer.is_hidden(behaviour_id)),
+                },
+            )
+            property_names = sorted(behaviour_viewer.get_behaviour_property_names(behaviour_id))
+            for property_name in property_names:
+                property_type = behaviour_viewer.get_property_type(behaviour_id, property_name)
+                property_type_name = str(_read_member(property_type, "name"))
+                if property_type_name == "DataType":
+                    identifier = behaviour_viewer.get_behaviour_data(behaviour_id, property_name)
+                    if identifier.is_null():
+                        continue
+                    feed("data_link", identifier, property_name)
+                elif property_type_name == "SettingType":
+                    identifier = behaviour_viewer.get_behaviour_setting(behaviour_id, property_name)
+                    if identifier.is_null():
+                        continue
+                    feed("setting_link", identifier, property_name)
+    return digest.hexdigest()
+
+
+def _rig_mass_fingerprint(domain):
+    """Hash persisted rigid-body mass values without animation-time evaluation."""
+    model_viewer = domain.model_viewer()
+    behaviours = model_viewer.behaviour_viewer()
+    data_viewer = model_viewer.data_viewer()
+    rows = []
+    seen_owners = set()
+    for behaviour_name in ("PhysicsSettings", "RigidBody"):
+        try:
+            behaviour_ids = behaviours.get_behaviours(behaviour_name)
+        except RuntimeError:
+            continue
+        for behaviour_id in behaviour_ids:
+            owner = behaviours.get_behaviour_owner(behaviour_id)
+            owner_text = _id_string(owner)
+            if owner_text in seen_owners:
+                continue
+            data_id = behaviours.get_behaviour_data(behaviour_id, "mass")
+            if data_id.is_null():
+                continue
+            try:
+                value = float(data_viewer.get_data_value(data_id))
+            except (RuntimeError, TypeError):
+                value = float(data_viewer.get_data_value(data_id, 0))
+            rows.append([owner_text, _id_string(data_id), value])
+            seen_owners.add(owner_text)
+    rows.sort(key=lambda item: item[0])
+    raw = json.dumps(rows, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _casc_tool_state(view_scene):
+    """Read normalized Ballistic tool state from Cascadeur's Zstandard ZIP member."""
+    if view_scene is None:
+        return {"fingerprint": None, "ballistic_count": 0, "members": {}}
+    path = Path(str(view_scene.get_path_name()))
+    if not path.is_file():
+        return {"fingerprint": None, "ballistic_count": 0, "members": {}}
+    # Cascadeur 2026.1 stores CASC JSON members with ZIP method 93 (Zstandard),
+    # which embedded Python 3.11's zipfile cannot decode. Windows ships bsdtar,
+    # so extract the one small semantic member without a shell or visible window.
+    completed = subprocess.run(
+        ["tar", "-xOf", str(path), "tool/ballistic.json"],
+        capture_output=True,
+        check=False,
+        timeout=5,
+        creationflags=0x08000000 if os.name == "nt" else 0,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("Unable to read CASC ballistic state: " + completed.stderr.decode(errors="replace")[:500])
+    payload = json.loads(completed.stdout.decode("utf-8"))
+    members = {"tool/ballistic.json": payload.get("Data")}
+    raw = json.dumps(members, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    ballistic = members.get("tool/ballistic.json")
+    return {
+        "fingerprint": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+        "ballistic_count": len(ballistic) if isinstance(ballistic, list) else 0,
+        "members": members,
+    }
+
+
+def _save_current_scene(view_scene):
+    """Synchronously persist the active copy-on-write scene for tool-state evidence."""
+    if view_scene is None:
+        raise RuntimeError("No application scene is available")
+    app = csc.app.get_application()
+    path = Path(str(view_scene.get_path_name()))
+    errors = []
+    for attempt in (
+        lambda: app.get_data_source_manager().save_scene(view_scene),
+        lambda: app.get_data_source_manager().save_current_scene(),
+    ):
+        try:
+            attempt()
+            if path.is_file() and not str(view_scene.name()).startswith("*"):
+                return str(path)
+        except Exception as exc:
+            errors.append(str(exc))
+    raise RuntimeError("Failed to persist current scene: " + " | ".join(errors))
+
+
+def scene_state(scene):
+    app = csc.app.get_application()
+    view_scene = _scene_view()
+    domain_scene = _domain_scene(scene) if scene is not None else None
+    if view_scene is None or domain_scene is None:
+        return {
+            "scene_id": None,
+            "revision": None,
+            "name": None,
+            "path": None,
+            "current_frame": None,
+            "selection": [],
+            "objects": [],
+            "layers": [],
+            "folders": [],
+            "layer_root_id": None,
+            "active_layer_id": None,
+        }
+    name = None
+    path = None
+    for attr_name in ("name", "get_path_name"):
+        attr = getattr(view_scene, attr_name, None)
+        if callable(attr):
+            try:
+                value = attr()
+                if attr_name == "name":
+                    name = str(value)
+                else:
+                    path = str(value)
+            except Exception:
+                pass
+    frame = None
+    with suppress(Exception):
+        frame = int(domain_scene.get_current_frame(False))
+    selection = []
+    try:
+        selected = domain_scene.selector().selected()
+        selection = sorted(_id_string(item) for item in selected.ids)
+    except Exception:
+        with suppress(Exception):
+            selection = sorted(_id_string(item) for item in domain_scene.selector().selected().ids())
+    objects = []
+    try:
+        viewer = domain_scene.model_viewer()
+        for object_id in viewer.get_objects():
+            objects.append(
+                {
+                    "id": _id_string(object_id),
+                    "name": str(viewer.get_object_name(object_id)),
+                    "type": str(viewer.get_object_type_name(object_id)),
+                }
+            )
+        objects.sort(key=lambda item: item["id"])
+    except Exception:
+        pass
+    layers = []
+    folders = []
+    layer_root_id = None
+    active_layer_id = None
+    try:
+        viewer = domain_scene.layers_viewer()
+        layer_root_id = _id_string(viewer.root_id())
+        for layer_id in viewer.all_layer_ids():
+            layer = viewer.layer(layer_id)
+            header = viewer.header(layer_id)
+            layers.append(
+                {
+                    "id": _id_string(layer_id),
+                    "name": str(_read_member(header, "name")),
+                    "parent": _id_string(_read_member(header, "parent")),
+                    "visible": bool(_read_member(layer, "is_visible")),
+                    "locked": bool(_read_member(layer, "is_locked")),
+                    "keys": list(layer.key_frame_indices()),
+                }
+            )
+        layers.sort(key=lambda item: item["id"])
+        for folder_id, _folder in viewer.folders_map().items():
+            header = viewer.header(folder_id)
+            folders.append(
+                {
+                    "id": _id_string(folder_id),
+                    "name": str(_read_member(header, "name")),
+                    "parent": _id_string(_read_member(header, "parent")),
+                }
+            )
+        folders.sort(key=lambda item: item["id"])
+        active_layer_id = _id_string(domain_scene.get_layers_selector().top_layer_id())
+    except Exception:
+        pass
+    transform_fingerprint = None
+    model_data_fingerprint = None
+    rig_mass_fingerprint = None
+    tool_state = {"fingerprint": None, "ballistic_count": 0}
+    if frame is not None:
+        with suppress(Exception):
+            transform_fingerprint = _transform_fingerprint(domain_scene, frame)
+        with suppress(Exception):
+            model_data_fingerprint = _model_data_fingerprint(domain_scene, frame)
+        with suppress(Exception):
+            rig_mass_fingerprint = _rig_mass_fingerprint(domain_scene)
+    with suppress(Exception):
+        tool_state = _casc_tool_state(view_scene)
+    raw = json.dumps(
+        {
+            "name": name,
+            "path": path,
+            "frame": frame,
+            "selection": selection,
+            "objects": objects,
+            "layers": layers,
+            "folders": folders,
+            "layer_root_id": layer_root_id,
+            "active_layer_id": active_layer_id,
+            "transform_fingerprint": transform_fingerprint,
+            "model_data_fingerprint": model_data_fingerprint,
+            "rig_mass_fingerprint": rig_mass_fingerprint,
+            "tool_state_fingerprint": tool_state.get("fingerprint"),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    scene_id = guards.scene_instance(view_scene)["scene_instance_id"]
+    revision = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return {
+        "scene_id": scene_id,
+        "revision": revision,
+        "name": name,
+        "path": path,
+        "current_frame": frame,
+        "selection": selection,
+        "selection_fingerprint": hashlib.sha256("\n".join(selection).encode()).hexdigest(),
+        "objects": objects,
+        "layers": layers,
+        "folders": folders,
+        "layer_root_id": layer_root_id,
+        "active_layer_id": active_layer_id,
+        "transform_fingerprint": transform_fingerprint,
+        "model_data_fingerprint": model_data_fingerprint,
+        "rig_mass_fingerprint": rig_mass_fingerprint,
+        "tool_state_fingerprint": tool_state.get("fingerprint"),
+        "ballistic_count": tool_state.get("ballistic_count", 0),
+        "license": _license_state(app),
+        "pro_features_available": bool(app and app.is_pro_features_available()),
+    }
+
+
+def tools_catalog():
+    app = csc.app.get_application()
+    manager = app.get_tools_manager() if app else None
+    if manager is None:
+        return []
+    result = []
+    for tool in manager.tools():
+        try:
+            result.append(str(tool.name()))
+        except Exception:
+            result.append(type(tool).__name__)
+    return sorted(set(result))
+
+
+def introspect_csc():
+    """Create a JSON-safe schema directly from the installed embedded module."""
+
+    def inspect_namespace(namespace, seen):
+        identity = id(namespace)
+        if identity in seen:
+            return {}
+        seen.add(identity)
+        result = {}
+        for name in sorted(dir(namespace)):
+            if name.startswith("_"):
+                continue
+            try:
+                value = getattr(namespace, name)
+            except Exception:
+                continue
+            module_name = getattr(value, "__name__", "")
+            if inspect.ismodule(value) and module_name.startswith("csc"):
+                result[name] = inspect_namespace(value, seen)
+                continue
+            doc = (getattr(value, "__doc__", "") or "")[:12000]
+            if isinstance(value, type):
+                methods = []
+                values = []
+                for method_name in sorted(dir(value)):
+                    if method_name.startswith("_"):
+                        continue
+                    try:
+                        member = getattr(value, method_name)
+                    except Exception:
+                        continue
+                    if callable(member) or isinstance(member, property):
+                        methods.append(method_name)
+                    else:
+                        values.append(method_name)
+                result[name] = {"type": "class", "methods": methods, "values": values, "doc": doc}
+            elif inspect.isroutine(value) or callable(value):
+                try:
+                    signature = str(inspect.signature(value))
+                except Exception:
+                    signature = "(...)"
+                result[name] = {"type": "function", "signature": signature, "doc": doc}
+            else:
+                result[name] = {"type": "value", "repr": repr(value)[:1000]}
+        return result
+
+    return {"csc": inspect_namespace(csc, set())}
+
+
+def inspect_runtime_object(value):
+    members = []
+    for name in sorted(dir(value)):
+        if name.startswith("_"):
+            continue
+        try:
+            member = getattr(value, name)
+        except Exception:
+            continue
+        entry = {"name": name, "callable": callable(member), "type": type(member).__name__}
+        if callable(member):
+            try:
+                entry["signature"] = str(inspect.signature(member))
+            except Exception:
+                entry["signature"] = "(...)"
+        else:
+            entry["value"] = json_safe(member)
+        members.append(entry)
+    return {"type": type(value).__name__, "repr": repr(value)[:1000], "members": members}
+
+
+def _save_snapshot(scene, snapshot_id, working_id):
+    root = ensure_dirs()
+    destination = root / "snapshots" / (snapshot_id + ".casc")
+    working_destination = root / "snapshots" / (working_id + ".working.casc")
+    app = csc.app.get_application()
+    view_scene = _scene_view()
+    snapshots_root = (root / "snapshots").resolve()
+    current_path = Path(str(view_scene.get_path_name())) if view_scene is not None else None
+
+    resolved_current = current_path.resolve() if current_path and current_path.is_file() else None
+    current_is_working = bool(
+        resolved_current
+        and resolved_current.parent == snapshots_root
+        and resolved_current.name.endswith(".working.casc")
+    )
+    errors = []
+    if current_is_working:
+        # Cascadeur does not consistently prefix view_scene.name() with '*'
+        # for static update-graph edits. Always persist the writable working
+        # document before cloning its immutable recovery snapshot.
+        for attempt in (
+            lambda: app.get_data_source_manager().save_scene(view_scene),
+            lambda: app.get_data_source_manager().save_current_scene(),
+        ):
+            try:
+                attempt()
+                if resolved_current.is_file() and resolved_current.stat().st_size > 0:
+                    break
+            except Exception as exc:
+                errors.append(str(exc))
+        else:
+            raise RuntimeError("In-place working-scene save failed: " + " | ".join(errors))
+        working_path = resolved_current
+    else:
+        # Never make an immutable recovery snapshot the active document.  The
+        # first protected change branches the live scene to a writable working
+        # document, leaving the original and every recovery file untouched.
+        for attempt in (
+            lambda: app.get_data_source_manager().save_scene(view_scene, str(working_destination)),
+            lambda: view_scene.save(str(working_destination)),
+        ):
+            try:
+                attempt()
+                if working_destination.is_file() and working_destination.stat().st_size > 0:
+                    break
+            except Exception as exc:
+                errors.append(str(exc))
+        else:
+            raise RuntimeError("Working-scene branch failed: " + " | ".join(errors))
+        working_path = working_destination.resolve()
+
+    shutil.copy2(str(working_path), str(destination))
+    if not destination.is_file() or destination.stat().st_size <= 0:
+        raise RuntimeError("Immutable snapshot clone was not created")
+    if destination.resolve() == working_path.resolve():
+        raise RuntimeError("Snapshot and working scene paths must differ")
+    return {"path": str(destination), "working_path": str(working_path)}
+
+
+def _file_loader(tool_name, scene, method, path):
+    app = csc.app.get_application()
+    tool = app.get_tools_manager().get_tool(tool_name)
+    target = tool
+    getter = getattr(tool, "get_fbx_loader", None)
+    if callable(getter):
+        target = getter(_scene_view())
+    function = getattr(target, method)
+    return function(str(path).replace("\\", "/"))
+
+
+def _run_operation(scene, operation, request):
+    name = operation.get("name")
+    adapter = guards._ADAPTERS.get(name)
+    if _operation_is_mutating(operation) and adapter is not None:
+        before = dict(guards.scene_instance(scene))
+        handle = guards.begin_adapter_attempt(request, operation, adapter, scene)
+        try:
+            return adapter.execute(scene, operation.get("arguments") or {}, request)
+        except Exception as exc:
+            try:
+                observation = guards.lookup_failure_observation(handle, _scene_view() or scene, request)
+            except Exception:
+                observation = None
+            if observation is None:
+                guards.observe_effect(name, "unknown", scene_before=before, scene_after=None,
+                    detail={"error": str(exc)[:500], "reason": "PRIVATE_FAILURE_COMPLETION_UNAVAILABLE"})
+            raise
+        finally:
+            from .native_completion import close_adapter_attempt
+            close_adapter_attempt(handle)
+    return _run_operation_legacy(scene, operation, request)
+
+
+def _run_operation_legacy(scene, operation, request):
+    name = operation.get("name")
+    args = operation.get("arguments") or {}
+    if name == "system.observe_geometry_capture":
+        raise ValueError("GEOMETRY_COUPLED_ADAPTER_REQUIRED: no legacy observation fallback")
+    if name == "system.get_geometry_capture":
+        from .native_geometry_capture import get_geometry_capture
+        return get_geometry_capture(args["capture_id"]), []
+    if name == "system.native_adapter_status":
+        from .native_adapters import status
+        return status(), []
+    if name in {"system.verify_key_insertion", "system.verify_key_topology"}:
+        from .native_key_insertion_evidence import verify_key_insertion, verify_key_topology
+        reader = verify_key_insertion if name == "system.verify_key_insertion" else verify_key_topology
+        return reader(scene, args), []
+    if name == "system.verify_observation":
+        if args["kind"] in {"retarget_inputs", "controller_targets"}:
+            from .native_retarget_inputs import verify_observation as verify_retarget
+            return verify_retarget(scene, args["observation"], args["digest"], args["kind"]), []
+        from .native_adapters import verify_observation
+        return verify_observation(args["observation"], args["digest"], args["kind"]), []
+    if name == "system.observe_retarget_inputs":
+        from .native_retarget_inputs import observe_retarget_inputs
+        return observe_retarget_inputs(scene, args), []
+    if name == "system.observe_controller_targets":
+        from .native_retarget_inputs import observe_controller_targets
+        return observe_controller_targets(scene, args), []
+    if name == "system.rebind_source":
+        prior = args["source_binding"]
+        guards.assert_source(scene, prior)
+        adapter = guards._ADAPTERS.get(args["operation_name"])
+        if adapter is None:
+            raise ValueError("RIG_ADAPTER_UNVERIFIED: no executor for successor operation")
+        scope = adapter.required_scope(scene, {**prior["scope"], "operation_name": args["operation_name"],
+            "operation_arguments": args["operation_arguments"]})
+        return guards.capture_source(scene, scope, prior["inputs_digest"]), []
+    if name == "system.observe_motion_inputs":
+        from .native_adapters import observe_motion_inputs
+        return observe_motion_inputs(scene, args), []
+    if name == "system.observe_recipe_target":
+        from .native_adapters import observe_recipe_target
+        return observe_recipe_target(scene, args), []
+    if name == "system.observe_key_layout":
+        from .native_adapters import observe_key_layout
+        return observe_key_layout(scene, args), []
+    if name == "system.observe_motion_capture":
+        from .native_adapters import observe_motion_capture
+        return observe_motion_capture(scene, args), []
+    if name == "system.capture_source":
+        scope = args["scope"]
+        if set(scope) == {"operation_name", "operation_arguments"}:
+            adapter = guards._ADAPTERS.get(scope["operation_name"])
+            if adapter is None:
+                raise ValueError("RIG_ADAPTER_UNVERIFIED: no native dependency reader")
+            scope = adapter.required_scope(scene, scope)
+        return guards.capture_source(scene, scope, args["inputs_digest"], args.get("sample_digest")), []
+    if name == "system.validate_source":
+        return guards.assert_source(scene, args["source_binding"], operation_name=args.get("operation_name"), arguments=args.get("operation_arguments")), []
+    handled, registered_result = dispatch_registered(
+        name,
+        scene,
+        args,
+        request,
+        {
+            "csc": csc,
+            "domain_scene": _domain_scene,
+            "scene_view": _scene_view,
+            "scene_state": scene_state,
+            "json_safe": json_safe,
+            "id_string": _id_string,
+            "read_member": _read_member,
+            "guid": _guid,
+            "object_id": _object_id,
+            "save_current_scene": _save_current_scene,
+            "casc_tool_state": _casc_tool_state,
+            # The name this handler was dispatched for; a batch may mix operations.
+            "operation_name": name,
+            "assert_source_binding": lambda: guards.assert_source(_scene_view() or scene, request.get("source_binding"), operation_name=name),
+        },
+    )
+    if handled:
+        return registered_result
+    if name in ("system.status", "scene.summary"):
+        state = scene_state(scene)
+        if name == "system.status":
+            state["tools"] = tools_catalog()
+            state["protocol_version"] = PROTOCOL_VERSION
+            state["runtime_epoch"] = guards.RUNTIME_EPOCH
+            state["adapter_fingerprint"] = guards.LOADED_FINGERPRINT
+            state["guarded_capabilities"] = guards.capabilities(scene)
+            from .incident_admission import capability
+            state["incident_admission_v1"] = capability(runtime_root(), guards.RUNTIME_EPOCH, guards.LOADED_FINGERPRINT)
+            from .native_adapters import status as native_status
+            state["native_adapter"] = native_status()
+            state["bridge_python"] = tuple(__import__("sys").version_info[:3])
+        return state, []
+    if name == "scene.objects":
+        state = scene_state(scene)
+        offset = max(0, int(args.get("offset", 0)))
+        limit = min(1000, max(1, int(args.get("limit", 200))))
+        return {
+            "total": len(state["objects"]),
+            "offset": offset,
+            "items": state["objects"][offset : offset + limit],
+        }, []
+    if name == "system.tools":
+        return tools_catalog(), []
+    if name == "system.introspect":
+        schema = introspect_csc()
+        counts = {"symbols": 0, "classes": 0, "functions": 0, "methods": 0, "values": 0}
+
+        def count(node):
+            for value in node.values():
+                if not isinstance(value, dict):
+                    continue
+                if "type" in value:
+                    counts["symbols"] += 1
+                    if value["type"] == "class":
+                        counts["classes"] += 1
+                    elif value["type"] == "function":
+                        counts["functions"] += 1
+                    counts["methods"] += len(value.get("methods", []))
+                    counts["values"] += len(value.get("values", []))
+                else:
+                    count(value)
+
+        count(schema)
+        counts["class_members"] = counts["methods"] + counts["values"]
+        return {"schema": schema, "counts": counts}, []
+    if name == "system.action_invoke":
+        action_id = str(args["action_id"])
+        # Installed Python commands are registered with the ActionManager under
+        # the "Commands." menu prefix; native actions (Scene.Undo) are not.
+        dispatched = "Commands." + action_id if args.get("command") else action_id
+        before = scene_state(scene)
+        result = csc.app.get_application().get_action_manager().call_action(dispatched)
+        after = scene_state(scene)
+        postcondition = args.get("postcondition")
+        if postcondition:
+            raise PermissionError("Generic action postcondition call chains are not available in production")
+        elif args.get("expect_change", True) and before["revision"] == after["revision"]:
+            raise AssertionError("POSTCONDITION_FAILED: action made no observable scene change")
+        return {
+            "action_id": action_id,
+            "dispatched_action_id": dispatched,
+            "return_value": json_safe(result),
+            "before": before["revision"],
+            "after": after["revision"],
+        }, []
+    if name == "system.action_dispatch":
+        # Internal half of a host-verified UI file flow.  The host fills the
+        # exact owned dialog and independently verifies either a changed scene
+        # revision or a stable non-empty output file before it can report
+        # success.  This operation is intentionally not exposed as an MCP tool.
+        action_id = str(args["action_id"])
+        result = csc.app.get_application().get_action_manager().call_action(action_id)
+        return {"action_id": action_id, "return_value": json_safe(result)}, []
+    if name == "timeline.set_frame":
+        frame = int(args["frame"])
+        domain = _domain_scene(scene)
+
+        def set_frame(_model, _update, _scene, session):
+            session.set_current_frame(frame)
+
+        transact(domain.modify_with_session, "Cascadeur Complete: set frame", set_frame)
+        observed = int(domain.get_current_frame(False))
+        if observed != frame:
+            raise AssertionError("POSTCONDITION_FAILED: frame is " + str(observed))
+        return {"frame": observed}, []
+    if name == "timeline.get":
+        domain = _domain_scene(scene)
+        viewer = domain.layers_viewer()
+        boundary = None
+        with suppress(Exception):
+            boundary = json_safe(_scene_view().animation_boundary())
+        return {
+            "current_frame": int(domain.get_current_frame(False)),
+            "frames_count": int(viewer.frames_count()),
+            "animation_boundary": boundary,
+        }, []
+    if name == "animation.transform_get":
+        domain = _domain_scene(scene)
+        frame = int(args.get("frame", domain.get_current_frame(False)))
+        ids = [str(item) for item in args.get("ids", [])]
+        if not ids:
+            ids = [_id_string(item) for item in domain.selector().selected().ids]
+        if not ids:
+            raise ValueError("transform_get requires ids or a non-empty selection")
+        warnings = []
+        if bool(args.get("refresh", False)):
+            from .handlers.animation import refresh_interpolation
+
+            refresh_interpolation(domain)
+        elif frame > int(domain.get_current_frame(False)):
+            # Cascadeur re-interpolates only up to the playhead after an edit.
+            warnings.append(
+                f"frame {frame} is past the playhead; values may predate the latest edit "
+                "(pass refresh=true or run interpolation_refresh)"
+            )
+        return _read_transforms(domain, ids, frame, str(args.get("space", "local"))), warnings
+    if name == "animation.transform_set":
+        domain = _domain_scene(scene)
+        current_frame = int(domain.get_current_frame(False))
+        frame = int(args.get("frame", current_frame))
+        if frame != current_frame:
+            raise ValueError("transform_set writes the current frame only; set the playhead first")
+        ids = [str(item) for item in args.get("ids", [])]
+        if not ids:
+            ids = [_id_string(item) for item in domain.selector().selected().ids]
+        if not ids:
+            raise ValueError("transform_set requires ids or a non-empty selection")
+        space = str(args.get("space", "local"))
+        if space not in ("local", "global"):
+            raise ValueError("space must be local or global")
+        provided = {
+            key: args.get(key)
+            for key in ("position", "rotation_euler_xyz_radians", "scale")
+            if args.get(key) is not None
+        }
+        if not provided:
+            raise ValueError("At least one transform component is required")
+        if space == "global" and "scale" in provided:
+            raise ValueError("Scale is only writable in local space")
+        for key, value in provided.items():
+            if not isinstance(value, (list, tuple)) or len(value) != 3:
+                raise ValueError(key + " must contain exactly three numbers")
+            provided[key] = [float(item) for item in value]
+
+        from .handlers.animation import rotation_from_euler_xyz
+
+        targets = []
+        for raw_id in ids:
+            object_id = _object_id(raw_id)
+            data_ids = _transform_data_ids(domain, object_id, space)
+            if data_ids is None:
+                raise ValueError("Object has no Transform behaviour: " + raw_id)
+            targets.append((object_id, data_ids))
+
+        def set_transforms(model, _update, scene_updater):
+            editor = model.data_editor()
+            changed = set()
+            for _object, data_ids in targets:
+                if "position" in provided:
+                    editor.set_data_value(data_ids["position"], frame, tuple(provided["position"]))
+                    changed.add(data_ids["position"])
+                if "rotation_euler_xyz_radians" in provided:
+                    rotation = rotation_from_euler_xyz(csc, provided["rotation_euler_xyz_radians"])
+                    editor.set_data_value(data_ids["rotation"], frame, rotation)
+                    changed.add(data_ids["rotation"])
+                if "scale" in provided:
+                    editor.set_data_value(data_ids["scale"], frame, tuple(provided["scale"]))
+                    changed.add(data_ids["scale"])
+            scene_updater.generate_update()
+            scene_updater.run_update(changed, frame)
+
+        transact(domain.modify_update, "Cascadeur Complete: set transform", set_transforms)
+        observed = _read_transforms(domain, ids, frame, space)
+        for item in observed:
+            if "position" in provided and any(
+                abs(actual - expected) > 1e-4
+                for actual, expected in zip(item["position"], provided["position"], strict=True)
+            ):
+                raise AssertionError("POSTCONDITION_FAILED: position differs")
+            if "scale" in provided and any(
+                abs(actual - expected) > 1e-4 for actual, expected in zip(item["scale"], provided["scale"], strict=True)
+            ):
+                raise AssertionError("POSTCONDITION_FAILED: scale differs")
+            if "rotation_euler_xyz_radians" in provided:
+                expected_rotation = rotation_from_euler_xyz(csc, provided["rotation_euler_xyz_radians"])
+                expected_quaternion = _quaternion_list(expected_rotation)
+                observed_quaternion = item["rotation"]["quaternion_wxyz"]
+                dot = abs(sum(a * b for a, b in zip(expected_quaternion, observed_quaternion, strict=True)))
+                if abs(1.0 - dot) > 1e-4:
+                    raise AssertionError("POSTCONDITION_FAILED: rotation differs")
+        return observed, []
+    if name == "selection.get":
+        return scene_state(scene)["selection"], []
+    if name == "selection.filter":
+        domain = _domain_scene(scene)
+        viewer = domain.model_viewer()
+        selected_only = bool(args.get("selected_only", True))
+        ids = domain.selector().selected().ids if selected_only else viewer.get_objects()
+        type_name = str(args.get("type", "")).casefold()
+        name_contains = str(args.get("name_contains", "")).casefold()
+        matches = []
+        for object_id in ids:
+            if not isinstance(object_id, csc.model.ObjectId):
+                continue
+            object_name = str(viewer.get_object_name(object_id))
+            object_type = str(viewer.get_object_type_name(object_id))
+            if type_name and object_type.casefold() != type_name:
+                continue
+            if name_contains and name_contains not in object_name.casefold():
+                continue
+            matches.append({"id": _id_string(object_id), "name": object_name, "type": object_type})
+        return matches, []
+    if name in ("selection.set", "selection.add", "selection.remove"):
+        domain = _domain_scene(scene)
+        current = {_id_string(item) for item in domain.selector().selected().ids}
+        supplied = {str(item) for item in args.get("ids", [])}
+        if name == "selection.add":
+            target = current | supplied
+        elif name == "selection.remove":
+            target = current - supplied
+        else:
+            target = supplied
+        object_ids = {_object_id(item) for item in target}
+        pivot = (
+            _object_id(args["pivot_id"]) if args.get("pivot_id") else next(iter(object_ids), csc.model.ObjectId.null())
+        )
+
+        def change_selection(_model, _update, _scene, session):
+            session.take_selector().select(object_ids, pivot)
+
+        transact(domain.modify_with_session, "Cascadeur Complete: " + name, change_selection)
+        observed = set(scene_state(_scene_view() or scene)["selection"])
+        if observed != target:
+            raise AssertionError("POSTCONDITION_FAILED: selection differs")
+        return sorted(observed), []
+    if name in ("layer.list", "animation.key_list"):
+        state = scene_state(scene)
+        if name == "layer.list":
+            return state["layers"], []
+        requested = args.get("layer_id")
+        if requested:
+            for layer in state["layers"]:
+                if layer["id"] == str(requested):
+                    return {"layer_id": requested, "keys": layer["keys"]}, []
+            raise KeyError("Unknown layer id: " + str(requested))
+        return {layer["id"]: layer["keys"] for layer in state["layers"]}, []
+    if name in (
+        "layer.create",
+        "layer.delete",
+        "layer.visibility",
+        "layer.lock",
+        "animation.key_add",
+        "animation.key_delete",
+    ):
+        domain = _domain_scene(scene)
+        created = []
+
+        def edit_layers(model, _update, scene_updater):
+            editor = model.layers_editor()
+            if name == "layer.create":
+                parent = _guid(args["parent_id"]) if args.get("parent_id") else scene_updater.layers_viewer().root_id()
+                created.append(editor.create_layer(str(args["name"]), parent))
+                return
+            layer_id = _guid(args["layer_id"])
+            if name == "layer.delete":
+                editor.delete_layer(layer_id)
+            elif name == "layer.visibility":
+                editor.set_visible_for_layer(bool(args["visible"]), layer_id)
+            elif name == "layer.lock":
+                editor.set_locked_for_layer(bool(args["locked"]), layer_id)
+            elif name == "animation.key_add":
+                editor.set_fixed_interpolation_or_key_if_need(layer_id, int(args["frame"]), True)
+            elif name == "animation.key_delete":
+                editor.unset_section(int(args["frame"]), layer_id)
+
+        transact(domain.modify, "Cascadeur Complete: " + name, edit_layers)
+        state = scene_state(_scene_view() or scene)
+        if name == "layer.create":
+            created_id = _id_string(created[0])
+            if not any(item["id"] == created_id for item in state["layers"]):
+                raise AssertionError("POSTCONDITION_FAILED: created layer was not observed")
+            return {"layer_id": created_id}, []
+        layer_id_text = str(args["layer_id"])
+        observed_layer = next((item for item in state["layers"] if item["id"] == layer_id_text), None)
+        if name == "layer.delete":
+            if observed_layer is not None:
+                raise AssertionError("POSTCONDITION_FAILED: deleted layer still exists")
+            return {"layer_id": layer_id_text, "deleted": True}, []
+        if observed_layer is None:
+            raise AssertionError("POSTCONDITION_FAILED: layer was not found")
+        if name == "layer.visibility" and observed_layer["visible"] != bool(args["visible"]):
+            raise AssertionError("POSTCONDITION_FAILED: visibility differs")
+        if name == "layer.lock" and observed_layer["locked"] != bool(args["locked"]):
+            raise AssertionError("POSTCONDITION_FAILED: lock state differs")
+        if name == "animation.key_add" and int(args["frame"]) not in observed_layer["keys"]:
+            raise AssertionError("POSTCONDITION_FAILED: key was not added")
+        if name == "animation.key_delete" and int(args["frame"]) in observed_layer["keys"]:
+            raise AssertionError("POSTCONDITION_FAILED: key was not deleted")
+        return observed_layer, []
+    if name == "scene.save":
+        path = _save_current_scene(_scene_view())
+        output = Path(path)
+        if not output.is_file() or output.stat().st_size <= 0:
+            raise AssertionError("POSTCONDITION_FAILED: current scene was not saved")
+        return {"path": str(output), "bytes": output.stat().st_size}, []
+    if name == "scene.open":
+        path = str(args["path"])
+        return _load_scene_verified(path), []
+    if name == "io.import_fbx":
+        before = scene_state(scene)
+        result = _file_loader("FbxSceneLoader", scene, "import_scene", args["path"])
+        after = scene_state(_scene_view() or scene)
+        if before["revision"] == after["revision"]:
+            raise AssertionError("POSTCONDITION_FAILED: FBX import made no observable scene change")
+        before_ids = {item["id"] for item in before["objects"]}
+        return {
+            "path": str(args["path"]),
+            "created_ids": sorted(item["id"] for item in after["objects"] if item["id"] not in before_ids),
+            "before_revision": before["revision"],
+            "after_revision": after["revision"],
+            "return_value": json_safe(result),
+        }, []
+    if name == "io.export_fbx":
+        result = _file_loader("FbxSceneLoader", scene, "export_all_objects", args["path"])
+        destination = Path(args["path"])
+        # The loader may finish writing after it returns; the host waits for a
+        # stable non-empty file and owns the output postconditions.
+        return {
+            "path": str(destination),
+            "exists_on_return": destination.is_file(),
+            "return_value": json_safe(result),
+        }, []
+    if name == "safety.snapshot":
+        snapshot_id = str(args["snapshot_id"])
+        working_id = str(args["working_id"])
+        return {"snapshot_id": snapshot_id, **_save_snapshot(scene, snapshot_id, working_id)}, []
+    if name in {"safety.rollback", "safety.rollback_internal"}:
+        path = Path(str(args["path"]))
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        snapshots_root = (ensure_dirs() / "snapshots").resolve()
+        working_path = (snapshots_root / (str(args["working_id"]) + ".working.casc")).resolve()
+        if path.resolve().parent != snapshots_root or working_path.parent != snapshots_root:
+            raise ValueError("Rollback paths must remain inside the snapshots directory")
+        shutil.copy2(str(path.resolve()), str(working_path))
+        # Never remove the failed working tab from inside a command: Cascadeur's
+        # tab bar re-selects its previous tab after the command returns, and
+        # removing that tab terminates the application.
+        loaded = _load_scene_verified(working_path, prefer_other_open=True, close_previous=False)
+        loaded["restored_from"] = str(path.resolve())
+        loaded["working_path"] = str(working_path)
+        return loaded, []
+    if name == "system.undo":
+        return _run_operation(
+            scene,
+            {
+                "name": "system.action_invoke",
+                "arguments": {
+                    "action_id": args.get("action_id", "Scene.Undo"),
+                    "expect_change": args.get("expect_change", True),
+                },
+            },
+            request,
+        )
+    if name == "system.redo":
+        return _run_operation(
+            scene,
+            {
+                "name": "system.action_invoke",
+                "arguments": {
+                    "action_id": args.get("action_id", "Scene.Redo"),
+                    "expect_change": args.get("expect_change", True),
+                },
+            },
+            request,
+        )
+    raise KeyError("Unknown operation: " + str(name))
+
+
+def _request_effect(request):
+    effects = []
+    operations = request.get("operations", [])
+    if not isinstance(operations, list) or not operations:
+        return "mixed"
+    for op in operations:
+        if not isinstance(op, dict) or not isinstance(op.get("name"), str) or not isinstance(op.get("arguments") or {}, dict):
+            return "mixed"
+        name, args = op["name"], op.get("arguments") or {}
+        if name == "system.observe_geometry_capture":
+            effects.append("mixed")
+        elif name.startswith("io.export_") or name in {"scene.save", "animation.mesh_sample"}:
+            effects.append("file")
+        elif name.startswith("io.import_") or name.startswith("safety."):
+            effects.append("mixed")
+        elif name == "animation.interpolation_refresh" or (name == "animation.transform_get" and args.get("refresh", False)):
+            effects.append("evaluation")
+        elif _operation_is_mutating(op):
+            effects.append("scene")
+    return "mixed" if len(set(effects)) > 1 else (effects[0] if effects else "none")
+
+
+def _verified_rollback_adapter():
+    """Only code-owned installed-build evidence can enable the rollback route."""
+    adapter = guards._ADAPTERS.get("safety.rollback")
+    if adapter is None:
+        return None
+    proof = adapter.verification
+    completion = proof.get("rollback_completion_observed")
+    observed_build = getattr(adapter, "observed_build", None)
+    if not isinstance(completion, dict) or not callable(observed_build):
+        return None
+    build = observed_build()
+    if (not isinstance(build, str) or not build
+            or proof.get("installed_build") != build
+            or proof.get("runtime_fingerprint") != guards.LOADED_FINGERPRINT
+            or proof.get("dispatch_semantics") != "synchronous_no_yield"
+            or completion.get("installed_build") != build
+            or completion.get("runtime_fingerprint") != guards.LOADED_FINGERPRINT
+            or completion.get("dispatch_semantics") != "synchronous_no_yield"
+            or not isinstance(completion.get("evidence_sha256"), str)
+            or not re.fullmatch(r"[a-f0-9]{64}", completion["evidence_sha256"])):
+        return None
+    return adapter
+
+
+def execute_request(scene, request):
+    """Authenticate and claim independent admission before querying a scene."""
+    from . import incident_admission as admission
+    started = time.monotonic()
+    root = runtime_root()
+    admitted = False
+    try:
+        _verify_message(request, _bridge_key(root))
+        terminal = guards.previous_terminal(root, request)
+        if terminal is not None:
+            return terminal
+        operations = request.get("operations")
+        if (isinstance(operations, list) and len(operations) == 1 and isinstance(operations[0], dict)
+                and operations[0].get("name") in admission.SETUP_IDS):
+            preview = admission.validate_unclaimed(root, request)
+            from .native_setup_dependencies import validate_declared_pair_dependency
+            if validate_declared_pair_dependency(preview["setup"], Path(__file__).parent,
+                                                guards.LOADED_FINGERPRINT):
+                guards.assert_loaded_package()
+        with admission.admitted_request(root, request) as sidecar:
+            admitted = True
+            if admission.diagnostic_request(request):
+                return _execute_control_request(request, sidecar, diagnostic=True)
+            if sidecar["work_kind"] == "explicit_setup":
+                return _execute_control_request(request, sidecar, diagnostic=False)
+            return _execute_admitted_request(scene, request)
+    except (OSError, ValueError, RuntimeError) as exc:
+        if admitted:
+            # An I/O failure after dispatch/terminal publication cannot become
+            # a false rejected_pre_dispatch receipt.
+            raise
+        result = _error(request.get("feature_id", "request"), "INVALID_REQUEST", str(exc), started, {})
+        result.update(dispatched=False, outcome="rejected_pre_dispatch", execution="not_dispatched")
+        result["result"] = {"error_details": {"code": "INCIDENT_ADMISSION_REJECTED", "detail": str(exc)}}
+        return result
+
+
+def _execute_control_request(request, sidecar, *, diagnostic):
+    """Bounded metadata or an exact approved finite setup, never ordinary dispatch."""
+    from . import incident_admission as admission
+    from .native_completion import epoch_status
+    guards.begin_request(request)
+    started = time.monotonic()
+    effect = "none" if diagnostic else "mixed"
+    guards.receipt_event(runtime_root(), request, "dispatch_started", effect_class=effect, dispatched=True)
+    try:
+        if diagnostic:
+            if request["operations"][0]["name"] == "system.incident_observe_original":
+                from .native_incident_observation import observe_original
+                value = observe_original(runtime_root(), request["operations"][0]["arguments"]["original"], request)
+            else:
+                value = {"protocol_version": PROTOCOL_VERSION, "runtime_epoch": guards.RUNTIME_EPOCH,
+                "adapter_fingerprint": guards.LOADED_FINGERPRINT,
+                "incident_admission_v1": admission.capability(runtime_root(), guards.RUNTIME_EPOCH, guards.LOADED_FINGERPRINT),
+                "native_completion_epoch": epoch_status(), "diagnostic_scope": "bridge_metadata_only"}
+        else:
+            value = {"setup_invocation_ref": request["request_id"],
+                     "steps": admission.dispatch_setup(request, sidecar)}
+        result = _error(request["feature_id"], None, "", started, {})
+        result.update(ok=True, result=value, error_code=None, error_message=None, evidence=[], status="succeeded")
+        outcome = "succeeded"
+    except Exception as exc:
+        result = _error(request["feature_id"], "POSTCONDITION_FAILED", str(exc), started, {})
+        # A setup experiment can leave retained native resources on failure.
+        # Its exception is not a native completion certificate.
+        outcome = "failed_after_dispatch" if diagnostic else "outcome_unknown"
+    phase, failure = guards.write_observation()
+    result.update(receipt_id=request["request_id"], phase="terminal", outcome=outcome,
+                  dispatched=True, execution=outcome, write_phase=phase, failure_kind=failure,
+                  recovery_eligible=False)
+    guards.receipt_event(runtime_root(), request, "terminal", outcome=outcome, result=result,
+                         effect_class=effect, dispatched=True)
+    return result
+
+
+def _execute_admitted_request(scene, request):
+    """Guard the original request and durably record its observed outcome."""
+    scene = _scene_view() or scene
+    started = time.monotonic()
+    guards.begin_request(request)
+    effect = _request_effect(request)
+    source = request.get("source_binding")
+    state = scene_state(scene)
+    dispatched = False
+    try:
+        if request.get("scene_id") and request["scene_id"] != state.get("scene_id"):
+            raise ValueError("SCENE_CHANGED: scene identity differs")
+        if request.get("expected_revision") and request["expected_revision"] != state.get("revision"):
+            raise ValueError("SCENE_CHANGED: scene revision differs")
+        if request.get("protocol_version") not in (PROTOCOL_VERSION, "2.0") or (request.get("protocol_version") == "2.0" and effect != "none"):
+            raise ValueError("PROTOCOL_MISMATCH")
+        if request.get("runtime_epoch") and request.get("runtime_epoch") != guards.RUNTIME_EPOCH:
+            raise ValueError("PROTOCOL_MISMATCH: runtime restarted")
+        if source is not None and effect == "none":
+            guards.assert_source(scene, source)
+        if effect != "none":
+            from .native_completion import assert_epoch_usable
+            assert_epoch_usable()
+            guards.assert_loaded_package()
+            if len(request.get("operations", ())) != 1:
+                raise ValueError("RIG_ADAPTER_UNVERIFIED: guarded native effects require one exact executor")
+            if request.get("runtime_epoch") != guards.RUNTIME_EPOCH or request.get("adapter_fingerprint") != guards.LOADED_FINGERPRINT:
+                raise ValueError("PROTOCOL_MISMATCH: runtime epoch or loaded adapter differs")
+            for op in request["operations"]:
+                guards.assert_source(scene, source, operation_name=op["name"], arguments=op.get("arguments") or {})
+                if op["name"] not in guards._ADAPTERS:
+                    raise ValueError("RIG_ADAPTER_UNVERIFIED: no coupled native executor")
+                if (op["name"] in YIELDING_OPERATIONS and op["name"] not in guards._ADAPTERS
+                        and not (op["name"] == "safety.rollback" and _verified_rollback_adapter() is not None)):
+                    raise ValueError("RIG_ADAPTER_UNVERIFIED: native completion yields")
+            guards.set_write_guard(lambda: guards.assert_source(_scene_view() or scene, source))
+        _verify_confirmation(runtime_root(), request, state)
+        if (request.get("safety_context") or {}).get("snapshot_required"):
+            raise ValueError("Unbound in-request snapshot is forbidden")
+        guards.receipt_event(runtime_root(), request, "dispatch_started", effect_class=effect, dispatched=True)
+        dispatched = True
+        result = _execute_request_impl(scene, request)
+    except Exception as exc:
+        code = "UNSUPPORTED_VERSION" if "PROTOCOL_MISMATCH" in str(exc) else "INVALID_REQUEST"
+        result = _error(request.get("feature_id", "request"), code, str(exc), started, state)
+        result["result"] = {"error_details": {"code": str(exc).split(":", 1)[0]}}
+    post_source = None
+    if dispatched and effect != "none" and result.get("ok") is False and result.get("result") is None:
+        result["result"] = {"error_details": {"code": result.get("error_code"),
+            "message": result.get("error_message")}}
+    if dispatched and effect != "none" and source is not None:
+        try:
+            supplied = (result.get("result") or {}).get("source_binding") if isinstance(result.get("result"), dict) else None
+            post_source = guards.assert_source(_scene_view() or scene, supplied) if supplied else guards.capture_source(_scene_view() or scene, source["scope"], source["inputs_digest"])
+            if isinstance(result.get("result"), dict):
+                result["result"]["post_source_binding"] = post_source
+                result["result"]["source_binding"] = post_source
+        except Exception as exc:
+            result.setdefault("warnings", []).append("Post-source capture is unavailable: " + str(exc)[:500])
+            if isinstance(result.get("result"), dict):
+                result["result"]["post_source_error"] = {"type": type(exc).__name__, "message": str(exc)[:2000]}
+            if result.get("ok"):
+                result["ok"] = False
+                result["error_code"] = "POSTCONDITION_FAILED"
+                result["error_message"] = "Applied state could not be captured: " + str(exc)
+    phase, failure = guards.write_observation()
+    outcome = ("succeeded" if result["ok"] else "failed_after_dispatch") if dispatched else "rejected_pre_dispatch"
+    effects = guards.effect_observations()
+    if dispatched and effect != "none":
+        name = request["operations"][0]["name"]
+        observation = guards.selected_effect_for_request(request, _scene_view() or scene)
+        if (observation is None or observation["completion"] == "unknown"
+                or (not result["ok"] and not observation.get("private_failure_observation"))):
+            # A Python return or exception says nothing about asynchronous native
+            # completion. Keep the original claim unresolved and never replay it.
+            outcome = "outcome_unknown"
+            if result.get("ok"):
+                result["error_code"] = "POSTCONDITION_FAILED"
+                result["error_message"] = "NATIVE_COMPLETION_UNKNOWN: reconcile the original request; do not redispatch"
+            result["ok"] = False
+            result.setdefault("warnings", []).append("NATIVE_COMPLETION_UNKNOWN: reconcile the original request; do not redispatch")
+        elif observation["completion"] == "no_effect":
+            outcome = "failed_after_dispatch"
+            result["ok"] = False
+        if post_source is not None and source is not None:
+            old_id, new_id = source["binding"]["scene_instance_id"], post_source["binding"]["scene_instance_id"]
+            approved_restore = False
+            if old_id != new_id and name == "safety.rollback" and observation is not None:
+                restore_adapter = _verified_rollback_adapter()
+                approve = getattr(restore_adapter, "approve_successor", None)
+                if callable(approve):
+                    try:
+                        approved_restore = approve(request, source, post_source, result, observation) is True
+                    except Exception:
+                        approved_restore = False
+            if old_id != new_id and name == "scene.activate" and observation is not None:
+                from .native_owned_pair_binding import approve_pair_activation_successor
+                approved_restore = approve_pair_activation_successor(request, source, post_source, result, observation)
+            if old_id != new_id and name != "safety.bootstrap" and not approved_restore:
+                outcome = "outcome_unknown"
+                result["ok"] = False
+                result["error_message"] = "SCENE_CHANGED: unapproved native successor"
+        if isinstance(result.get("result"), dict):
+            # Diagnostic observations retain live callback references inside
+            # the guard. The terminal payload owns an immutable JSON snapshot.
+            result["result"]["native_effect_observations"] = json.loads(json.dumps(effects, allow_nan=False))
+            if observation is not None and observation.get("private_failure_observation"):
+                result["result"]["failed_after_observation"] = observation
+    result.update({"receipt_id": request["request_id"], "phase": "terminal", "outcome": outcome,
+                   "dispatched": dispatched, "execution": outcome, "write_phase": phase,
+                   "failure_kind": failure, "recovery_eligible": False,
+                   "quality": "unverified", "export": "not_requested",
+                   "scene_before": source.get("binding") if source else None,
+                   "scene_after": post_source["binding"] if post_source else None})
+    # Eligibility is code-owned and source-bound. A failure flag or snapshot on
+    # the wire cannot create an adapter, an attestation or a recovery source.
+    if (outcome == "failed_after_dispatch" and dispatched and effect in ("scene", "mixed")
+            and observation is not None and observation.get("completion") == "completed"
+            and observation.get("private_failure_observation")
+            and phase in ("started", "completed") and failure != "guard_rejected_before_first_write"
+            and post_source is not None and len(request.get("operations", ())) == 1
+            and request["operations"][0]["name"] not in {"safety.rollback", "safety.rollback_internal"}):
+        try:
+            rollback_adapter = _verified_rollback_adapter()
+            original_adapter = guards._ADAPTERS.get(request["operations"][0]["name"])
+            proof = original_adapter.verification if original_adapter is not None else {}
+            attestation = proof.get("recovery_after_partial_write_observed") or {}
+            prepare_recovery = getattr(original_adapter, "prepare_recovery_binding", None)
+            build = rollback_adapter.observed_build() if rollback_adapter is not None else None
+            if (rollback_adapter is not None and callable(prepare_recovery)
+                    and proof.get("runtime_fingerprint") == guards.LOADED_FINGERPRINT
+                    and proof.get("installed_build") == build
+                    and attestation.get("runtime_fingerprint") == guards.LOADED_FINGERPRINT
+                    and attestation.get("installed_build") == build
+                    and effect in attestation.get("known_effect_classes", ())
+                    and isinstance(attestation.get("evidence_sha256"), str)
+                    and re.fullmatch(r"[a-f0-9]{64}", attestation["evidence_sha256"])):
+                current_scene = _scene_view() or scene
+                recovery = prepare_recovery(current_scene, request, result)
+                scope = recovery["scope"]
+                args = scope["operation_arguments"]
+                manifest = source["scope"]["snapshot_manifest"]
+                if (scope.get("operation_name") != "safety.rollback"
+                        or scope.get("snapshot_manifest") != manifest
+                        or scope.get("recovery") != {"failed_request_id": request["request_id"],
+                            "post_source_digest": guards.digest(post_source),
+                            "snapshot_manifest_digest": guards.digest(manifest)}
+                        or args.get("failed_request_id") != request["request_id"]
+                        or args.get("post_source_digest") != guards.digest(post_source)
+                        or args.get("snapshot_manifest_digest") != guards.digest(manifest)
+                        or args.get("path") != manifest["path"]
+                        or args.get("snapshot_id") != manifest["snapshot_id"]
+                        or recovery["binding"]["document_lineage_id"] != post_source["binding"]["document_lineage_id"]):
+                    raise ValueError("RECOVERY_BINDING_UNAVAILABLE")
+                guards.assert_source(current_scene, post_source)
+                guards.assert_source(current_scene, recovery, operation_name="safety.rollback", arguments=args)
+                result["result"]["recovery_source_binding"] = recovery
+                result["recovery_eligible"] = True
+        except Exception as exc:
+            result.setdefault("warnings", []).append("Recovery is unavailable: " + str(exc)[:500])
+    if dispatched and effect != "none":
+        final_observation = guards.selected_effect_for_request(request, _scene_view() or scene)
+        if (final_observation is None or final_observation.get("completion") == "unknown"
+                or guards.digest(final_observation) != guards.digest(observation)):
+            outcome = "outcome_unknown"
+            result.update(ok=False, outcome=outcome, execution=outcome, recovery_eligible=False)
+            if isinstance(result.get("result"), dict):
+                result["result"].pop("recovery_source_binding", None)
+                result["result"]["native_completion_error"] = "NATIVE_OBSERVATION_REVOKED_BEFORE_TERMINAL"
+            result.setdefault("warnings", []).append("Native completion observation changed before terminal sealing")
+    result["scene_revision_before"] = state.get("revision")
+    # Terminal durability precedes response publication. Failure propagates and
+    # leaves the claim unresolved; a later host must never redispatch it.
+    receipt = guards.receipt_event(runtime_root(), request, "terminal", outcome=outcome, result=result,
+                                  effect_class=effect, dispatched=dispatched)
+    from .native_completion import finalize_failure_observation
+    finalize_failure_observation(request, result, receipt)
+    from .native_scene_adapter import finalize_evaluation
+    finalize_evaluation(_scene_view() or scene, request, result, receipt)
+    from .native_key_insertion_evidence import finalize_insertion
+    finalize_insertion(_scene_view() or scene, request, result, receipt)
+    from .native_geometry_capture import finalize_geometry_capture
+    finalize_geometry_capture(_scene_view() or scene, request, result, receipt)
+    from .native_owned_pair_binding import finalize_pair_operation
+    finalize_pair_operation(_scene_view() or scene, request, result, receipt)
+    return result
+
+
+def _execute_request_impl(scene, request):
+    started = time.monotonic()
+    feature_id = request.get("feature_id") or (request.get("operations") or [{}])[0].get("name", "batch")
+    # Cascadeur may retain a Python command object created for a scene tab that
+    # is no longer active. Always resolve the live scene view before enforcing
+    # identity/revision guards; otherwise a menu fallback can reject a request
+    # for the visible tab using the previous tab's identity.
+    scene = _scene_view() or scene
+    before = scene_state(scene)
+    expected_scene = request.get("scene_id")
+    expected_revision = request.get("expected_revision")
+    if expected_scene and expected_scene != before["scene_id"]:
+        return _error(feature_id, "SCENE_CHANGED", "Scene identity changed", started, before)
+    if expected_revision and expected_revision != before["revision"]:
+        return _error(feature_id, "SCENE_CHANGED", "Scene revision changed", started, before)
+    # Private execution body: execute_request already authenticated and consumed
+    # the exact token before writing dispatch_started. Consuming it again here
+    # rejects every legitimate first dispatch as a replay.
+    safety = request.get("safety_context") or {}
+    snapshot_id = None
+    if safety.get("snapshot_required"):
+        # An in-request snapshot would switch the active document to a working copy
+        # the host never learns about. The host takes snapshots with safety.snapshot.
+        return _error(
+            feature_id, "INVALID_REQUEST", "snapshot_required is not supported; use safety.snapshot", started, before
+        )
+    results = []
+    warnings = []
+    proven = []
+    try:
+        current_scene = _scene_view() or scene
+        for operation in request.get("operations", []):
+            result, operation_warnings = _run_operation(current_scene, operation, request)
+            results.append({"operation": operation["name"], "result": result})
+            warnings.extend(operation_warnings)
+            for postcondition in operation_postconditions(operation["name"], operation.get("arguments"), result):
+                if postcondition not in proven:
+                    proven.append(postcondition)
+            current_scene = _scene_view() or current_scene
+        after = scene_state(current_scene)
+        return {
+            "ok": True,
+            "feature_id": feature_id,
+            "execution_mode": "Native",
+            "scene_id": after["scene_id"],
+            "scene_revision": after["revision"],
+            "result": results[0]["result"] if len(results) == 1 else results,
+            "warnings": warnings,
+            "changed_entities": _changed_entities(before, after),
+            "snapshot_id": snapshot_id,
+            "job_id": None,
+            "evidence": [
+                {
+                    "kind": "bridge_postcondition",
+                    "detail": "Request completed on Cascadeur UI thread",
+                    "observed_at": time.time(),
+                }
+            ],
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "error_code": None,
+            "error_message": None,
+            "operation_id": results[0]["operation"] if len(results) == 1 else "batch",
+            "status": "succeeded",
+            "scene_revision_before": before.get("revision"),
+            "scene_revision_after": after.get("revision"),
+            "postconditions": [
+                {
+                    "id": "bridge_execution",
+                    "ok": True,
+                    "detail": "Operation completed and live scene state was re-read",
+                }
+            ]
+            + [
+                {"id": item, "ok": True, "detail": "Asserted by the bridge operation on the Cascadeur UI thread"}
+                for item in proven
+            ],
+            "evidence_id": None,
+        }
+    except PermissionError as exc:
+        return _error(feature_id, "LICENSE_GATED", str(exc), started, scene_state(_scene_view() or scene), snapshot_id)
+    except AssertionError as exc:
+        return _error(
+            feature_id, "POSTCONDITION_FAILED", str(exc), started, scene_state(_scene_view() or scene), snapshot_id
+        )
+    except Exception as exc:
+        detail = str(exc) + "\n" + traceback.format_exc(limit=8)
+        return _error(
+            feature_id, "POSTCONDITION_FAILED", detail, started, scene_state(_scene_view() or scene), snapshot_id
+        )
+
+
+def _changed_entities(before, after):
+    changed = []
+    if before.get("revision") != after.get("revision"):
+        if before.get("current_frame") != after.get("current_frame"):
+            changed.append("timeline.current_frame")
+        if before.get("selection") != after.get("selection"):
+            changed.append("scene.selection")
+        if before.get("objects") != after.get("objects"):
+            changed.append("scene.objects")
+        if before.get("layers") != after.get("layers"):
+            changed.append("scene.layers")
+        if before.get("transform_fingerprint") != after.get("transform_fingerprint"):
+            changed.append("scene.transforms")
+        if before.get("model_data_fingerprint") != after.get("model_data_fingerprint"):
+            changed.append("scene.behaviours")
+        if before.get("rig_mass_fingerprint") != after.get("rig_mass_fingerprint"):
+            changed.append("rig.rigid_body_masses")
+        if before.get("tool_state_fingerprint") != after.get("tool_state_fingerprint"):
+            changed.append("scene.tool_state")
+        if not changed:
+            changed.append("scene")
+    return changed
+
+
+def _error(feature_id, code, message, started, state, snapshot_id=None):
+    return {
+        "ok": False,
+        "feature_id": feature_id,
+        "execution_mode": "Native",
+        "scene_id": state.get("scene_id"),
+        "scene_revision": state.get("revision"),
+        "result": None,
+        "warnings": [],
+        "changed_entities": [],
+        "snapshot_id": snapshot_id,
+        "job_id": None,
+        "evidence": [{"kind": "bridge_error", "detail": message[:2000], "observed_at": time.time()}],
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "error_code": code,
+        "error_message": message[:12000],
+        "operation_id": None,
+        "status": "failed",
+        "scene_revision_before": state.get("revision"),
+        "scene_revision_after": state.get("revision"),
+        "postconditions": [],
+        "evidence_id": None,
+    }
+
+
+# Operations that hand work to Cascadeur's event loop (rendering, modal
+# confirmations, file dialogs, scene loading, tab changes). The drain returns
+# right after them so the UI thread can finish that work before the host polls.
+YIELDING_OPERATIONS = frozenset(
+    {
+        "render.viewport_capture",
+        "render.image",
+        "io.export_image",
+        "scene.open_autosave",
+        "timeline.playback",
+        "render.viewport_layout",
+        "view.silhouette",
+        "view.isometric_grid",
+        "view.composition",
+        "view.trajectory",
+        "view.trajectory_translate",
+        "view.trajectory_rotate",
+        "view.trajectory_direction",
+        "view.trajectory_edit",
+        "view.ballistic_ghosts",
+        "view.fingers_drawing",
+        "physics.autophysics_freeze",
+        "view.ghost",
+        "view.node_editor",
+        "view.control_picker",
+        "physics.auto_enable",
+        "physics.auto_snap",
+        "system.action_dispatch",
+        "scene.new",
+        "scene.open",
+        "scene.activate",
+        "scene.close",
+        "safety.rollback",
+        "safety.rollback_internal",
+    }
+)
+DRAIN_LINGER_SECONDS = 1.0
+DRAIN_MAX_SECONDS = 20.0
+
+
+def process_pending(scene, *, matching_scene_only=False, linger=True):
+    """Drain queued requests, lingering briefly for follow-up requests.
+
+    One UI trigger (menu command or tab activation) costs several seconds, but
+    MCP clients usually send short bursts (status, snapshot, commit, re-read).
+    After each pass the drain waits up to ``DRAIN_LINGER_SECONDS`` for the next
+    request and stops at ``DRAIN_MAX_SECONDS`` or after an event-loop-bound
+    operation, keeping the Cascadeur UI responsive between bursts. The UI-thread
+    pump polls on its own timer, so it passes ``linger=False`` and never blocks
+    the UI waiting for requests that have not arrived yet.
+    """
+    started = time.monotonic()
+    total = 0
+    requests = runtime_root() / "state" / "requests"
+    try:
+        while True:
+            processed, must_yield = _drain_once(scene, matching_scene_only=matching_scene_only)
+            total += processed
+            if processed == 0 or must_yield or time.monotonic() - started >= DRAIN_MAX_SECONDS:
+                return total
+            if not linger:
+                continue
+            linger_deadline = time.monotonic() + DRAIN_LINGER_SECONDS
+            _mark_draining(time.time() + DRAIN_LINGER_SECONDS)
+            while time.monotonic() < linger_deadline and not any(requests.glob("*.json")):
+                time.sleep(0.02)
+            if not any(requests.glob("*.json")):
+                return total
+    finally:
+        _mark_draining(0.0)
+
+
+def _mark_draining(until):
+    """Tell the host until when a queued request is claimed without a UI trigger."""
+    with suppress(Exception):
+        atomic_json(runtime_root() / "state" / "drain_active.json", {"until": float(until), "pid": os.getpid()})
+
+
+def _request_shape_error(request):
+    """Reject a signed request whose fields the drain would otherwise trip over."""
+    expires_at = request.get("expires_at", 0)
+    if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+        return "Request expires_at must be a number"
+    if not isinstance(request.get("safety_context") or {}, dict):
+        return "Request safety_context must be an object"
+    operations = request.get("operations") or []
+    if not isinstance(operations, list):
+        return "Request operations must be a list"
+    for item in operations:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            return "Each request operation must be an object with a name"
+        if not isinstance(item.get("arguments") or {}, dict):
+            return "Request operation arguments must be an object"
+    return None
+
+
+def _drain_once(scene, *, matching_scene_only=False):
+    # Event and command callbacks can carry a stale per-tab scene argument.
+    # Queue routing must follow the document that is actually active now.
+    root = ensure_dirs()
+    try:
+        bridge_secret = _bridge_key(root)
+    except Exception:
+        return 0, True
+    requests = root / "state" / "requests"
+    responses = root / "state" / "responses"
+    processed = 0
+    must_yield = False
+    active_scene_id = None
+    for path in sorted(requests.glob("*.json")):
+        if must_yield:
+            break
+        if matching_scene_only:
+            try:
+                preview = json.loads(path.read_text(encoding="utf-8"))
+                _verify_message(preview, bridge_secret)
+            except Exception:
+                preview = {}
+            target_scene_id = preview.get("scene_id")
+            if target_scene_id:
+                try:
+                    from .incident_admission import validate_unclaimed
+                    if guards.previous_terminal(root, preview) is not None:
+                        target_scene_id = None
+                    else:
+                        validate_unclaimed(root, preview)
+                        active_scene_id = scene_state(_scene_view() or scene).get("scene_id")
+                except (OSError, ValueError, RuntimeError):
+                    # Claim and return an authenticated rejection below. An
+                    # invalid sidecar cannot authorize scene-routing reads.
+                    target_scene_id = None
+            if target_scene_id and target_scene_id != active_scene_id:
+                # Leave the request unclaimed. A host tab nudge activates a
+                # different scene first and then returns to the target scene;
+                # only the matching activation may execute a mutating request.
+                continue
+        claimed = path.with_suffix(".processing")
+        try:
+            os.replace(path, claimed)
+        except OSError:
+            continue
+        try:
+            try:
+                request = json.loads(claimed.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                request = None
+            if not isinstance(request, dict):
+                # Unreadable or not a request object: there is no request id or
+                # nonce to answer, so drop the claim and keep draining.
+                continue
+            request_id = str(request.get("request_id", ""))
+            authenticated = True
+            terminal = None
+            try:
+                _verify_message(request, bridge_secret)
+                terminal = guards.previous_terminal(root, request)
+                if terminal is None:
+                    _claim_request_nonce(root, request)
+                    guards.begin_request(request)
+                    guards.receipt_event(root, request, "claimed", effect_class=_request_effect(request), dispatched=False)
+            except (BridgeAuthenticationError, ValueError) as exc:
+                authenticated = False
+                result = _error("authentication", "INVALID_REQUEST", str(exc), time.monotonic(), {})
+            shape_error = _request_shape_error(request) if authenticated else None
+            if terminal is not None:
+                result = terminal
+            elif authenticated and (request.get("protocol_version") not in (PROTOCOL_VERSION, "2.0") or (request.get("protocol_version") == "2.0" and _request_effect(request) != "none")):
+                result = _error("protocol", "UNSUPPORTED_VERSION", "Bridge protocol mismatch", time.monotonic(), {})
+                result["result"] = {"error_details": {"code": "PROTOCOL_MISMATCH"}}
+            elif shape_error:
+                result = _error("request", "INVALID_REQUEST", shape_error, time.monotonic(), {})
+            elif authenticated and (float(request.get("expires_at", 0)) < time.time() or guards.canceled(root, request)):
+                result = _error("timeout", "TIMEOUT", "Expired or canceled before dispatch", time.monotonic(), {})
+                result.update({"outcome": "canceled_pre_dispatch", "execution": "canceled_pre_dispatch"})
+            elif authenticated:
+                result = execute_request(scene, request)
+            if authenticated and terminal is None and result.get("phase") != "terminal":
+                outcome = result.get("outcome", "rejected_pre_dispatch")
+                result.update({"receipt_id": request_id, "phase": "terminal", "outcome": outcome,
+                               "dispatched": False, "execution": outcome, "write_phase": "not_started",
+                               "recovery_eligible": False})
+                guards.receipt_event(root, request, "terminal", outcome=outcome, result=result,
+                                     effect_class=_request_effect(request), dispatched=False)
+            try:
+                valid_request_id = str(uuid.UUID(request_id)) == request_id.casefold()
+            except ValueError:
+                valid_request_id = False
+            if valid_request_id:
+                result.update(
+                    {
+                        "request_id": request_id,
+                        "session_id": request.get("session_id"),
+                        "nonce": request.get("nonce"),
+                        "mac": "",
+                    }
+                )
+                # Sign exactly what the host will read: JSON turns non-string
+                # keys (e.g. frame numbers) into strings, which changes the
+                # canonical key order and would break the MAC.
+                result = json.loads(json.dumps(_finite(result), ensure_ascii=False, allow_nan=False))
+                result["mac"] = _sign_message(result, bridge_secret)
+                atomic_json(responses / (request_id + ".json"), result)
+            processed += 1
+            if (
+                authenticated
+                and not shape_error
+                and any(str(item.get("name")) in YIELDING_OPERATIONS for item in request.get("operations") or [])
+            ):
+                must_yield = True
+            # A request may change the active scene (open/new/rollback), so the
+            # scene filter is re-evaluated for the remaining queue entries.
+            from .incident_admission import diagnostic_request
+            if result.get("dispatched") is True and not diagnostic_request(request):
+                scene = _scene_view() or scene
+                if matching_scene_only:
+                    active_scene_id = scene_state(scene).get("scene_id")
+        finally:
+            claimed.unlink(missing_ok=True)
+    return processed, must_yield

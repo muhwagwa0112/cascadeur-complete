@@ -1043,7 +1043,8 @@ def _run_operation_legacy(scene, operation, request):
         return observe_controller_targets(scene, args), []
     if name == "system.rebind_source":
         prior = args["source_binding"]
-        guards.assert_source(scene, prior)
+        from .native_update_source import assert_historical_source
+        assert_historical_source(scene, prior)
         adapter = guards._ADAPTERS.get(args["operation_name"])
         if adapter is None:
             raise ValueError("RIG_ADAPTER_UNVERIFIED: no executor for successor operation")
@@ -1071,7 +1072,13 @@ def _run_operation_legacy(scene, operation, request):
             scope = adapter.required_scope(scene, scope)
         return guards.capture_source(scene, scope, args["inputs_digest"], args.get("sample_digest")), []
     if name == "system.validate_source":
-        return guards.assert_source(scene, args["source_binding"], operation_name=args.get("operation_name"), arguments=args.get("operation_arguments")), []
+        from .native_update_source import is_graph_source, assert_historical_source
+        supplied = args["source_binding"]
+        if is_graph_source(supplied):
+            observed = assert_historical_source(scene, supplied, operation_name=args.get("operation_name"), arguments=args.get("operation_arguments"))
+            return {"source_binding": observed, "validation": "historical_closed_snapshot",
+                "current_graph_verified": False, "requires_admitted_update_boundary": True}, []
+        return guards.assert_source(scene, supplied, operation_name=args.get("operation_name"), arguments=args.get("operation_arguments")), []
     handled, registered_result = dispatch_registered(
         name,
         scene,
@@ -1486,7 +1493,9 @@ def _request_effect(request):
         if not isinstance(op, dict) or not isinstance(op.get("name"), str) or not isinstance(op.get("arguments") or {}, dict):
             return "mixed"
         name, args = op["name"], op.get("arguments") or {}
-        if name.startswith("io.export_") or name in {"scene.save", "system.observe_geometry_capture", "animation.mesh_sample"}:
+        if name == "system.observe_geometry_capture":
+            effects.append("mixed")
+        elif name.startswith("io.export_") or name in {"scene.save", "animation.mesh_sample"}:
             effects.append("file")
         elif name.startswith("io.import_") or name.startswith("safety."):
             effects.append("mixed")
@@ -1532,6 +1541,14 @@ def execute_request(scene, request):
         terminal = guards.previous_terminal(root, request)
         if terminal is not None:
             return terminal
+        operations = request.get("operations")
+        if (isinstance(operations, list) and len(operations) == 1 and isinstance(operations[0], dict)
+                and operations[0].get("name") in admission.SETUP_IDS):
+            preview = admission.validate_unclaimed(root, request)
+            from .native_setup_dependencies import validate_declared_pair_dependency
+            if validate_declared_pair_dependency(preview["setup"], Path(__file__).parent,
+                                                guards.LOADED_FINGERPRINT):
+                guards.assert_loaded_package()
         with admission.admitted_request(root, request) as sidecar:
             admitted = True
             if admission.diagnostic_request(request):
@@ -1597,6 +1614,7 @@ def _execute_admitted_request(scene, request):
     source = request.get("source_binding")
     state = scene_state(scene)
     dispatched = False
+    from .native_update_source import is_graph_source, assert_historical_source, require_callback_check
     try:
         if request.get("scene_id") and request["scene_id"] != state.get("scene_id"):
             raise ValueError("SCENE_CHANGED: scene identity differs")
@@ -1607,7 +1625,7 @@ def _execute_admitted_request(scene, request):
         if request.get("runtime_epoch") and request.get("runtime_epoch") != guards.RUNTIME_EPOCH:
             raise ValueError("PROTOCOL_MISMATCH: runtime restarted")
         if source is not None and effect == "none":
-            guards.assert_source(scene, source)
+            assert_historical_source(scene, source)
         if effect != "none":
             from .native_completion import assert_epoch_usable
             assert_epoch_usable()
@@ -1617,13 +1635,13 @@ def _execute_admitted_request(scene, request):
             if request.get("runtime_epoch") != guards.RUNTIME_EPOCH or request.get("adapter_fingerprint") != guards.LOADED_FINGERPRINT:
                 raise ValueError("PROTOCOL_MISMATCH: runtime epoch or loaded adapter differs")
             for op in request["operations"]:
-                guards.assert_source(scene, source, operation_name=op["name"], arguments=op.get("arguments") or {})
+                assert_historical_source(scene, source, operation_name=op["name"], arguments=op.get("arguments") or {})
                 if op["name"] not in guards._ADAPTERS:
                     raise ValueError("RIG_ADAPTER_UNVERIFIED: no coupled native executor")
                 if (op["name"] in YIELDING_OPERATIONS and op["name"] not in guards._ADAPTERS
                         and not (op["name"] == "safety.rollback" and _verified_rollback_adapter() is not None)):
                     raise ValueError("RIG_ADAPTER_UNVERIFIED: native completion yields")
-            guards.set_write_guard(lambda: guards.assert_source(_scene_view() or scene, source))
+            guards.set_write_guard(lambda: assert_historical_source(_scene_view() or scene, source))
         _verify_confirmation(runtime_root(), request, state)
         if (request.get("safety_context") or {}).get("snapshot_required"):
             raise ValueError("Unbound in-request snapshot is forbidden")
@@ -1641,7 +1659,17 @@ def _execute_admitted_request(scene, request):
     if dispatched and effect != "none" and source is not None:
         try:
             supplied = (result.get("result") or {}).get("source_binding") if isinstance(result.get("result"), dict) else None
-            post_source = guards.assert_source(_scene_view() or scene, supplied) if supplied else guards.capture_source(_scene_view() or scene, source["scope"], source["inputs_digest"])
+            if is_graph_source(source):
+                from .native_update_source import latest_closed_snapshot, post_source_from_snapshot
+                current = _scene_view() or scene
+                require_callback_check(current, request)
+                if supplied:
+                    post_source = assert_historical_source(current, supplied)
+                else:
+                    snapshot = latest_closed_snapshot(current, expected_graph_dtype_digest=source["scope"]["expected_graph_dtype_digest"])
+                    post_source = post_source_from_snapshot(current, request, snapshot)
+            else:
+                post_source = guards.assert_source(_scene_view() or scene, supplied) if supplied else guards.capture_source(_scene_view() or scene, source["scope"], source["inputs_digest"])
             if isinstance(result.get("result"), dict):
                 result["result"]["post_source_binding"] = post_source
                 result["result"]["source_binding"] = post_source
@@ -1683,6 +1711,9 @@ def _execute_admitted_request(scene, request):
                         approved_restore = approve(request, source, post_source, result, observation) is True
                     except Exception:
                         approved_restore = False
+            if old_id != new_id and name == "scene.activate" and observation is not None:
+                from .native_owned_pair_binding import approve_pair_activation_successor
+                approved_restore = approve_pair_activation_successor(request, source, post_source, result, observation)
             if old_id != new_id and name != "safety.bootstrap" and not approved_restore:
                 outcome = "outcome_unknown"
                 result["ok"] = False
@@ -1768,6 +1799,8 @@ def _execute_admitted_request(scene, request):
     finalize_insertion(_scene_view() or scene, request, result, receipt)
     from .native_geometry_capture import finalize_geometry_capture
     finalize_geometry_capture(_scene_view() or scene, request, result, receipt)
+    from .native_owned_pair_binding import finalize_pair_operation
+    finalize_pair_operation(_scene_view() or scene, request, result, receipt)
     return result
 
 
@@ -2064,19 +2097,30 @@ def _drain_once(scene, *, matching_scene_only=False):
             request_id = str(request.get("request_id", ""))
             authenticated = True
             terminal = None
+            claim_error = None
             try:
                 _verify_message(request, bridge_secret)
                 terminal = guards.previous_terminal(root, request)
                 if terminal is None:
                     _claim_request_nonce(root, request)
-                    guards.begin_request(request)
-                    guards.receipt_event(root, request, "claimed", effect_class=_request_effect(request), dispatched=False)
             except (BridgeAuthenticationError, ValueError) as exc:
                 authenticated = False
                 result = _error("authentication", "INVALID_REQUEST", str(exc), time.monotonic(), {})
+            if authenticated and terminal is None:
+                try:
+                    guards.begin_request(request)
+                    guards.receipt_event(root, request, "claimed", effect_class=_request_effect(request), dispatched=False)
+                except Exception as exc:
+                    # The signed nonce has already been consumed. A producer
+                    # recorder failure must get a rejected terminal and may not
+                    # be mistaken for unauthenticated input or dispatched again.
+                    claim_error = exc
+                    result = _error("claim", "INVALID_REQUEST", "PRODUCER_CLAIM_OBSERVATION_FAILED: " + str(exc), time.monotonic(), {})
             shape_error = _request_shape_error(request) if authenticated else None
             if terminal is not None:
                 result = terminal
+            elif claim_error is not None:
+                pass
             elif authenticated and (request.get("protocol_version") not in (PROTOCOL_VERSION, "2.0") or (request.get("protocol_version") == "2.0" and _request_effect(request) != "none")):
                 result = _error("protocol", "UNSUPPORTED_VERSION", "Bridge protocol mismatch", time.monotonic(), {})
                 result["result"] = {"error_details": {"code": "PROTOCOL_MISMATCH"}}

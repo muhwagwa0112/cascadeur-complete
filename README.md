@@ -81,6 +81,46 @@ position `[3.25, -1.5, 0.75]`, reading it back, saving a successor checkpoint an
 returning the original receipt on duplicate commit. The source file hash remained
 unchanged. This observation does not expand the pinned 2026.1 product inventory.
 
+### R6 recovery and owned-pair continuation
+
+The complete [R6 proposal](docs/implementation/cascadeur-motion-r6/IMPLEMENTATION_PLAN.md)
+is retained at remote revision `d31bdf3210f83fea2964a05d185d9bc976ef04ca`.
+Its historical `product_applied` fields describe the proposal, not current code.
+R6 adds these concrete entry points:
+
+- `manual_setup_prepare(steps, workspace)` drafts a bounded fixture setup with
+  the exact two legacy incidents still unknown/open. The local interactive
+  `incident_cli approve-manual-setup --plan-digest ...` command reviews its
+  residual risks; `manual_setup_commit(plan_digest)` submits only that approved
+  request and observes an existing request without replay.
+- `pair_continuation_prepare(setup_plan_digest, context, mutation)` requires an
+  actual succeeded, retained owned-pair setup. The local interactive
+  `incident_cli approve-pair-continuation --plan-digest ...` command reviews the
+  full sequence; `pair_continuation_commit(plan_digest)` runs its fixed 10 or 12
+  steps and stops on pending, unknown or failure. Unit, basis and rational FPS
+  in `context` are explicit conversion policy, not SDK-observed metadata.
+- `incident_producer_observation(request_id)` reads prospective signed host
+  dispatch, actual process claim, first-effect boundary and original terminal
+  archive. These are **partial observations**, not proof of complete producer,
+  descendant, consumer or resource closure. They cannot repair old unknowns.
+
+The source and frozen installer replace code in place while preserving the
+physical runtime/state/snapshots/logs directories and authenticated state. Code
+rollback and the transaction's own ownership/DACL changes are bounded separately.
+This is not permission to replace a live bridge or close application tabs.
+
+Owned-pair native code now includes an installed Update graph/type extractor,
+same-callback source checks, full projection checks and immutable-P0 checkpoint
+comparison. It must qualify in a fresh loaded runtime; source code and SDK
+declarations alone do not establish native success. Unbaking remains gated:
+the selected installed action sources do not establish the three exact action
+bindings, their arguments and operation-correlated completion.
+
+Use `python scripts/collect_native_evidence.py --help` for bounded, non-executing
+collection of explicitly selected installed SDK declarations and Python action
+sources. It does not import the SDK or run the app. Current evidence gaps and
+the original incident history are recorded in [the issue memo](docs/KNOWN_ISSUES_2026-11-15.md).
+
 ### R5 incident admission and finite setup
 
 The [R5 source proposal](docs/implementation/cascadeur-motion-r5/IMPLEMENTATION_PLAN.md)

@@ -18,13 +18,15 @@ from . import incident_policy as p
 from . import incident_store as store
 
 ADMISSION_PURPOSE = b"cascadeur-complete/incident-admission/v1\0"
+ADMISSION_V2_PURPOSE = b"cascadeur-complete/incident-admission/v2\0"
 CLAIM_PURPOSE = b"cascadeur-complete/incident-admission-claim/v1\0"
 EVIDENCE_PURPOSE = b"cascadeur-complete/incident-evidence/v1\0"
 _LOCAL = threading.local()
 SETUP_IDS = {"setup.qualify_native_adapter": (2, 5),
              "setup.qualify_independent_models": (1, 2),
              "setup.qualify_independent_position_writer": (1, 2),
-             "setup.qualify_geometry_calculation": (1, 2)}
+             "setup.qualify_geometry_calculation": (1, 2),
+             "setup.qualify_owned_pair_geometry": (1, 2)}
 
 
 class PersistedEvidence:
@@ -138,30 +140,71 @@ def intent_for(request, domain):
         context.get("workspace_generation_id"), context.get("baseline_digest"), context.get("run_id"))
 
 
-def snapshot(registry, stores, request, active):
+def collect_snapshot_locked(registry, stores, request=None, active=None):
+    """Read complete projections under the caller's existing registry locks."""
     evidence = PersistedEvidence(stores)
     projections = []
     for domain in stores:
-        originals, unsealed, unresolved = domain.original_snapshot(classify,
-            exclude=(active.domain, request["request_id"], p.digest(request)))
+        excluded = (active.domain, request["request_id"], p.digest(request)) if request is not None else None
+        originals, unsealed, unresolved = domain.original_snapshot(classify, exclude=excluded)
         journal = domain.journal()
         projection = p.project_domain(originals=originals, journal=journal,
             unsealed_effect_request_ids=unsealed, unresolved_set_digest=unresolved, evidence=evidence)
         # Recover a verified crash suffix only after semantic validation.
         projections.append(projection)
     registry_snapshot = p.RegistrySnapshot(p.digest(registry), tuple(s.domain for s in stores))
+    return evidence, tuple(projections), registry_snapshot
+
+
+def projection_heads(projections):
+    return [{"head": asdict(item.head), "unresolved_set_digest": item.unresolved_set_digest}
+            for item in sorted(projections, key=lambda item: item.head.domain)]
+
+
+def _manual_disposition_locked(registry, stores, request, active, **options):
+    if (request.get("execution_context") or {}).get("incident_route") is None:
+        return None
+    route = (request.get("execution_context") or {})["incident_route"]
+    from .incident_manual_setup import ROUTE as SETUP_ROUTE
+    from .incident_pair_continuation import ROUTE as PAIR_ROUTE
+    if route.get("kind") == SETUP_ROUTE:
+        from .incident_manual_setup import disposition_locked
+    elif route.get("kind") == PAIR_ROUTE:
+        from .incident_pair_continuation import disposition_locked
+    else:
+        raise p.PolicyError("UNSUPPORTED_INCIDENT_POLICY_ROUTE")
+    return disposition_locked(registry, stores, request, active, **options)
+
+
+def snapshot(registry, stores, request, active, *, native=False, require_manual_claim=False):
+    evidence, projections, registry_snapshot = collect_snapshot_locked(registry, stores, request, active)
     intent = intent_for(request, active.domain)
+    manual = _manual_disposition_locked(registry, stores, request, active,
+        native=native, require_claim=require_manual_claim, projections=projections)
     decision = p.decide(intent=intent, registry=registry_snapshot, domains=projections, evidence=evidence,
+        manual_disposition=manual,
         diagnostic_evidence_digest=diagnostic_digest() if diagnostic_request(request) else None,
         separation_evidence_digest=(request.get("execution_context") or {}).get("separation_evidence_digest"))
     if decision.verdict not in (p.Verdict.NEW_WORK_CANDIDATE, p.Verdict.DIAGNOSTIC_CANDIDATE):
         raise p.EvidenceUnavailable(decision.reason + ": " + ",".join(decision.incident_request_ids))
-    return intent, [{"head": asdict(item.head), "unresolved_set_digest": item.unresolved_set_digest}
-                    for item in sorted(projections, key=lambda item: item.head.domain)]
+    return intent, projection_heads(projections)
+
+
+def _sidecar_format(request):
+    route = (request.get("execution_context") or {}).get("incident_route")
+    if route is None:
+        return "admission-v1.json", ADMISSION_PURPOSE, "admission-claim-v1.json"
+    from .incident_manual_setup import ROUTE as SETUP_ROUTE
+    from .incident_pair_continuation import ROUTE as PAIR_ROUTE
+    store.exact(route, {"kind", "plan_digest"})
+    if route["kind"] not in (SETUP_ROUTE, PAIR_ROUTE):
+        raise p.PolicyError("UNSUPPORTED_INCIDENT_POLICY_ROUTE")
+    p._digest_string(route["plan_digest"], "manual setup plan digest")
+    return "admission-v2.json", ADMISSION_V2_PURPOSE, "admission-claim-v2.json"
 
 
 def _body(request, active, registry, intent, heads):
-    return {"schema_version": 1, "purpose": "incident_admission_v1", "domain": asdict(active.domain),
+    body = {"schema_version": 1, "purpose": "incident_admission_v1", "domain": asdict(active.domain),
         "registry_digest": p.digest(registry), "request_id": request["request_id"],
         "request_digest": p.digest(request), "operation_digest": p.digest(request["operations"]),
         "runtime_epoch": request.get("runtime_epoch"), "loaded_fingerprint": request.get("adapter_fingerprint"),
@@ -171,6 +214,10 @@ def _body(request, active, registry, intent, heads):
         "workspace_generation_id": intent.workspace_generation_id, "baseline_digest": intent.baseline_digest,
         "separation_evidence_digest": (request.get("execution_context") or {}).get("separation_evidence_digest"),
         "work_kind": intent.kind.value, "expires_at": request["expires_at"]}
+    route = (request.get("execution_context") or {}).get("incident_route")
+    if route is not None:
+        body.update(schema_version=2, purpose="incident_admission_v2", policy_route=route)
+    return body
 
 
 def issue(root, request):
@@ -185,9 +232,12 @@ def issue(root, request):
         if intent.kind != p.WorkKind.NATIVE_DIAGNOSTIC and (not request.get("runtime_epoch") or not request.get("adapter_fingerprint")):
             raise p.EvidenceUnavailable("INCIDENT_ADMISSION_RUNTIME_HANDSHAKE_REQUIRED")
         setup = _setup_plan(active, request, registry, heads) if intent.kind == p.WorkKind.EXPLICIT_SETUP else None
+        filename, purpose, _ = _sidecar_format(request)
+        # The manual step binds only after all original/setup checks pass.
+        _manual_disposition_locked(registry, stores, request, active, bind_claim=True)
         value = store.seal({**_body(request, active, registry, intent, heads), "setup": setup, "ticket": str(uuid.uuid4())},
-                           active.secret, ADMISSION_PURPOSE)
-        store.publish_new(active.state / "request_records" / request["request_id"] / "admission-v1.json", value)
+                           active.secret, purpose)
+        store.publish_new(active.state / "request_records" / request["request_id"] / filename, value)
         return value
 
 
@@ -198,9 +248,11 @@ def _validate(root, request, *, claim=False, require_claim=True):
         directory = active.state / "request_records" / request["request_id"]
         if store.read(directory / "request.json") != request:
             raise p.PolicyError("IMMUTABLE_OUTBOX_DIFFERS")
-        value = store.read(directory / "admission-v1.json")
-        store.verify(value, active.secret, ADMISSION_PURPOSE)
-        intent, heads = snapshot(registry, stores, request, active)
+        filename, purpose, claim_filename = _sidecar_format(request)
+        value = store.read(directory / filename)
+        store.verify(value, active.secret, purpose)
+        intent, heads = snapshot(registry, stores, request, active,
+            native=True, require_manual_claim=True)
         expected = _body(request, active, registry, intent, heads)
         store.exact(value, set(expected) | {"ticket", "mac", "setup"})
         if any(value[k] != v for k, v in expected.items()) or time.time() >= value["expires_at"]:
@@ -222,8 +274,8 @@ def _validate(root, request, *, claim=False, require_claim=True):
                               "admission_digest": p.digest(value), "request_digest": p.digest(request)},
                              active.secret, CLAIM_PURPOSE)
         if claim:
-            store.publish_new(directory / "admission-claim-v1.json", claimed)
-        elif require_claim and store.read(directory / "admission-claim-v1.json") != claimed:
+            store.publish_new(directory / claim_filename, claimed)
+        elif require_claim and store.read(directory / claim_filename) != claimed:
             raise p.PolicyError("ADMISSION_CLAIM_DIFFERS")
         return value
 
@@ -261,6 +313,7 @@ class VerifiedSetupStepGrant:
     maximum_geometry_calculations: int | None = None
     maximum_evaluations: int | None = None
     maximum_driver_mutations: int | None = None
+    maximum_update_graph_captures: int | None = None
 
 
 def assert_setup_admission(setup_id, setup_invocation_ref=None):
@@ -287,6 +340,9 @@ def assert_setup_admission(setup_id, setup_invocation_ref=None):
     source_guard = context.get("source_guard")
     if source_guard is not None:
         source_guard()
+    from .producer_observation import assert_native_first_effect
+    current = _LOCAL.request
+    assert_native_first_effect(current[0], current[1])
     return context["grant"]
 
 
@@ -330,6 +386,9 @@ def dispatch_setup(request, sidecar):
     # The exact fresh plan directory is an approved effect. Each helper owns
     # one finite child, so its fixture paths remain under runtime snapshots.
     assert_request_admission()
+    from .producer_observation import assert_native_first_effect
+    current = _LOCAL.request
+    assert_native_first_effect(current[0], current[1])
     plan_workspace = Path(plan["workspace"])
     plan_workspace.mkdir()
     plan_workspace_identity = store.physical_identity(plan_workspace)
@@ -352,6 +411,9 @@ def dispatch_setup(request, sidecar):
             elif setup_id == "setup.qualify_independent_position_writer":
                 from .native_independent_position import qualify_independent_position_writer
                 result = qualify_independent_position_writer()
+            elif setup_id == "setup.qualify_owned_pair_geometry":
+                from .native_owned_pair_binding import qualify_owned_pair_geometry
+                result = qualify_owned_pair_geometry()
             elif setup_id == "setup.qualify_geometry_calculation":
                 from .native_geometry_qualification import qualify_geometry_calculation
                 result = qualify_geometry_calculation()

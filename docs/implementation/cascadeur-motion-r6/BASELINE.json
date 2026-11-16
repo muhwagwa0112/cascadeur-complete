@@ -1,0 +1,18 @@
+{
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "implementation_branch": "feat/cascadeur-motion-r3",
+  "implementation_commit": "7f1565a0ffad1595b9824cba25443bc581997fb6",
+  "implementation_tree": "78fd7098208b73702b94e1e2ed6608bca116af5d",
+  "previous_preparation_commit": "dffa8f9956a01c15e9db02cee33e490f3569cd05",
+  "publication_branch": "docs/cascadeur-motion-plan-r6",
+  "publication_prefix": "docs/implementation/cascadeur-motion-r6/",
+  "artifact_kind": "code_ready_preparation",
+  "product_patches_applied": false,
+  "native_sdk_executed": false,
+  "native_application_state_observed_here": false,
+  "installed_version_in_upstream_memo": "2026.2.3.0.16863",
+  "legacy_outcomes_preserved": [
+    "ffb7fc8e-417c-454c-a669-48625a086eda",
+    "fcf3352a-483c-4f9c-bc18-8b61a58822eb"
+  ]
+}

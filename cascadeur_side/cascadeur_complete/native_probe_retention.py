@@ -17,18 +17,21 @@ _LIMITS = {
     "finite_models": {"new_tabs": 1, "files": 2},
     "position_writer": {"new_tabs": 1, "files": 2},
     "geometry_calculation": {"new_tabs": 1, "files": 2},
+    "owned_pair_geometry": {"new_tabs": 1, "files": 2},
 }
 _SETUP_OPERATIONS = {
     "native_adapter": "setup.qualify_native_adapter",
     "finite_models": "setup.qualify_independent_models",
     "position_writer": "setup.qualify_independent_position_writer",
     "geometry_calculation": "setup.qualify_geometry_calculation",
+    "owned_pair_geometry": "setup.qualify_owned_pair_geometry",
 }
 _FILENAMES = {
     "native_adapter": {"source.casc", "backup.casc", "working.casc", "next-backup.casc", "next-working.casc"},
     "finite_models": {"fixture-before.casc", "fixture-after.casc"},
     "position_writer": {"fixture-before.casc", "fixture-after.casc"},
     "geometry_calculation": {"fixture-before.casc", "fixture-after.casc"},
+    "owned_pair_geometry": {"fixture-before.casc", "fixture-after.casc"},
 }
 
 

@@ -21,9 +21,12 @@ _HELPERS = {
     "setup.qualify_independent_models": ("native_interpolation_qualification.py", 1, 2),
     "setup.qualify_independent_position_writer": ("native_independent_position.py", 1, 2),
     "setup.qualify_geometry_calculation": ("native_geometry_qualification.py", 1, 2),
+    "setup.qualify_owned_pair_geometry": ("native_owned_pair_binding.py", 1, 2),
 }
 _SEMANTIC_LIMITS = {"setup.qualify_geometry_calculation": {
-    "maximum_geometry_calculations": 5, "maximum_evaluations": 2, "maximum_driver_mutations": 1}}
+    "maximum_geometry_calculations": 5, "maximum_evaluations": 2, "maximum_driver_mutations": 1},
+    "setup.qualify_owned_pair_geometry": {"maximum_geometry_calculations": 10,
+        "maximum_evaluations": 2, "maximum_driver_mutations": 1, "maximum_update_graph_captures": 2}}
 
 
 def _bridge_directory():
@@ -53,7 +56,16 @@ def validate_helper_bytes(plan):
 
 
 def prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace):
-    from .incident_admission import PersistedEvidence, snapshot, intent_for
+    return _prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace)
+
+
+def _prepare_metadata_only(root, steps, runtime_epoch, loaded_fingerprint, workspace):
+    """Internal draft builder. This does not issue an admission ticket."""
+    return _prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace, metadata_only=True)
+
+
+def _prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace, *, metadata_only=False):
+    from .incident_admission import snapshot, collect_snapshot_locked, projection_heads
     if (not isinstance(steps, list) or not steps or len(set(steps)) != len(steps)
             or any(step not in _HELPERS for step in steps)):
         raise p.PolicyError("EXACT_FINITE_SETUP_SEQUENCE_REQUIRED")
@@ -75,7 +87,11 @@ def prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace):
         request = {"request_id": str(uuid.uuid4()), "operations": [{"name": steps[0], "arguments": {}}],
             "runtime_epoch": runtime_epoch, "adapter_fingerprint": loaded_fingerprint,
             "source_binding": None, "execution_context": None}
-        _, heads = snapshot(registry, stores, request, active)
+        if metadata_only:
+            _, projections, _ = collect_snapshot_locked(registry, stores)
+            heads = projection_heads(projections)
+        else:
+            _, heads = snapshot(registry, stores, request, active)
         plan = {"schema_version": 1, "plan_id": str(uuid.uuid4()), "domain": asdict(active.domain),
             "registry_digest": p.digest(registry), "heads": heads, "runtime_epoch": runtime_epoch,
             "loaded_fingerprint": loaded_fingerprint, "helper_files": helper_bytes(),

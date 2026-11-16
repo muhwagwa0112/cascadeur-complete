@@ -1,0 +1,69 @@
+{
+  "format": "cascadeur-r6-unbaking-integration-inputs",
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "base_commit": "7f1565a0ffad1595b9824cba25443bc581997fb6",
+  "kind": "implementation_input_map_not_qualification",
+  "product_sources": [
+    {
+      "path": "cascadeur_side/cascadeur_complete/native_unbaking.py",
+      "git_blob_sha1": "6a3c003eb46d34a341ab32c563b8525ece66e874",
+      "functions": ["step_contract_status", "require_step_contract", "validate_arguments", "capture_before", "observe_after"],
+      "planned_change": "Only after an actual installed callable and completion boundary are identified, consume a process-private QualifiedStep in step_contract_status/require_step_contract. Preserve argument/source/topology comparisons."
+    },
+    {
+      "path": "cascadeur_side/cascadeur_complete/handlers/generation.py",
+      "git_blob_sha1": "ee669d5209fad0a8325e7899edd9f4455feda222",
+      "function": "unbaking",
+      "action_map_start_line": 117,
+      "action_map_end_line": 119,
+      "planned_change": "Route exact approved step to the verified native leaf before opaque call_action; preserve exact object/layer/range, topology policy, source authorization and real terminal linkage."
+    }
+  ],
+  "steps": [
+    {
+      "step": "prepare_keys_by_fulcrums",
+      "action_id": "View.AutoInterpolation_Keys",
+      "required_semantics": ["actual fulcrum/contact source fields and units", "selected-frame rules", "key insertion/removal policy", "explicit target closure"],
+      "binding_status": "not_observed"
+    },
+    {
+      "step": "adjust_keys_and_interpolation",
+      "action_id": "View.Animation unbaking",
+      "required_semantics": ["actual difference getter meaning and units", "key selection/removal policy", "interpolation method and error bound", "actual termination condition"],
+      "binding_status": "not_observed"
+    },
+    {
+      "step": "adjust_autoposing_lock_state",
+      "action_id": "AutoPosingTool.AutoUnlock",
+      "required_semantics": ["actual lock property/data/setting IDs", "enum or bool meaning", "per-frame versus static scope", "original action's unlocking policy"],
+      "binding_status": "not_observed"
+    }
+  ],
+  "collector": {
+    "script": "collect_action_sources.py",
+    "python_argument": "--python MODULE=EXACT_FILE",
+    "text_argument": "--text EXACT_FILE",
+    "entry_argument": "--entry MODULE:QUALNAME",
+    "output_argument": "--output NEW_JSON",
+    "callable": "collect(python_specs, text_paths, actions, entries)",
+    "module_imports_selected_source": false,
+    "runtime_qualification": false,
+    "native_execution": false
+  },
+  "required_binding_evidence": [
+    "installed build identifier and SHA256 of the exact registration file",
+    "exact action ID registration source, conditional path and callable target",
+    "actual callable signature and explicit arguments or actual pure planner",
+    "reachable native/external/dynamic targets that the static collector cannot resolve",
+    "real synchronous completion boundary or correlated completion owner and operation ID",
+    "actual key/topology/non-target observation for the first bounded supported step"
+  ],
+  "forbidden_inferences": [
+    "action ID mention proves registration",
+    "lexical call candidate proves runtime dispatch",
+    "absence of async indicators proves synchronous completion",
+    "call_action returning None proves completion",
+    "sparse fitting is equivalent to native unbaking",
+    "static source evidence is a token for production qualification"
+  ]
+}

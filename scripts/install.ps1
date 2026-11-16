@@ -29,6 +29,8 @@ $movedOld = [System.Collections.Generic.List[object]]::new()
 $activatedTargets = [System.Collections.Generic.List[string]]::new()
 $targetState = [ordered]@{}
 $maintenanceLease = $null
+$runtimeState = $null
+$runtimeActivationStarted = $false
 try {
     New-Item -ItemType Directory -Path $StageRuntime, $StageBridge, $StageEvents, $BackupRoot -Force | Out-Null
     foreach ($name in @('pyproject.toml', 'uv.lock', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'policy.default.json')) {
@@ -39,9 +41,8 @@ try {
     }
     Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete\*') -Destination $StageBridge -Recurse -Force
     Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete_events\*') -Destination $StageEvents -Recurse -Force
-    # Dependency preparation must not take an early snapshot of mutable state.
-    # The authoritative state is copied from the final pre-activation backup below,
-    # before any incoming runtime imports can create replacement authentication keys.
+    # Dependency preparation and both smoke calls use disposable state roots.
+    # Existing authenticated state stays at its original physical runtime root.
 
     Push-Location $StageRuntime
     try {
@@ -68,42 +69,51 @@ try {
     # recreate the environment after the runtime directory reaches its final path.
     Remove-Item -LiteralPath (Join-Path $StageRuntime '.venv') -Recurse -Force
 
-    # Staging above uses a disposable root. From this final idle check through
-    # activation, hooks and rollback, block new installed runtime readers and
-    # competing installers at the stable sibling gate, not the moved runtime.
+    # Hold the existing sibling lease across code activation, hooks and rollback.
+    # Never move/delete the runtime root or its persistent directories.
     $maintenanceLease = Enter-CascadeurMaintenanceLease $RuntimeRoot
     Assert-CascadeurUpgradeIdle $RuntimeRoot
+    $runtimeState = Backup-CascadeurRuntimeCode $RuntimeRoot $BackupRoot
+    $targetState['runtime'] = $runtimeState
     foreach ($pair in @(
-        [pscustomobject]@{ Target = $RuntimeRoot; Stage = $StageRuntime; BackupName = 'runtime' },
-        [pscustomobject]@{ Target = $BridgeRoot; Stage = $StageBridge; BackupName = 'bridge' },
-        [pscustomobject]@{ Target = $EventsRoot; Stage = $StageEvents; BackupName = 'events' }
+        [pscustomobject]@{ Target = $BridgeRoot; BackupName = 'bridge' },
+        [pscustomobject]@{ Target = $EventsRoot; BackupName = 'events' }
     )) {
         $targetState[$pair.BackupName] = [pscustomobject]@{
             path = [IO.Path]::GetFullPath($pair.Target)
             existed = [bool](Test-Path -LiteralPath $pair.Target)
         }
+    }
+    [ordered]@{
+        schema = 2
+        runtime_mode = 'code-in-place'
+        backup_root = $BackupRoot
+        targets = $targetState
+    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $TransactionManifest -Encoding utf8
+
+    $runtimeActivationStarted = $true
+    Clear-CascadeurRuntimeCode $RuntimeRoot
+    New-Item -ItemType Directory -Path $RuntimeRoot -Force | Out-Null
+    foreach ($entry in @(Get-CascadeurRuntimeCodeEntries $StageRuntime)) {
+        Move-Item -LiteralPath $entry.FullName -Destination $RuntimeRoot
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $RuntimeRoot 'policy.json'))) {
+        Copy-Item -LiteralPath (Join-Path $RuntimeRoot 'policy.default.json') -Destination (Join-Path $RuntimeRoot 'policy.json')
+    }
+    Assert-CascadeurUpgradeIdle $RuntimeRoot
+    foreach ($pair in @(
+        [pscustomobject]@{ Target = $BridgeRoot; Stage = $StageBridge; BackupName = 'bridge' },
+        [pscustomobject]@{ Target = $EventsRoot; Stage = $StageEvents; BackupName = 'events' }
+    )) {
         New-Item -ItemType Directory -Path (Split-Path -Parent $pair.Target) -Force | Out-Null
         if (Test-Path -LiteralPath $pair.Target) {
             $backup = Join-Path $BackupRoot $pair.BackupName
             Move-Item -LiteralPath $pair.Target -Destination $backup
             $movedOld.Add([pscustomobject]@{ Target = $pair.Target; Backup = $backup })
         }
-        if ($pair.BackupName -eq 'runtime') {
-            Copy-CascadeurPersistentState (Join-Path $BackupRoot 'runtime') $StageRuntime
-            if (-not (Test-Path -LiteralPath (Join-Path $StageRuntime 'policy.json'))) {
-                Copy-Item -LiteralPath (Join-Path $ProjectRoot 'policy.default.json') -Destination (Join-Path $StageRuntime 'policy.json')
-            }
-            Assert-CascadeurUpgradeIdle $RuntimeRoot
-        }
-        Move-Item -LiteralPath $pair.Stage -Destination $pair.Target
         $activatedTargets.Add($pair.Target)
+        Move-Item -LiteralPath $pair.Stage -Destination $pair.Target
     }
-
-    [ordered]@{
-        schema = 1
-        backup_root = $BackupRoot
-        targets = $targetState
-    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $TransactionManifest -Encoding utf8
 
     & uv sync --project $RuntimeRoot --frozen
     if ($LASTEXITCODE -ne 0) { throw 'Final-path dependency installation failed' }
@@ -122,14 +132,30 @@ try {
     }
     & (Join-Path $ProjectRoot 'packaging\install-hooks.ps1') -RuntimeRoot $RuntimeRoot `
         -TransactionManifest $TransactionManifest -SkipCodexRegistration:$SkipCodexRegistration
+    Assert-CascadeurRuntimeIdentity $runtimeState
 } catch {
+    $installFailure = $_
+    $rollbackFailures = [System.Collections.Generic.List[string]]::new()
     foreach ($target in $activatedTargets) {
-        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+        try {
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+        } catch { $rollbackFailures.Add($_.Exception.Message) }
     }
     foreach ($item in $movedOld) {
-        if (Test-Path -LiteralPath $item.Backup) { Move-Item -LiteralPath $item.Backup -Destination $item.Target }
+        try {
+            if (Test-Path -LiteralPath $item.Target) { throw "Rollback target is still occupied: $($item.Target)" }
+            if (Test-Path -LiteralPath $item.Backup) { Move-Item -LiteralPath $item.Backup -Destination $item.Target }
+            else { throw "Rollback backup is missing: $($item.Backup)" }
+        } catch { $rollbackFailures.Add($_.Exception.Message) }
     }
-    throw
+    if ($runtimeActivationStarted) {
+        try { Restore-CascadeurRuntimeCode $runtimeState $BackupRoot }
+        catch { $rollbackFailures.Add($_.Exception.Message) }
+    }
+    if ($rollbackFailures.Count) {
+        throw "Installation failed: $($installFailure.Exception.Message). Rollback incomplete; retain ${BackupRoot}. $($rollbackFailures -join '; ')"
+    }
+    throw $installFailure
 } finally {
     try {
         if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }

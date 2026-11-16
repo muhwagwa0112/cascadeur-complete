@@ -411,10 +411,27 @@ class Decision:
     incident_request_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ManualLegacyDisposition:
+    """Authenticated local policy choice; never native or OS closure evidence."""
+    plan_digest: str
+    request_digest: str
+    operation_digest: str
+    domain: DomainRef
+    runtime_epoch: str
+    loaded_fingerprint: str
+    workspace_generation_id: str
+    baseline_digest: str
+    run_id: str
+    originals: tuple[OriginalRef, ...]
+    work_kind: WorkKind = WorkKind.EXPLICIT_SETUP
+
+
 def decide(*, intent: WorkIntent, registry: RegistrySnapshot,
            domains: Sequence[DomainProjection], evidence: VerifiedEvidenceSource,
            diagnostic_evidence_digest: str | None = None,
-           separation_evidence_digest: str | None = None) -> Decision:
+           separation_evidence_digest: str | None = None,
+           manual_disposition: ManualLegacyDisposition | None = None) -> Decision:
     """Pure decision; does not sign, persist, or consume an admission sidecar.
 
     Product caller must perform it on locked snapshots, then bind the candidate
@@ -464,10 +481,25 @@ def decide(*, intent: WorkIntent, registry: RegistrySnapshot,
         return Decision(Verdict.DENY, "RETIREMENT_NOT_DURABLY_COMPLETE", pending)
     unresolved = tuple(i.original.request_id for i in incidents
                        if i.observation is None and i.retirement is None)
-    if unresolved:
-        return Decision(Verdict.DENY, "AUTHORITATIVE_COMPLETION_OR_CONTAINMENT_REQUIRED", unresolved)
     if intent.run_id is not None and any(i.original.original_run_id == intent.run_id for i in incidents):
         return Decision(Verdict.DENY, "ORIGINAL_INCIDENT_RUN_NOT_AUTOMATICALLY_RESUMABLE")
+    if unresolved and manual_disposition is not None:
+        choice = manual_disposition
+        exact_open = tuple(i.original for i in incidents if i.observation is None and i.retirement is None)
+        if (not isinstance(choice, ManualLegacyDisposition) or intent.kind != choice.work_kind
+                or len(incidents) != len(exact_open)
+                or sorted(digest(asdict(i)) for i in exact_open) != sorted(digest(asdict(i)) for i in choice.originals)
+                or choice.request_digest != intent.request_digest or choice.operation_digest != intent.operation_digest
+                or choice.domain != intent.domain or choice.runtime_epoch != intent.runtime_epoch
+                or choice.loaded_fingerprint != intent.loaded_fingerprint or choice.run_id != intent.run_id
+                or choice.workspace_generation_id != intent.workspace_generation_id
+                or choice.baseline_digest != intent.baseline_digest):
+            return Decision(Verdict.DENY, "MANUAL_LEGACY_SETUP_BINDING_DIFFERS", unresolved)
+        _digest_string(choice.plan_digest, "manual setup plan digest")
+        return Decision(Verdict.NEW_WORK_CANDIDATE,
+            "MANUAL_LEGACY_RISK_ACCEPTED_EXACT_SETUP_GUARDS_STILL_REQUIRED", unresolved)
+    if unresolved:
+        return Decision(Verdict.DENY, "AUTHORITATIVE_COMPLETION_OR_CONTAINMENT_REQUIRED", unresolved)
     retired = tuple(i.retirement for i in incidents if i.retirement is not None)
     if retired:
         if (intent.workspace_generation_id is None or intent.baseline_digest is None

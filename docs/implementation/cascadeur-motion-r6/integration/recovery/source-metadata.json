@@ -1,0 +1,119 @@
+{
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "base_commit": "7f1565a0ffad1595b9824cba25443bc581997fb6",
+  "kind": "unapplied_product_integration_proposal",
+  "patch": "manual-legacy-setup.patch",
+  "patch_sha256": "5f42f3d816dc1a9d057ba6e8944101fd44acc86e00ab530096accf8d2a53eb61",
+  "target_files": [
+    {
+      "target_path": "cascadeur_side/cascadeur_complete/incident_admission.py",
+      "status": "modified",
+      "base_git_blob_sha1": "e9da289da19258179a9f9a8a94bbd70c2bb791fa",
+      "base_sha256": "822f53daf3ca6e430356023cdd09e91a530b6a8eaefdef7e6a872573795266e0",
+      "proposed_git_blob_sha1": "22460db5579ddd0bd32abf7891cca2a0489532ce",
+      "proposed_sha256": "f3f0ab97dc8ec52f76d9716a81540a592b84bb8fd3c297a6c342a0946aae8bc8",
+      "proposed_bytes": 22089
+    },
+    {
+      "target_path": "cascadeur_side/cascadeur_complete/incident_manual_setup.py",
+      "status": "added",
+      "base_git_blob_sha1": null,
+      "base_sha256": null,
+      "proposed_git_blob_sha1": "94026304f6d13b4d63c10c79689c6437b0792842",
+      "proposed_sha256": "55c06ec71f61a10bd8b71a8aa9eca89666730b047fcb3d228641258d95df80cb",
+      "proposed_bytes": 18795
+    },
+    {
+      "target_path": "cascadeur_side/cascadeur_complete/incident_pair_continuation.py",
+      "status": "added",
+      "base_git_blob_sha1": null,
+      "base_sha256": null,
+      "proposed_git_blob_sha1": "b3bc006b21fbb964d0fc08280aa78cfda6f15ca7",
+      "proposed_sha256": "201e02b0a6c63b3694f34ce9ab2a09b513fc1d9bf0c3abdbfb689cf25bedec8e",
+      "proposed_bytes": 31145
+    },
+    {
+      "target_path": "cascadeur_side/cascadeur_complete/incident_policy.py",
+      "status": "modified",
+      "base_git_blob_sha1": "4a01ae0449f25f00db858a39c4d2417a6b9b9bf9",
+      "base_sha256": "e818452739768da0cf5bc0a83e1708e1e27802c6faa5abd3ceb6185fb3b5e184",
+      "proposed_git_blob_sha1": "de5e63c49583260ee014f706f23997301793999a",
+      "proposed_sha256": "44e80bb572ef70323002dd3ec3bcd298613fa6c4255f0b8b03ca1104a6650198",
+      "proposed_bytes": 23573
+    },
+    {
+      "target_path": "cascadeur_side/cascadeur_complete/incident_setup.py",
+      "status": "modified",
+      "base_git_blob_sha1": "cf1a2f8e56f216a5c323b73ce2e2e1a5d449647e",
+      "base_sha256": "c2e0709273cdb4a500fcd8cf35349f139d38a0ee3b30a77a4f566e7d0ba25548",
+      "proposed_git_blob_sha1": "781922980988d07023051ffcf21b9078e0fd32ab",
+      "proposed_sha256": "91fb7b46c1e7087c5866073d51c55428f42accc845ca4d07f5dd3c71da0f0afb",
+      "proposed_bytes": 7852
+    },
+    {
+      "target_path": "src/cascadeur_complete/incident_admission.py",
+      "status": "modified",
+      "base_git_blob_sha1": "e9da289da19258179a9f9a8a94bbd70c2bb791fa",
+      "base_sha256": "822f53daf3ca6e430356023cdd09e91a530b6a8eaefdef7e6a872573795266e0",
+      "proposed_git_blob_sha1": "22460db5579ddd0bd32abf7891cca2a0489532ce",
+      "proposed_sha256": "f3f0ab97dc8ec52f76d9716a81540a592b84bb8fd3c297a6c342a0946aae8bc8",
+      "proposed_bytes": 22089
+    },
+    {
+      "target_path": "src/cascadeur_complete/incident_cli.py",
+      "status": "modified",
+      "base_git_blob_sha1": "c0416e55646b34226bed4fc9812120ffdb43e67f",
+      "base_sha256": "2c24003ba9962b0b62f6d0bb1be63fa97802fc7d0ccca72164d97abe17202e84",
+      "proposed_git_blob_sha1": "a09193102dd79df3a9c7d725c84cf0eadd068d15",
+      "proposed_sha256": "e59ecf13248913b8861448bb5718e3fa8454692fd313c14f7df5aa4ed9765238",
+      "proposed_bytes": 4101
+    },
+    {
+      "target_path": "src/cascadeur_complete/incident_manual_setup.py",
+      "status": "added",
+      "base_git_blob_sha1": null,
+      "base_sha256": null,
+      "proposed_git_blob_sha1": "94026304f6d13b4d63c10c79689c6437b0792842",
+      "proposed_sha256": "55c06ec71f61a10bd8b71a8aa9eca89666730b047fcb3d228641258d95df80cb",
+      "proposed_bytes": 18795
+    },
+    {
+      "target_path": "src/cascadeur_complete/incident_pair_continuation.py",
+      "status": "added",
+      "base_git_blob_sha1": null,
+      "base_sha256": null,
+      "proposed_git_blob_sha1": "b3bc006b21fbb964d0fc08280aa78cfda6f15ca7",
+      "proposed_sha256": "201e02b0a6c63b3694f34ce9ab2a09b513fc1d9bf0c3abdbfb689cf25bedec8e",
+      "proposed_bytes": 31145
+    },
+    {
+      "target_path": "src/cascadeur_complete/incident_policy.py",
+      "status": "modified",
+      "base_git_blob_sha1": "4a01ae0449f25f00db858a39c4d2417a6b9b9bf9",
+      "base_sha256": "e818452739768da0cf5bc0a83e1708e1e27802c6faa5abd3ceb6185fb3b5e184",
+      "proposed_git_blob_sha1": "de5e63c49583260ee014f706f23997301793999a",
+      "proposed_sha256": "44e80bb572ef70323002dd3ec3bcd298613fa6c4255f0b8b03ca1104a6650198",
+      "proposed_bytes": 23573
+    },
+    {
+      "target_path": "src/cascadeur_complete/incident_setup.py",
+      "status": "modified",
+      "base_git_blob_sha1": "cf1a2f8e56f216a5c323b73ce2e2e1a5d449647e",
+      "base_sha256": "c2e0709273cdb4a500fcd8cf35349f139d38a0ee3b30a77a4f566e7d0ba25548",
+      "proposed_git_blob_sha1": "781922980988d07023051ffcf21b9078e0fd32ab",
+      "proposed_sha256": "91fb7b46c1e7087c5866073d51c55428f42accc845ca4d07f5dd3c71da0f0afb",
+      "proposed_bytes": 7852
+    }
+  ],
+  "verified_baseline_blob_count": 7,
+  "runtime_execution": false,
+  "product_applied": false,
+  "tests_executed": false,
+  "finite_continuation": {
+    "setup_anchor": "actual signed succeeded pair setup result",
+    "steps_without_position": 10,
+    "steps_with_position": 12,
+    "requires_motion_activation_integration": true,
+    "general_recipe_supported": false
+  }
+}

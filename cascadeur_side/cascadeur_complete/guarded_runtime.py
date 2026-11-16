@@ -12,6 +12,8 @@ import threading
 import uuid
 from pathlib import Path
 
+from . import producer_observation as _producer_observation
+
 RUNTIME_EPOCH = str(uuid.uuid4())
 _SCENES = []
 _ADAPTERS = {}
@@ -102,6 +104,9 @@ def _capture_with_adapter(scene, scope, inputs_digest, sample_digest, selection_
     required = adapter.required_scope(scene, scope)
     if digest(required) != digest(scope):
         raise ValueError("INCOMPLETE_CAPTURE: requested scope differs from required dependency closure")
+    if required.get("validation_mode") == "qualified_update_boundary":
+        from .native_update_source import issue_source_from_latest_snapshot
+        return issue_source_from_latest_snapshot(scene, required, inputs_digest, sample_digest, selection_digest)
     captured = adapter.capture(scene, required)
     if captured.get("coverage_complete") is not True:
         raise ValueError("INCOMPLETE_CAPTURE")
@@ -122,6 +127,8 @@ def _capture_with_adapter(scene, scope, inputs_digest, sample_digest, selection_
 def assert_source(scene, source, *, operation_name=None, arguments=None):
     if not isinstance(source, dict) or digest(source) not in _ISSUED_SOURCES:
         raise ValueError("BINDING_UNAVAILABLE: source was not issued by this runtime")
+    if source.get("scope", {}).get("validation_mode") == "qualified_update_boundary":
+        raise ValueError("SOURCE_CURRENT_GRAPH_REQUIRES_ADMITTED_UPDATE")
     if not source.get("complete") or source.get("adapter_fingerprint") != LOADED_FINGERPRINT:
         raise ValueError("BINDING_UNAVAILABLE")
     expected = source["binding"]
@@ -146,6 +153,10 @@ def begin_request(request):
     _LOCAL.guard = None
     _LOCAL.effects = []
     _LOCAL.adapter_attempt = None
+    _LOCAL.producer_observed = False
+    from .runtime import runtime_root
+    recorded = _producer_observation.record_native_claim_if_prospective(runtime_root(), request)
+    _LOCAL.producer_observed = recorded is not None
 
 
 def begin_adapter_attempt(request, operation, adapter, scene):
@@ -212,6 +223,11 @@ def before_write(source_guard=None):
         # A supplied operation guard supplements admission; it cannot replace it.
         from .incident_admission import assert_request_admission
         assert_request_admission()
+        from .runtime import runtime_root
+        request = getattr(_LOCAL, "request", None)
+        if request is None:
+            raise ValueError("PRODUCER_REQUEST_CONTEXT_REQUIRED")
+        _producer_observation.assert_native_first_effect(runtime_root(), request)
         installed_guard = getattr(_LOCAL, "guard", None)
         if installed_guard is not None:
             installed_guard()
@@ -322,4 +338,8 @@ def receipt_event(root, request, phase, *, outcome="pending", result=None, effec
     if target.exists():
         raise ValueError("Receipt sequence already exists")
     atomic_json(target, payload)
+    if phase == "terminal" and getattr(_LOCAL, "producer_observed", False):
+        # This archives already sealed bytes. Failure must never rewrite the
+        # original terminal or manufacture a different native outcome.
+        _producer_observation.archive_terminal(root, request["request_id"])
     return payload

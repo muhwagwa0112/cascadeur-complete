@@ -3833,6 +3833,23 @@
       },
       "name": "incident_observe_original"
     },
+    "incident_producer_observation": {
+      "description": "Read recorded future-request process facts; partial facts grant no closure.",
+      "input_schema": {
+        "properties": {
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "incident_producer_observationArguments",
+        "type": "object"
+      },
+      "name": "incident_producer_observation"
+    },
     "incident_retirement_commit": {
       "description": "Execute only an exact independently verified and separately approved retirement.",
       "input_schema": {
@@ -5421,6 +5438,48 @@
         "type": "object"
       }
     },
+    "manual_setup_commit": {
+      "description": "Consume stored local approval for that exact setup, or observe its old request.\n\n    This never approves residual risk, closes a legacy incident, or retries an\n    effect. Caller-provided approval dictionaries and request IDs are not used.\n    ",
+      "input_schema": {
+        "properties": {
+          "plan_digest": {
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest"
+        ],
+        "title": "manual_setup_commitArguments",
+        "type": "object"
+      },
+      "name": "manual_setup_commit"
+    },
+    "manual_setup_prepare": {
+      "description": "Draft one bounded setup for the exact two legacy incidents; issue no approval.\n\n    Original outcomes remain unknown. Review residual risks and the exact plan\n    through the local approve-manual-setup command before manual_setup_commit.\n    ",
+      "input_schema": {
+        "properties": {
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "workspace": {
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "steps",
+          "workspace"
+        ],
+        "title": "manual_setup_prepareArguments",
+        "type": "object"
+      },
+      "name": "manual_setup_prepare"
+    },
     "mirror_prepare": {
       "description": "Snapshot and prepare an exact frame or interval mirror for Box controllers.",
       "input_schema": {
@@ -6655,6 +6714,59 @@
         "title": "operation_batchDictOutput",
         "type": "object"
       }
+    },
+    "pair_continuation_commit": {
+      "description": "Run a locally approved finite pair plan once; existing requests are observed.\n\n    A pending, failed, or unknown step stops the sequence without replay or\n    automatic cleanup. Only the final restore receipt proves original tab return.\n    ",
+      "input_schema": {
+        "properties": {
+          "plan_digest": {
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest"
+        ],
+        "title": "pair_continuation_commitArguments",
+        "type": "object"
+      },
+      "name": "pair_continuation_commit"
+    },
+    "pair_continuation_prepare": {
+      "description": "Draft the finite pair sequence from an actual succeeded retained setup.\n\n    Context is an explicit units/basis/FPS policy, not observed SDK metadata.\n    Local approve-pair-continuation must review the complete plan separately.\n    ",
+      "input_schema": {
+        "properties": {
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "mutation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mutation"
+          },
+          "setup_plan_digest": {
+            "title": "Setup Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "setup_plan_digest",
+          "context"
+        ],
+        "title": "pair_continuation_prepareArguments",
+        "type": "object"
+      },
+      "name": "pair_continuation_prepare"
     },
     "physics_state": {
       "description": "Inventory rigid bodies, masses, constraints, collisions, and physics behaviours.",

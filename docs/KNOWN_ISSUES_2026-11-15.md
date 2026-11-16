@@ -1,11 +1,38 @@
-# Cascadeur motion r5 구현 상태와 남은 문제
+# Cascadeur motion r6 구현 상태와 남은 문제
 
 작성일: 2026-11-15 / 갱신: 2026-11-16 (Asia/Seoul)  
-대상: `feat/cascadeur-motion-r3`, r5 기준 구현 `fc0e98eaa30e819f98880a32dce30c6767a5cc64` 이후 변경  
-읽은 최신 원격 개선안: `origin/docs/cascadeur-motion-plan-r5`, `dffa8f9956a01c15e9db02cee33e490f3569cd05`의 26개 파일 전체(6,101행); 아래 r4 기록은 당시의 이력  
+대상: `feat/cascadeur-motion-r3`, r6 기준 구현 `7f1565a0ffad1595b9824cba25443bc581997fb6` 이후 변경  
+읽은 최신 원격 개선안: `origin/docs/cascadeur-motion-plan-r6`, `d31bdf3210f83fea2964a05d185d9bc976ef04ca`의 73개 파일 전체(29,843행); 아래 r5/r4 기록은 당시의 이력  
 고정 제품 목록: Cascadeur `2026.1.3.0.15619` / 실제 설치·실행: `2026.2.3.0.16863`
 
 ## 이번 변경과 관찰 범위
+
+### 최신 추가: R6 전체 intake와 실제 제품 경로 통합
+
+`origin/docs/cascadeur-motion-plan-r6`에 새 개선안이 있다. 최신 `d31bdf3210f83fea2964a05d185d9bc976ef04ca`의 **73개 파일, 29,843행 전체**를 읽고 R6-01~07 전체를 새 native goal로 설정했다. 기준 구현은 `7f1565a0ffad1595b9824cba25443bc581997fb6`이다. 원문은 `docs/implementation/cascadeur-motion-r6`에 보관했다. 29개 최종 source의 길이/SHA256/Git blob, aggregate patch의 기준→결과를 모두 대조했다. aggregate patch SHA256은 `3fcb36db838969fec171b69cc84a54c7a026b0064e58e4663a034584c8a25453`이다. 제안 자체에 없는 실제 SDK leaf와 연결 결함은 제품 코드에서 보완했다. 원문의 `product_applied:false`는 제안 작성 당시의 값이다.
+
+- **설치:** source/frozen 경로 모두 runtime 디렉터리 전체 이동 대신 허용된 code entry만 교체한다. runtime/state/snapshots/logs의 Win32 물리 ID, 기존 policy bytes와 code preimage를 고정하며 rollback은 해당 transaction의 code·ownership/DACL 변경만 복원한다. 임시 재현은 실제 설치, Inno 전체 실행 또는 강제 장애 주입을 대신하지 않는다.
+- **수동 setup과 continuation:** CLI와 MCP의 prepare/commit를 연결했다. 두 legacy unknown/open을 유지한 채 정확한 새 setup 계획과 별도 로컬 승인에만 admission v2를 발급한다. 기존 outbox 관측도 승인된 epoch/fingerprint/source/scene/시간 범위까지 대조한다. 실제 succeeded owned-pair setup이 있어야 고정 10/12단계 continuation을 만들 수 있다. pending/unknown/실패에서 중단하며 요청을 replay하거나 원 탭을 자동 정리하지 않는다. context의 단위·basis·FPS는 명시적 변환 정책이다.
+- **미래 producer 관측:** 새 signed outbox의 게시 전 host 기록, native claim의 실제 PID/creation/image identity, 첫 효과 경계, 원 terminal raw archive를 실제 queue/guard/receipt 경로에 연결했다. 조회는 `observed_partial_v1`, `closure_authority:none`만 발급한다. 원 두 incident에 소급 기록·완료·retirement를 생성하지 않는다. 관리 supervisor/transport/VM/VHD/certificate custody가 인증하는 전체 scope·closure backend는 아직 없다.
+- **유한 native 경로:** 설치 SDK의 `Update.root()`부터 typed node/port/edge/data/owner/producer를 읽는 실제 extractor와 private closed-snapshot source를 추가했다. readonly source 검증은 historical observation이라고 표시하고 fresh graph 검사는 admitted Update callback에서 첫 실제 계산/쓰기 전에 한다. 전체 projection의 비대상 channel/frame까지 검사하고 mutation 없는 evaluation의 실제 callback bookends도 private terminal/geometry 연결에 보존한다. checkpoint는 immutable P0에 직접 비교하며 authored/미분류 field는 exact로 유지한다. 새 코드의 실앱 qualification 성공을 주장하지 않는다.
+- **MCP surface:** 실제 in-process MCP Client 목록·schema에서 새 도구 5개(`manual_setup_prepare/commit`, `pair_continuation_prepare/commit`, `incident_producer_observation`)만 추가된 것을 확인했다. 기존 모든 tool 계약과 resource/template는 동일하다. 의도된 추가만 golden에 반영했다. golden 갱신 자체는 native 검증이 아니다.
+
+**Unbaking의 정확한 남은 leaf:** 제품 collector를 실행해 명시적으로 선택한 설치 stub와 `ml.editable_animation`, `python_actions_rule`, `common.selection_operations` source를 비실행 수집했다. 결과는 로컬 ignored `artifacts/native-r6/unbaking-installed-sources.json`(336,321 bytes)이다. 선택한 source에서는 `View.AutoInterpolation_Keys`, `View.Animation unbaking`, `AutoPosingTool.AutoUnlock` 세 exact ID의 등록이 발견되지 않았다. 이는 SDK 전체에 없다는 뜻이 아니다. `editable_animation.run`은 후보일 뿐이며, nested callback(1023/1031), `show_buttons_dialog`(1044), global current-scene(858)/settings(644) 때문에 exact argument 및 원 operation의 완료 소유권이 확정되지 않는다. 선택 source SHA256: editable_animation `58e0a35072d8491c87cf14677562f3d609a6387d5a76d3aa59f322eac28c228c`, python_actions_rule `71f6fdcddade64ab349eda51873fcb791d0870473b0ce0208dc057a1c1fca995`. 실제 등록 소유자·인자·완료 callback을 확인해 native unbaking lowering/completion 경계에 연결해야 한다. 세 action은 계속 gate하며 sparse key 생성으로 대체하지 않았다.
+
+추가로 설치 `resources/scripts/python/commands`와 `inner_scripts`의 파일 목록·관련 문자열/등록 지점만 한정 조사했다. inner_scripts는 빈 `__init__.py`와 Transform/Mirror 생성 예제 `functions.py`뿐이며 세 동작의 등록은 없다. commands에도 직접 구현/등록은 발견되지 않았다. `python_actions_rule.py:9/25/38`의 일반 `run/name/description` discovery와 `CommandInfo(next_pkg, description)`는 세 ID의 binding을 증명하지 않으며, editable_animation의 `command_name`과도 계약이 다르다. 실제 owner는 여전히 미관측이다. 이 부재만으로 C++/native 소유라고 단정하지 않는다.
+
+**실제 환경과 남은 승인/증거:** 설치 exe는 이번에도 `2026.2.3.0.16863`, CIM의 실제 실행 프로세스는 PID `2328`, creation `2026-11-16T06:14:42.902727+09:00`이다. 이 실행 확인은 새 bridge bytes의 실앱 성공 근거가 아니다. 실행 중인 앱 종료·탭 닫기·hot reload·실제 설치 교체를 수행하지 않았다. 별도 로컬 operator가 구체적인 legacy 위험 수용 계획과 continuation을 검토·승인하지 않았으며 새 fixture를 생성하지 않았다. 실제 loaded epoch qualification, 독립 target/producer closure, unbaking 완료 계약과 최종 native recipe/consumer 납품은 미완료다. 두 원 요청·raw terminal·키·nonce·소비 상태를 변경하지 않았다. 전체 goal은 완료 처리하지 않는다.
+
+**이번 R6의 한정 확인:**
+
+- `tests/test_incident_admission.py::test_two_domain_admission_and_bounded_diagnostic`: **1 passed in 1.75s**. 실제 임시 queue→native drain→signed metadata receipt와 원 terminal 중복 조회를 확인했다. SDK scene 접근은 trap이며 실앱 실행이 아니다.
+- `tests/test_r6_producer_installer_boundaries.py::test_in_place_code_rollback_retains_real_store_identity`: **1 passed in 1.92s**. 임시 디렉터리에 실제 PowerShell helper를 실행해 인증된 IncidentStore의 물리 root ID·marker·unknown/state/snapshot/log/policy bytes와 새 evidence를 유지하고 code만 복원했다. corrupt preimage는 clear 전에 거절했다. 실제 source/frozen 설치 전체는 실행하지 않았다.
+- `tests/test_r6_producer_installer_boundaries.py::test_prospective_process_records_preserve_actual_terminal_bytes`: **1 passed in 1.81s**. 실제 query-only Win32 자기 process/image identity와 임시 signed outbox→private claim/first-effect→unknown terminal raw archive를 확인했다. SDK epoch attestation만 fixture로 격리했으며 source/terminal bytes를 그대로 보존했다. Windows의 `fstat` change time과 path `stat` creation time 차이를 같은 시간으로 가정하던 결함을 수정했다. 같은 descriptor의 전후 ctime은 계속 대조하고 handle↔path의 volume/file ID·size·mtime을 대조한다.
+- 실제 임시 `AtomicQueue`/v2 sidecar 재현(exit 0)에서 동일 요청 재전송·변조 epoch·pending setup·추가 unknown·bool frame을 거절하고, 만료 후에는 원 요청 관측만 수행함을 확인했다. 승인·native 관측은 명시적 fixture이며 실제 local operator 승인/SDK/app 함수는 호출하지 않았다. 중간 observer double의 누락된 `execution_mode`를 고쳐 이 한정 재현만 재실행했다.
+- 실제 두 원 terminal 파일도 읽기 전용으로 다시 hash했다. global `f871806f1b62d7127a4316a160e83f6baa249fa7078024eb0b659d09b49a30fb`, isolated `ac0afaf64891be8405acdf2c66c7d98789555f55acb2969904d851ba6f2e1138`로 기존 raw bytes와 같다. 이는 종료·격리 증거가 아니다.
+- `.venv` Python의 단일 SDK-shaped inline 재현은 **exit 0 / 0.71s**였다. 실제 extractor의 dtype/shape·paired interface·graph-only 변경·외부 endpoint 거절, runner late callback 증거 폐기, private snapshot identity·historical source와 fresh graph의 구분, 전체 source의 4-channel 위치 예측·다른 object/assets 보존·nonunit scale 거절을 확인했다. 첫 실행에서 내부 tuple 주소가 strict JSON 계약에 어긋나는 결함을 발견해 leaf의 주소 표현만 JSON 배열로 고쳤다. 실제 SDK/앱 실행이 아니다. rollback의 exclusive marker 생성과 `modify_update` 진입 전에도 producer/효과 guard를 두고 callback 내부 재검사는 유지했다.
+
+전체 suite/lint/build/독립 audit은 실행하지 않았다. 이 결과로 실제 callback 완료·native save/load·geometry·unbaking 또는 OS realm closure를 주장하지 않는다.
 
 ### 최신 추가: setup 효과 경계와 retirement 재개 보완
 

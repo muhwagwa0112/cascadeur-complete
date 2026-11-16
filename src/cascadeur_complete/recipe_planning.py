@@ -121,7 +121,7 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
     add("baseline_capture", "transform_get", "motion.capture", "read", postconditions=("complete_source_capture",))
     if spec.geometry_capture is not None:
         add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
-            {"after": "baseline_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
+            {"after": "baseline_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file", "evaluation"),
             postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
             objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
     add("analyze", "motion_analysis", "motion.analyze", "host_compute", postconditions=("required_metric_eligibility",))
@@ -159,7 +159,7 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
         if spec.geometry_capture is not None:
             add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
                 {"after": "actual_readback", "cleanup_index": index,
-                 "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
+                 "policy": spec.geometry_capture.model_dump(mode="json")}, ("file", "evaluation"),
                 postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
                 objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
             add("actual_verify", "motion_quality", "motion.quality", "host_compute", {"cleanup_index": index},
@@ -171,7 +171,7 @@ def compile_steps(spec: RecipeSpec) -> tuple[StepPermit, ...]:
             channels=("evaluation",), postconditions=("evaluation_settled",))
         add("quality_capture", "transform_get", "motion.capture", "read", postconditions=("complete_actual_capture",))
         add("geometry_capture", "geometry_capture", "system.observe_geometry_capture", "file_stage",
-            {"after": "quality_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file",),
+            {"after": "quality_capture", "policy": spec.geometry_capture.model_dump(mode="json")}, ("file", "evaluation"),
             postconditions=("terminal_sealed_actual_geometry",), lowering="geometry-capture-v1",
             objects=spec.geometry_capture.mesh_ids, owned="geometry_capture")
     add("quality", "motion_quality", "motion.quality", "host_compute", postconditions=("actual_required_metrics_pass",))

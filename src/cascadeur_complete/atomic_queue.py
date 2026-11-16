@@ -11,6 +11,7 @@ from typing import Any
 from .models import BridgeRequest, ResultEnvelope
 from .paths import RuntimePaths
 from .queue_auth import QueueAuthenticationError, load_or_create_secret, session_id, sign_payload, verify_payload
+from . import producer_observation
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -69,6 +70,9 @@ class AtomicQueue:
         from .incident_admission import issue
         try:
             issue(self.paths.root, request.model_dump(mode="json"))
+            # Future incident facts are captured before publication. The
+            # recorder never retroactively reconstructs an old producer.
+            producer_observation.record_host_dispatch(self.paths.root, request.model_dump(mode="json"))
         except Exception:
             # The publication point has not been reached, so this NEW request
             # is authoritatively unclaimed. Never use this for an old unknown.

@@ -71,7 +71,7 @@ def _evaluation(scene, projection):
     return identity, copy.deepcopy(receipt)
 
 
-def _ownership(projection, ids, source):
+def _ownership(projection, ids, source, *, scene=None):
     owners = {}
     for obj in projection["objects"]:
         for behaviour in obj["behaviours"]:
@@ -94,6 +94,11 @@ def _ownership(projection, ids, source):
         if (len(ids)==1 and source.get("scope", {}).get("object_ids")==ids
                 and declared in (None,ids[0]) and independent_projection_identity(projection,ids[0])):
             return {ids[0]:ids[0]}
+        if scene is not None:
+            from .native_owned_pair_binding import pair_ownership
+            owned = pair_ownership(scene, projection, ids, source)
+            if owned is not None:
+                return owned
         raise ValueError("CHARACTER_OWNERSHIP_UNVERIFIED: capture requires one unique actual RigInfo owner")
     owner = next(iter(selected[0]))
     declared = source.get("scope", {}).get("profile", {}).get("character_id")
@@ -225,14 +230,15 @@ def observe_motion_capture(scene, arguments):
     if not isinstance(required, list) or not set(required) <= set(ids):
         raise ValueError("INVALID_POLICY: rotation requirements escape capture scope")
     source = copy.deepcopy(arguments.get("source_binding"))
-    guards.assert_source(scene, source)
+    from .native_update_source import assert_historical_source
+    assert_historical_source(scene, source)
     if source.get("scope", {}).get("context", context) != context:
         raise ValueError("CAPTURE_SCOPE_MISMATCH: source binding context differs")
     projection = read_scene(scene)
     if context["frames"][-1] >= projection["frames"]:
         raise ValueError("INCOMPLETE_CAPTURE: context frames exceed actual native timeline")
     identity, evaluation = _evaluation(scene, projection)
-    ownership = _ownership(projection, ids, source)
+    ownership = _ownership(projection, ids, source, scene=scene)
     positions, rotations, validity, raw = _samples(projection, ids, context, space, basis, scale, set(required))
     canonical = {"context": context, "object_ids": ids, "space": space, "position_m": positions,
                  "rotation_wxyz": rotations, "channel_valid": validity, "source_binding": source}
@@ -280,7 +286,8 @@ def lookup_capture(capture_digest, key_layout_arguments=None):
     if rt._scene_view() is not scene:
         raise ValueError("SCENE_CHANGED: issued capture belongs to an inactive scene tab")
     record = copy.deepcopy(retained)
-    guards.assert_source(scene, record["canonical_batch"]["source_binding"])
+    from .native_update_source import assert_historical_source
+    assert_historical_source(scene, record["canonical_batch"]["source_binding"])
     projection = read_scene(scene)
     identity, evaluation = _evaluation(scene, projection)
     if (record["runtime_epoch"] != guards.RUNTIME_EPOCH or record["native_build"] != installed_build()

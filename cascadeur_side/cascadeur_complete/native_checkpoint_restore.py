@@ -326,7 +326,7 @@ class NativeRestoreResult:
 def _restore_native(scene, anchor, working):
     """The same complete native primitive is used by qualification and dispatch."""
     from .native_adapters import _WORKSPACES, _save_observed
-    from .native_project_io import load_project_copy
+    from .native_serialization_binding import load_checkpoint_copy, bind_completed_clone
     original_projection, original_path = read_scene(scene), str(scene.get_path_name())
     def original_unchanged():
         if read_scene(scene) != original_projection or str(scene.get_path_name()) != original_path:
@@ -339,12 +339,10 @@ def _restore_native(scene, anchor, working):
     fixed = anchor.get("fixed_anchor")
     serialization = None
     try:
-        target, load_observation = load_project_copy(path, working,
-            expected_sha256=anchor["manifest"]["sha256"], expected_length=anchor["manifest"]["bytes"],
-            source_guard=original_unchanged)
+        target, load_observation = load_checkpoint_copy(anchor, scene, working, source_guard=original_unchanged)
         if fixed is not None:
             from .native_serialization import compare_with_private_policy
-            compare_with_private_policy(target, fixed["immutable_anchor"], phase="project_load")
+            compare_with_private_policy(target, fixed["immutable_anchor"], phase="project_load", phase_guard=original_unchanged)
         elif read_scene(target) != anchor["projection"]:
             raise ValueError("RECOVERY_NATIVE_READBACK_DIFFERS")
         from .incident_admission import assert_request_admission
@@ -352,7 +350,7 @@ def _restore_native(scene, anchor, working):
         original_unchanged()
         saved = _save_observed(target, working)
         if fixed is not None:
-            serialization = compare_with_private_policy(target, fixed["immutable_anchor"], phase="restored_save")
+            serialization = compare_with_private_policy(target, fixed["immutable_anchor"], phase="restored_save", phase_guard=original_unchanged)
         restored_projection = read_scene(target)
         actual_path = str(target.get_path_name())
         if ((fixed is None and restored_projection != anchor["projection"])
@@ -366,6 +364,8 @@ def _restore_native(scene, anchor, working):
     if read_scene(scene) != original_projection or str(scene.get_path_name()) != original_path:
         raise ValueError("RECOVERY_FAILED_SCENE_CHANGED")
     guards.link_clone(scene, target)
+    if fixed is not None:
+        bind_completed_clone(fixed["immutable_anchor"], target)
     after = dict(guards.scene_instance(target))
     if after["scene_instance_id"] == before["scene_instance_id"] or after["document_lineage_id"] != before["document_lineage_id"]:
         raise ValueError("RECOVERY_SUCCESSOR_IDENTITY_INVALID")
@@ -573,6 +573,7 @@ class NativeCheckpointRestoreAdapter:
         # Exclusive marker survives every failure. A new request cannot retry
         # a partially completed restore with the same signed authorization.
         marker = rt.runtime_root() / "state" / "recovery" / arguments["failed_request_id"] / "native-restore.claim"
+        guards.before_write(lambda: self._assert_source(scene, source, arguments))
         fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "w", encoding="ascii") as stream:
             stream.write(request["request_id"])
