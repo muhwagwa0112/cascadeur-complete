@@ -38,7 +38,7 @@ if ([IO.Path]::GetFullPath([string]$manifest.cascadeur_settings.path) -ine [IO.P
     throw 'Unexpected configuration rollback target.'
 }
 $rollbackFailures = [System.Collections.Generic.List[string]]::new()
-try { Restore-CascadeurRuntimeCode $manifest.targets.runtime $backupRoot }
+try { Restore-CascadeurInstallerTransaction $manifest }
 catch { $rollbackFailures.Add($_.Exception.Message) }
 
 foreach ($name in @('bridge', 'events')) {
@@ -56,21 +56,6 @@ foreach ($name in @('bridge', 'events')) {
     if ($entry.existed) {
         New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
         Copy-Item -LiteralPath $source -Destination $target -Recurse -Force
-    }
-    } catch { $rollbackFailures.Add($_.Exception.Message) }
-}
-
-foreach ($item in @(
-    [pscustomobject]@{ Entry = $manifest.cascadeur_settings; Backup = 'cascadeur-settings.json' },
-    [pscustomobject]@{ Entry = $manifest.codex_config; Backup = 'codex-config.toml' }
-)) {
-    try {
-    $target = [IO.Path]::GetFullPath([string]$item.Entry.path)
-    if ($item.Entry.existed) {
-        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $backupRoot $item.Backup) -Destination $target -Force
-    } elseif (Test-Path -LiteralPath $target) {
-        Remove-Item -LiteralPath $target -Force
     }
     } catch { $rollbackFailures.Add($_.Exception.Message) }
 }

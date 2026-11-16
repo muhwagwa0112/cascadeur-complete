@@ -30,6 +30,7 @@ $activatedTargets = [System.Collections.Generic.List[string]]::new()
 $targetState = [ordered]@{}
 $maintenanceLease = $null
 $runtimeState = $null
+$transaction = $null
 $runtimeActivationStarted = $false
 try {
     New-Item -ItemType Directory -Path $StageRuntime, $StageBridge, $StageEvents, $BackupRoot -Force | Out-Null
@@ -84,12 +85,16 @@ try {
             existed = [bool](Test-Path -LiteralPath $pair.Target)
         }
     }
-    [ordered]@{
+    $configurationState = Backup-CascadeurInstallerConfiguration $BackupRoot
+    $transaction = [pscustomobject]@{
         schema = 2
         runtime_mode = 'code-in-place'
         backup_root = $BackupRoot
         targets = $targetState
-    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $TransactionManifest -Encoding utf8
+        cascadeur_settings = $configurationState.cascadeur_settings
+        codex_config = $configurationState.codex_config
+    }
+    Write-CascadeurInstallerJson $TransactionManifest $transaction
 
     $runtimeActivationStarted = $true
     Clear-CascadeurRuntimeCode $RuntimeRoot
@@ -149,7 +154,7 @@ try {
         } catch { $rollbackFailures.Add($_.Exception.Message) }
     }
     if ($runtimeActivationStarted) {
-        try { Restore-CascadeurRuntimeCode $runtimeState $BackupRoot }
+        try { Restore-CascadeurInstallerTransaction $transaction }
         catch { $rollbackFailures.Add($_.Exception.Message) }
     }
     if ($rollbackFailures.Count) {

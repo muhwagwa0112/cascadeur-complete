@@ -163,6 +163,11 @@ unchanged. Receipt authentication failures still reject the observation.
 The source and frozen installer replace code in place while preserving the
 physical runtime/state/snapshots/logs directories and authenticated state. Code
 rollback and the transaction's own ownership/DACL changes are bounded separately.
+Settings and optional Codex registration use hashed preimages and recorded write
+effects shared by both installers. Rollback requires the recorded postimage's
+hash and file identity; unknown writes or later external changes are retained
+with an explicit incomplete-rollback error. Code restoration failures do not
+prevent independent metadata restoration.
 This is not permission to replace a live bridge or close application tabs.
 
 Owned-pair native code now includes an installed Update graph/type extractor,
@@ -178,6 +183,9 @@ Use `python scripts/collect_native_evidence.py --help` for bounded, non-executin
 collection of explicitly selected installed SDK declarations and Python action
 sources. It does not import the SDK or run the app. Current evidence gaps and
 the original incident history are recorded in [the issue memo](docs/KNOWN_ISSUES_2026-11-15.md).
+The five default stub paths match the installed package layout, including
+`csc/update.pyi` and `csc/model.pyi`; use repeated `--stub` arguments for an
+explicit different layout. No recursive SDK search is performed.
 
 ### R5 incident admission and finite setup
 

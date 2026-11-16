@@ -207,3 +207,135 @@ if (-not $rejected) { throw 'Corrupt code backup accepted' }
         assert (root / name).read_bytes() == raw
     assert (root / "src/module.py").read_text() == "original_code = True\n"
     assert (root / "state/new-evidence.bin").exists()
+
+
+def test_shared_installer_transaction_restores_only_owned_metadata(tmp_path):
+    profiles = []
+    for name in ("source", "frozen"):
+        profile = tmp_path / name
+        root = profile / "AppData/Local/CascadeurMCP/cascadeur-complete"
+        for part in ("src", "state/incidents", "snapshots", "logs"):
+            (root / part).mkdir(parents=True, exist_ok=True)
+        secret = os.urandom(32)
+        (root / "state/bridge.key").write_bytes(secret)
+        marker = store.seal({"schema_version": 1, "auth_domain_id": store.policy.auth_domain_id(secret),
+            "store_instance_id": str(uuid.uuid4()), "physical_root": store.physical_identity(root)}, secret, store.STORE_PURPOSE)
+        (root / "state/incidents/store-v1.json").write_bytes(store.canonical(marker))
+        (root / "state/install-ownership.json").write_bytes(b'{"installed":true}')
+        (root / "state/original-unknown.json").write_bytes(b'{"outcome":"outcome_unknown"}')
+        (root / "src/module.py").write_bytes(b"original code")
+        (root / "policy.json").write_bytes(b'{"retained":true}')
+        (profile / ".codex").mkdir()
+        settings = profile / "AppData/Local/Nekki Limited/Cascadeur/settings.json"
+        settings.parent.mkdir(parents=True)
+        if name == "source":
+            settings.write_bytes(b'{"original":true}')
+            (profile / ".codex/config.toml").write_bytes(b"original codex\n")
+        profiles.append((profile, root, store.IncidentStore(root).identity))
+    check = tmp_path / "metadata-check.ps1"
+    check.write_text(r'''param([string]$Workspace,[string]$Helpers,[string]$RestoreScript)
+$ErrorActionPreference = 'Stop'
+. $Helpers
+foreach ($case in @('source','frozen')) {
+    $env:USERPROFILE = Join-Path $Workspace $case
+    $env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'AppData\Local'
+    $runtime = Join-Path $env:LOCALAPPDATA 'CascadeurMCP\cascadeur-complete'
+    $state = Join-Path $runtime 'state'
+    $backup = Join-Path $env:LOCALAPPDATA 'CascadeurMCP\backups\transaction'
+    New-Item -ItemType Directory -Path $backup | Out-Null
+    $saved = Backup-CascadeurRuntimeCode $runtime $backup
+    $config = Backup-CascadeurInstallerConfiguration $backup
+    $targets = [ordered]@{ runtime=$saved }
+    foreach ($name in @('bridge','events')) {
+        $leaf = if ($name -eq 'bridge') { 'cascadeur_complete' } else { 'cascadeur_complete_events' }
+        $target = Join-Path $env:LOCALAPPDATA ('Nekki Limited\Cascadeur\user_scripts\' + $leaf)
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $target 'original.py') -Value 'original bridge'
+        Copy-Item -LiteralPath $target -Destination (Join-Path $backup $name) -Recurse
+        $targets[$name] = [pscustomobject]@{ path=$target; existed=$true }
+    }
+    $manifest = [pscustomobject]@{ schema=2; runtime_mode='code-in-place'; backup_root=$backup;
+        targets=$targets; cascadeur_settings=$config.cascadeur_settings; codex_config=$config.codex_config }
+    $manifestPath = Join-Path $backup 'transaction.json'
+    Write-CascadeurInstallerJson $manifestPath $manifest
+    $lease = Enter-CascadeurMaintenanceLease $runtime
+    try {
+        # These are the exact shared production write boundaries; no installer,
+        # SDK, idle-scan override or global Codex command is executed here.
+        Start-CascadeurInstallerEffect $manifest 'state_acl'
+        $who = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        & icacls.exe $state /inheritance:r /grant:r "${who}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Fixture ACL write failed' }
+        Complete-CascadeurInstallerEffect $manifest 'state_acl'
+        if ((Get-CascadeurInstallerEffectState $manifest 'state_acl').sddl -ceq $saved.state_acl_sddl) { throw 'Fixture did not exercise a changed DACL' }
+        foreach ($name in @('cascadeur_settings','ownership')) {
+            $path = if ($name -eq 'ownership') { Join-Path $state 'install-ownership.json' } else { $config.cascadeur_settings.path }
+            Start-CascadeurInstallerEffect $manifest $name
+            Set-Content -LiteralPath $path -Value '{"installed":"changed"}'
+            Complete-CascadeurInstallerEffect $manifest $name
+        }
+        if ($case -eq 'source') {
+            Start-CascadeurInstallerEffect $manifest 'codex_config'
+            Set-Content -LiteralPath $config.codex_config.path -Value 'changed codex'
+            Complete-CascadeurInstallerEffect $manifest 'codex_config'
+        } else {
+            # A skipped registration does not own this independently created file.
+            Set-Content -LiteralPath $config.codex_config.path -Value 'unowned codex'
+        }
+        Set-Content -LiteralPath (Join-Path $runtime 'src/module.py') -Value 'incoming code'
+        Set-Content -LiteralPath (Join-Path $state 'new-evidence.bin') -Value 'retain new evidence'
+        if ($case -eq 'source') {
+            # Source outer catch calls this even after a hook has succeeded.
+            Restore-CascadeurInstallerTransaction $manifest
+        } else {
+            # Same child entry used by Inno after a successful hook/failed verify;
+            # the parent keeps its non-inheritable maintenance lease throughout.
+            & powershell.exe -NoProfile -NonInteractive -File $RestoreScript -TransactionManifest $manifestPath
+            if ($LASTEXITCODE -ne 0) { throw 'Frozen child metadata rollback failed' }
+        }
+        if ((Get-CascadeurInstallerEffectState $manifest 'state_acl').sddl -cne $saved.state_acl_sddl) { throw 'State DACL was not restored' }
+        Assert-CascadeurRuntimeIdentity $saved
+        Restore-CascadeurInstallerMetadata $manifest # Idempotent after restoration.
+        if ($case -eq 'source') {
+            # A corrupt code preimage must not prevent independent metadata undo.
+            $second = Join-Path $env:LOCALAPPDATA 'CascadeurMCP\backups\code-failure'
+            New-Item -ItemType Directory -Path $second | Out-Null
+            $s2 = Backup-CascadeurRuntimeCode $runtime $second
+            $c2 = Backup-CascadeurInstallerConfiguration $second
+            $m2 = [pscustomobject]@{ schema=2; runtime_mode='code-in-place'; backup_root=$second;
+                targets=[pscustomobject]@{runtime=$s2}; cascadeur_settings=$c2.cascadeur_settings; codex_config=$c2.codex_config }
+            Start-CascadeurInstallerEffect $m2 'cascadeur_settings'
+            Set-Content -LiteralPath $c2.cascadeur_settings.path -Value 'new changed settings'
+            Complete-CascadeurInstallerEffect $m2 'cascadeur_settings'
+            Set-Content -LiteralPath (Join-Path $second 'runtime-code/src/module.py') -Value 'corrupt preimage'
+            $failed = $false
+            try { Restore-CascadeurInstallerTransaction $m2 } catch {
+                if ($_.Exception.Message -notmatch 'preimage bytes or file set differ') { throw }
+                $failed = $true
+            }
+            if (-not $failed -or (Get-CascadeurInstallerFileState $c2.cascadeur_settings.path).sha256 -cne $c2.cascadeur_settings.sha256) { throw 'Code failure suppressed independent metadata rollback' }
+        }
+    } finally { $lease.Dispose() }
+}
+'shared_metadata_rollback_observed'
+''', encoding="utf-8")
+    repo = Path(__file__).resolve().parents[1]
+    checked = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(check),
+        "-Workspace", str(tmp_path), "-Helpers", str(repo / "packaging/upgrade-state.ps1"),
+        "-RestoreScript", str(repo / "packaging/restore-existing.ps1")], capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=60)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert "shared_metadata_rollback_observed" in checked.stdout
+    for profile, root, identity in profiles:
+        assert store.IncidentStore(root).identity == identity
+        assert (root / "state/install-ownership.json").read_bytes() == b'{"installed":true}'
+        assert (root / "state/original-unknown.json").read_bytes() == b'{"outcome":"outcome_unknown"}'
+        assert (root / "src/module.py").read_bytes() == b"original code"
+        assert (root / "state/new-evidence.bin").exists()
+        settings = profile / "AppData/Local/Nekki Limited/Cascadeur/settings.json"
+        if profile.name == "source":
+            assert settings.read_bytes() == b'{"original":true}'
+            assert (profile / ".codex/config.toml").read_bytes() == b"original codex\n"
+        else:
+            assert not settings.exists()
+            assert (profile / ".codex/config.toml").read_text().strip() == "unowned codex"

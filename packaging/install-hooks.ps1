@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $RuntimeRoot,
-    [string] $TransactionManifest,
+    [Parameter(Mandatory)] [string] $TransactionManifest,
     [switch] $SkipCodexRegistration
 )
 
@@ -14,11 +14,16 @@ Assert-CascadeurUpgradeIdle $RuntimeRoot
 # Their schema-2 transaction restores code and installer ownership on failure. Never
 # merge a historical backup here: it can resurrect deleted tokens/claims or
 # conflict with newer state. Backups are for explicit transaction rollback only.
-$BackupRoot = Join-Path $InstallLocalAppData ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-installer')
 $SettingsPath = Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\settings.json'
 $UserScriptsRoot = [IO.Path]::GetFullPath((Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\user_scripts')).TrimEnd('\')
 $CodexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
-New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
+if (-not (Test-Path -LiteralPath $TransactionManifest -PathType Leaf)) { throw 'An installer transaction manifest is required before hook effects.' }
+$IncomingTransaction = Get-Content -LiteralPath $TransactionManifest -Raw | ConvertFrom-Json
+Assert-CascadeurInstallerTransaction $IncomingTransaction
+if ([IO.Path]::GetFullPath([string]$IncomingTransaction.targets.runtime.path) -ine $RuntimeRoot) { throw 'Install hooks runtime differs from its transaction.' }
+Assert-CascadeurRuntimeIdentity $IncomingTransaction.targets.runtime
+Read-CascadeurInstallerEffects $IncomingTransaction | Out-Null
+$BackupRoot = [string]$IncomingTransaction.backup_root
 
 $StateRoot = Join-Path $RuntimeRoot 'state'
 New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
@@ -30,38 +35,24 @@ $ExistingOwnership = if ($OwnershipExisted) {
 $ActiveOwnership = $OwnershipExisted -and (
     $null -eq $ExistingOwnership.installed -or [bool]$ExistingOwnership.installed
 )
-$IncomingTransaction = if ($TransactionManifest -and (Test-Path -LiteralPath $TransactionManifest)) {
-    Get-Content -LiteralPath $TransactionManifest -Raw | ConvertFrom-Json
-} else { $null }
-if ($IncomingTransaction) {
-    if ($IncomingTransaction.schema -ne 2 -or $IncomingTransaction.runtime_mode -ne 'code-in-place' -or
-        [IO.Path]::GetFullPath([string]$IncomingTransaction.targets.runtime.path) -ine $RuntimeRoot) {
-        throw 'Install hooks require the exact schema-2 in-place runtime transaction.'
-    }
-    Assert-CascadeurRuntimeIdentity $IncomingTransaction.targets.runtime
-}
 $NeedsTransactionMigration = $ActiveOwnership -and $IncomingTransaction -and -not $ExistingOwnership.transaction_manifest
-$SettingsExisted = Test-Path -LiteralPath $SettingsPath
-$SettingsTouched = $false
-$CodexConfigExisted = Test-Path -LiteralPath $CodexConfig
-$CodexConfigTouched = $false
 $CurrentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-& icacls.exe $StateRoot /inheritance:r /grant:r "${CurrentIdentity}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Unable to restrict the MCP state directory ACL' }
 
 try {
-if (-not (Test-Path -LiteralPath $SettingsPath)) {
-    New-Item -ItemType Directory -Path (Split-Path -Parent $SettingsPath) -Force | Out-Null
-    $SettingsTouched = $true
-    [pscustomobject]@{
-        Python = [pscustomobject]@{ Commands = @('commands'); Events = @('events') }
-    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $SettingsPath -Encoding utf8
-}
+Start-CascadeurInstallerEffect $IncomingTransaction 'state_acl'
+& icacls.exe $StateRoot /inheritance:r /grant:r "${CurrentIdentity}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+$aclExitCode = $LASTEXITCODE
+Complete-CascadeurInstallerEffect $IncomingTransaction 'state_acl'
+if ($aclExitCode -ne 0) { throw 'Unable to restrict the MCP state directory ACL' }
+
 if (Test-Path -LiteralPath $SettingsPath) {
-    if ($SettingsExisted) {
-        Copy-Item -LiteralPath $SettingsPath -Destination (Join-Path $BackupRoot 'cascadeur-settings.json')
-    }
     $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+} else {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $SettingsPath) -Force | Out-Null
+    $settings = [pscustomobject]@{
+        Python = [pscustomobject]@{ Commands = @('commands'); Events = @('events') }
+    }
+}
     if ($null -eq $settings.PSObject.Properties['Python']) {
         $settings | Add-Member -NotePropertyName Python -NotePropertyValue ([pscustomobject]@{})
     }
@@ -96,16 +87,19 @@ if (Test-Path -LiteralPath $SettingsPath) {
         $settings.Python.Path = @($settings.Python.Path) + $UserScriptsRoot
     }
     $temporary = "$SettingsPath.cascadeur-mcp.tmp"
-    $SettingsTouched = $true
+    Start-CascadeurInstallerEffect $IncomingTransaction 'cascadeur_settings'
     $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $temporary -Encoding utf8
     Move-Item -LiteralPath $temporary -Destination $SettingsPath -Force
-}
+    Complete-CascadeurInstallerEffect $IncomingTransaction 'cascadeur_settings'
 
 $previousCodex = $null
-if (Get-Command codex -ErrorAction SilentlyContinue) {
+# A skipped registration never owns a Codex change or needs its preimage.
+# Even a read of an absent registration leaves native exit code 1 behind.
+if (-not $SkipCodexRegistration -and (Get-Command codex -ErrorAction SilentlyContinue)) {
     try { $previousCodex = (& codex mcp get cascadeur-complete --json 2>$null | ConvertFrom-Json) } catch {}
 }
 if (-not $ActiveOwnership) {
+    Start-CascadeurInstallerEffect $IncomingTransaction 'ownership'
     [ordered]@{
         schema = 2
         installed = $true
@@ -117,6 +111,7 @@ if (-not $ActiveOwnership) {
         codex_registered_by_installer = $false
         transaction_manifest = $IncomingTransaction
     } | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $OwnershipPath -Encoding utf8
+    Complete-CascadeurInstallerEffect $IncomingTransaction 'ownership'
 } elseif ($NeedsTransactionMigration) {
     # Source installs created before schema 2 have no uninstall transaction.
     # Preserve their original settings/Codex ownership while adopting the
@@ -136,7 +131,9 @@ if (-not $ActiveOwnership) {
     } else {
         $ExistingOwnership.transaction_manifest = $IncomingTransaction
     }
+    Start-CascadeurInstallerEffect $IncomingTransaction 'ownership'
     $ExistingOwnership | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $OwnershipPath -Encoding utf8
+    Complete-CascadeurInstallerEffect $IncomingTransaction 'ownership'
 }
 
 # Upgrades over an ownership record that predates the Python.Path entry adopt
@@ -145,14 +142,13 @@ $ownership = Get-Content -LiteralPath $OwnershipPath -Raw | ConvertFrom-Json
 if ($null -eq $ownership.PSObject.Properties['path_preexisting']) {
     $ownership | Add-Member -NotePropertyName path_preexisting -NotePropertyValue ([bool]$pathPreexisting)
     $ownership | Add-Member -NotePropertyName user_scripts_path -NotePropertyValue $UserScriptsRoot -Force
+    Start-CascadeurInstallerEffect $IncomingTransaction 'ownership'
     $ownership | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $OwnershipPath -Encoding utf8
+    Complete-CascadeurInstallerEffect $IncomingTransaction 'ownership'
 }
 
 $codexRegistered = $false
 if (-not $SkipCodexRegistration -and (Get-Command codex -ErrorAction SilentlyContinue)) {
-    if (Test-Path -LiteralPath $CodexConfig) {
-        Copy-Item -LiteralPath $CodexConfig -Destination (Join-Path $BackupRoot 'codex-config.toml')
-    }
     $executable = Join-Path $RuntimeRoot 'cascadeur-complete.exe'
     if (-not (Test-Path -LiteralPath $executable)) {
         $executable = Join-Path $RuntimeRoot '.venv\Scripts\cascadeur-complete.exe'
@@ -161,10 +157,14 @@ if (-not $SkipCodexRegistration -and (Get-Command codex -ErrorAction SilentlyCon
     if ($previousCodex -and -not $ActiveOwnership) {
         throw 'A pre-existing Codex MCP named cascadeur-complete is already registered. Remove or rename it before installing.'
     }
-    $CodexConfigTouched = $true
+    Start-CascadeurInstallerEffect $IncomingTransaction 'codex_config'
     & codex mcp remove cascadeur-complete 2>$null | Out-Null
+    Complete-CascadeurInstallerEffect $IncomingTransaction 'codex_config'
+    Start-CascadeurInstallerEffect $IncomingTransaction 'codex_config'
     & codex mcp add cascadeur-complete -- $executable | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Codex MCP registration failed' }
+    $codexExitCode = $LASTEXITCODE
+    Complete-CascadeurInstallerEffect $IncomingTransaction 'codex_config'
+    if ($codexExitCode -ne 0) { throw 'Codex MCP registration failed' }
     $codexRegistered = $true
     $ownership = Get-Content -LiteralPath $OwnershipPath -Raw | ConvertFrom-Json
     if ($null -eq $ownership.codex_registered_by_installer) {
@@ -172,40 +172,20 @@ if (-not $SkipCodexRegistration -and (Get-Command codex -ErrorAction SilentlyCon
     } else {
         $ownership.codex_registered_by_installer = $true
     }
+    Start-CascadeurInstallerEffect $IncomingTransaction 'ownership'
     $ownership | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $OwnershipPath -Encoding utf8
+    Complete-CascadeurInstallerEffect $IncomingTransaction 'ownership'
 }
+Assert-CascadeurRuntimeIdentity $IncomingTransaction.targets.runtime
 } catch {
     $hookFailure = $_
-    $rollbackFailures = [System.Collections.Generic.List[string]]::new()
     try {
-    if ($SettingsTouched) {
-        if ($SettingsExisted) {
-            $settingsPreimage = Join-Path $BackupRoot 'cascadeur-settings.json'
-            if (-not (Test-Path -LiteralPath $settingsPreimage -PathType Leaf)) { throw 'Cascadeur settings preimage is missing.' }
-            Copy-Item -LiteralPath $settingsPreimage -Destination $SettingsPath -Force
-        } elseif (Test-Path -LiteralPath $SettingsPath) {
-            Remove-Item -LiteralPath $SettingsPath -Force
-        }
-    }
-    } catch { $rollbackFailures.Add($_.Exception.Message) }
-    try {
-    if ($CodexConfigTouched) {
-        if ($CodexConfigExisted) {
-            $codexPreimage = Join-Path $BackupRoot 'codex-config.toml'
-            if (-not (Test-Path -LiteralPath $codexPreimage -PathType Leaf)) { throw 'Codex configuration preimage is missing.' }
-            Copy-Item -LiteralPath $codexPreimage -Destination $CodexConfig -Force
-        } elseif (-not $CodexConfigExisted -and (Test-Path -LiteralPath $CodexConfig)) {
-            Remove-Item -LiteralPath $CodexConfig -Force
-        }
-    }
-    } catch { $rollbackFailures.Add($_.Exception.Message) }
-    if ($rollbackFailures.Count) {
-        throw "Install hooks failed: $($hookFailure.Exception.Message). Configuration rollback incomplete; retain ${BackupRoot}. $($rollbackFailures -join '; ')"
+        Restore-CascadeurInstallerMetadata $IncomingTransaction
+    } catch {
+        throw "Install hooks failed: $($hookFailure.Exception.Message). Metadata rollback incomplete; retain ${BackupRoot}. $($_.Exception.Message)"
     }
     throw $hookFailure
 }
-
-if ($IncomingTransaction) { Assert-CascadeurRuntimeIdentity $IncomingTransaction.targets.runtime }
 
 [pscustomobject]@{ Runtime = $RuntimeRoot; Backup = $BackupRoot; CodexRegistered = $codexRegistered } |
     ConvertTo-Json -Compress

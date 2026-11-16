@@ -15,7 +15,10 @@ from pathlib import Path
 import sys
 
 
-STUB_MODULES = ("domain", "update", "model", "tools", "app")
+STUB_FILES = (
+    "csc/domain/__init__.pyi", "csc/update.pyi", "csc/model.pyi",
+    "csc/tools/__init__.pyi", "csc/app/__init__.pyi",
+)
 SYMBOLS = (
     "Scene", "SceneUpdater", "SkinnedMeshCalcResult", "calc_skinned_mesh",
     "Update", "Node", "NodeAttribute", "Group", "ObjectGroup", "UpdateGroup",
@@ -60,7 +63,7 @@ def collect_bundle(stub_root: Path, python_specs: list[str], text_paths: list[Pa
     declarations = _collector(declaration_path, "cascadeur_r6_declaration_collector")
     selected, absent = [], []
     # Explicit files or five named defaults only; never recurse or search inputs.
-    candidates = list(stub_paths) or [root / "csc" / module / "__init__.pyi" for module in STUB_MODULES]
+    candidates = list(stub_paths) or [root / name for name in STUB_FILES]
     for path in candidates:
         try:
             resolved = path.resolve(strict=True)

@@ -26,24 +26,15 @@ foreach ($entry in $targets.GetEnumerator()) {
         Copy-Item -LiteralPath $source -Destination (Join-Path $backupRoot $entry.Key) -Recurse -Force
     }
 }
-$settings = Join-Path $InstallLocalAppData 'Nekki Limited\Cascadeur\settings.json'
-$settingsExisted = Test-Path -LiteralPath $settings
-if ($settingsExisted) {
-    Copy-Item -LiteralPath $settings -Destination (Join-Path $backupRoot 'cascadeur-settings.json')
-}
-$codexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
-$codexExisted = Test-Path -LiteralPath $codexConfig
-if ($codexExisted) {
-    Copy-Item -LiteralPath $codexConfig -Destination (Join-Path $backupRoot 'codex-config.toml')
-}
+$configurationState = Backup-CascadeurInstallerConfiguration $backupRoot
 $manifest = [ordered]@{
     schema = 2
     runtime_mode = 'code-in-place'
     backup_root = $backupRoot
     targets = $targetState
-    cascadeur_settings = [pscustomobject]@{ path = $settings; existed = $settingsExisted }
-    codex_config = [pscustomobject]@{ path = $codexConfig; existed = $codexExisted }
+    cascadeur_settings = $configurationState.cascadeur_settings
+    codex_config = $configurationState.codex_config
 }
 New-Item -ItemType Directory -Path (Split-Path -Parent $TransactionManifest) -Force | Out-Null
-$manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $TransactionManifest -Encoding utf8
+Write-CascadeurInstallerJson $TransactionManifest $manifest
 Write-Output $backupRoot

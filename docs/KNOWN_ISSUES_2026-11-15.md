@@ -9,6 +9,26 @@
 
 **현재 최신 결과:** 이 머신의 Cascadeur `2026.2.3.0.16863`에서 v5 두 메시·세 프레임 setup 및 immutable-P0 기반 저장·새 탭 재로드·복원 저장이 실제 성공했다. 같은 새 runtime에서 위치 변경을 포함한 12단계 continuation도 실제 성공했다. Update 수집·Joint/identity bind·callback 안의 종속 채널 갱신과 native/Windows 경로 비교 결함을 수정했다. 아래 실패 기록은 각 시점의 이력이며 열한 open unknown은 종결하지 않았다. 성공 범위는 소유 유한 fixture다. unbaking·일반 rig·실패 후 조건부 recovery·전체 recipe/FBX consumer는 검증되지 않았다.
 
+### 후속 수정: 설치 transaction의 설정·ACL 복원
+
+성공한 hook 뒤 최종 identity 검사 등이 실패하면 source 설치의 outer catch가 code만 복원해 설정·Codex·ownership·DACL 변경을 남길 수 있었다. source/frozen 설치가 같은 설정 preimage와 effect journal을 사용하고, hook 내부 실패와 후속 설치 실패 모두 공통 metadata 복원을 호출하도록 수정했다. code와 metadata 복원은 독립적으로 시도하고 실패를 합산한다. hook 최종 identity 검사도 catch 안으로 이동했다.
+
+각 write 전 intent와 write 후 실제 postimage를 기록한다. 변경한 설정·Codex·ownership 파일은 postimage SHA256과 Win32 file ID가 모두 일치할 때만 원복·삭제한다. 미관측 write나 외부 변경은 파일과 backup을 보존하고 rollback incomplete를 명시한다. 원래 없던 state에 새 evidence가 있으면 해당 디렉터리와 제한 ACL을 유지한다. DACL은 원 SDDL과 exact 일치를 요구하며, Windows가 자동 상속의 AI control bit만 정규화한 경우에는 동일 ACE bytes·나머지 flag를 확인한 뒤 DACL만 원 descriptor로 복원한다.
+
+한정 검사 `test_shared_installer_transaction_restores_only_owned_metadata`는 **1 passed / 3.65 s / exit 0**이었다. 임시 USERPROFILE/LOCALAPPDATA에서 실제 공유 helper와 frozen `restore-existing.ps1` child를 실행해 DACL 변경·exact 복원, 기존 settings/Codex/ownership bytes 복원, 새 settings 제거, 설치가 건드리지 않은 Codex 파일 보존, store/runtime/state/snapshots/logs identity와 새 evidence 보존을 확인했다. code preimage 손상이 metadata 독립 복원을 막지 않는 것도 확인했다. 이 검사는 전체 Inno 설치·실제 Codex CLI 등록 검증이 아니다.
+
+또한 `-SkipCodexRegistration`에서도 실행하던 `codex mcp get`을 생략하도록 수정했다. 이전 설치의 최종 성공 JSON과 외부 wrapper exit 1이 함께 나온 경로에서, 없는 등록 조회의 native exit code가 남을 수 있는 결함이다. skip 경로는 전역 Codex 설정을 변경하거나 조회하지 않는다.
+
+수정 후 사용자 직접 종료 지시에 따라 실제 PID `3552`를 종료하고 이 머신에서 source 설치를 다시 실행했다. `scripts/install.ps1 -SkipCodexRegistration`는 staged/final MCP 검사와 실제 hooks를 거쳐 **exit 0**으로 끝났다. backup은 `20261116-191136-source-install`, ignored 로그는 `artifacts/native-r6/installer-metadata-fix-live-install.log`다. 원 runtime/state/snapshots/logs 네 디렉터리의 물리 ID와 policy 검사가 통과했고, Codex effect는 `started:false`, config bytes는 설치 전 SHA256과 같았다. 재실행한 Cascadeur PID `42920`의 창 handle과 pump(`busy:false`, `last_error:null`, `handlers_reloaded:0`)도 확인했다. 설치 후 incident inspect는 이전 `checkpoint-fixed-incidents-after.json`과 전체 JSON이 동일했다(exit 0). 열한 unknown·원 terminal·registry·journal을 유지했다. 이 성공 설치로 실제 실패 rollback이나 전체 frozen Inno 실행을 검증했다고 주장하지 않는다. native bridge bytes는 이번 후속 수정에서 바뀌지 않아 기존 실제 네 phase·12단계 결과를 재실행하지 않았다.
+
+### 후속 수정: SDK 수집 기본 경로와 실제 producer 관측
+
+제품 `scripts/collect_native_evidence.py`의 기본 경로가 다섯 모듈 모두 package `__init__.pyi`라고 가정해 실제 설치의 `csc/update.pyi`, `csc/model.pyi`를 놓쳤다. 첫 기본 수집은 missing 파일과 22개 missing symbol을 정직하게 반환했지만, 필요한 실제 graph/data 선언을 기본 명령으로 얻지 못하는 결함이었다. 확인한 설치 layout의 고정 다섯 파일로 수정했다. `--stub`의 명시적 다른 layout 선택과 비재귀·비실행·bytes 상한은 유지한다. 제안 원문은 수정하지 않았다.
+
+수정한 제품 수집기를 실제 설치의 다섯 stub와 기존 세 Python action source에 실행했다(exit 0). `Update`, `SceneUpdater`, graph/port ID, Data/DataViewer/BehaviourViewer 및 mesh/unbaking 관련 **요청 선언 29개 모두 발견**, missing 파일·심볼 0개다. ignored 결과 `artifacts/native-r6/installed-motion-sdk-and-action-sources-fixed.json`은 363,164 bytes, SHA256 `cc017c99474fa31d680eb2c36332bd44fb4dcdcd825d7974426385912c9ddd9f`다. 선택한 여덟 설치 파일의 현재 bytes와 수집 SHA256도 모두 일치했다. SDK나 설치 Python은 import/실행하지 않았다. 세 action ID의 등록은 선택 source에서 여전히 미발견이며, 이 결과를 native 완료·storage role·unbaking 자격으로 사용하지 않는다.
+
+최신 실제 setup 요청 `84699609-615b-43b4-bbd6-21b6adbebd34`의 제품 `read_producer_observation`도 원 signed 기록에서 host dispatch→PID `3552`의 creation/image identity→첫 효과→raw terminal 세 개의 archive 연결을 확인했다(exit 0). terminal SHA256은 `d26252ecc1fd7652d6a0c85eef0369646030163c2ffc466f3bb30e0e2e442f91`로 setup 원본과 같다. 읽기 결과는 ignored `artifacts/native-r6/checkpoint-fixed-producer-observation.json`에 보존했다. `scope_kind:observed_partial_v1`, `closure_authority:none`이며 전체 supervisor/resource/consumer closure나 원 unknown 종결을 발급하지 않았다.
+
 ### 추가 구현: immutable-P0 저장·재로드 경로
 
 owned-pair setup 완료 전에 checkpoint roundtrip을 연결했다. 실제 checkpoint executor의 P0 고정·두 native save·schema 2 manifest 등록을 공통 함수로 추출해 재사용하고, 기존 `_restore_native`가 같은 checkpoint 파일을 새 탭으로 실제 복사·로드·복원 저장한다. 네 phase(`checkpoint_save`, `working_save`, `project_load`, `restored_save`)를 처음 P0와 직접 비교한다. 각 phase의 새 Update graph/dtype/owner/producer 관측과 exact authored/unclassified 비교는 유지한다. setup의 실제 TLS 요청·invocation UUID·private admission을 확인하며 가짜 safety 요청이나 실패 요청·복구 permit을 만들지 않는다. 성공 후에만 clone lineage를 확정한다. 실제 loader가 반환한 tab wrapper는 phase 실패 시에도 retained 대상으로 추적하고, 무관한 새 탭을 소유 fixture로 분류하지 않는다.
