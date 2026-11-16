@@ -1,0 +1,400 @@
+diff --git a/packaging/upgrade-state.ps1 b/packaging/upgrade-state.ps1
+--- a/packaging/upgrade-state.ps1
++++ b/packaging/upgrade-state.ps1
+@@ -52,6 +52,139 @@
+         )
+     })
+     if ($busy.Count) { throw ('Close Cascadeur and the installed MCP before upgrading (PIDs: ' + (($busy | ForEach-Object ProcessId) -join ', ') + ').') }
++}
++
++function Get-CascadeurRuntimeCodeNames {
++    # These are the source installer and build-release.ps1 payload entries.
++    # Persistent state, user-added root files and Inno's own uninstall metadata
++    # are not runtime code owned by this transaction.
++    return @('.venv', 'src', 'inventory', 'support', '_internal',
++        'pyproject.toml', 'uv.lock', 'README.md', 'LICENSE',
++        'THIRD_PARTY_NOTICES.md', 'policy.default.json',
++        'bridge-package.json', 'cascadeur-complete.exe')
++}
++
++function Get-CascadeurRuntimeCodeEntries([string] $RuntimeRoot) {
++    if (-not (Test-Path -LiteralPath $RuntimeRoot)) { return }
++    $root = Get-Item -LiteralPath $RuntimeRoot -Force
++    if (-not $root.PSIsContainer -or ($root.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
++        throw 'The runtime must be a non-redirected directory.'
++    }
++    foreach ($name in (Get-CascadeurRuntimeCodeNames)) {
++        $path = Join-Path $RuntimeRoot $name
++        if (-not (Test-Path -LiteralPath $path)) { continue }
++        $entry = Get-Item -LiteralPath $path -Force
++        $tree = @($entry)
++        if ($entry.PSIsContainer) { $tree += @(Get-ChildItem -LiteralPath $path -Recurse -Force) }
++        if (@($tree | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
++            throw "Runtime code contains a redirected entry: $path"
++        }
++        $entry
++    }
++}
++
++function Backup-CascadeurRuntimeCode([string] $RuntimeRoot, [string] $BackupRoot) {
++    $runtime = [IO.Path]::GetFullPath($RuntimeRoot)
++    $codeBackup = Join-Path $BackupRoot 'runtime-code'
++    # Refuse to reuse another transaction's preimage, including timestamp collisions.
++    New-Item -ItemType Directory -Path $codeBackup -ErrorAction Stop | Out-Null
++    $entries = @(Get-CascadeurRuntimeCodeEntries $runtime)
++    $state = Join-Path $runtime 'state'
++    $stateExisted = Test-Path -LiteralPath $state
++    $stateSddl = $null
++    if ($stateExisted) {
++        $stateEntry = Get-Item -LiteralPath $state -Force
++        if (-not $stateEntry.PSIsContainer -or ($stateEntry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
++            throw 'The retained state directory must not be redirected.'
++        }
++        $stateSddl = (Get-Acl -LiteralPath $state).Sddl
++    }
++    $ownership = Join-Path $state 'install-ownership.json'
++    $ownershipExisted = Test-Path -LiteralPath $ownership
++    if ($ownershipExisted) {
++        $ownerEntry = Get-Item -LiteralPath $ownership -Force
++        if ($ownerEntry.PSIsContainer -or ($ownerEntry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
++            throw 'The installer ownership record must be a regular file.'
++        }
++        Copy-Item -LiteralPath $ownership -Destination (Join-Path $BackupRoot 'runtime-install-ownership.json')
++    }
++    foreach ($entry in $entries) {
++        Copy-Item -LiteralPath $entry.FullName -Destination $codeBackup -Recurse -Force
++    }
++    return [pscustomobject]@{
++        path = $runtime
++        existed = [bool](Test-Path -LiteralPath $runtime)
++        code_entries = @($entries | ForEach-Object Name)
++        state_existed = [bool]$stateExisted
++        state_acl_sddl = $stateSddl
++        ownership_existed = [bool]$ownershipExisted
++        policy_existed = [bool](Test-Path -LiteralPath (Join-Path $runtime 'policy.json'))
++    }
++}
++
++function Clear-CascadeurRuntimeCode([string] $RuntimeRoot) {
++    # Materialize the checked set before deleting the first code child.
++    $entries = @(Get-CascadeurRuntimeCodeEntries $RuntimeRoot)
++    foreach ($entry in $entries) {
++        Remove-Item -LiteralPath $entry.FullName -Recurse -Force
++    }
++}
++
++function Restore-CascadeurRuntimeCode([object] $RuntimeState, [string] $BackupRoot) {
++    $runtime = [IO.Path]::GetFullPath([string]$RuntimeState.path)
++    if ($RuntimeState.existed -and -not (Test-Path -LiteralPath $runtime -PathType Container)) {
++        throw 'The original runtime root is missing; do not recreate its authenticated identity.'
++    }
++    $codeBackup = Join-Path $BackupRoot 'runtime-code'
++    $names = @(Get-CascadeurRuntimeCodeNames)
++    foreach ($name in @($RuntimeState.code_entries)) {
++        if ($name -notin $names -or -not (Test-Path -LiteralPath (Join-Path $codeBackup $name))) {
++            throw "Runtime code preimage is missing or invalid: $name"
++        }
++    }
++    $ownershipBackup = Join-Path $BackupRoot 'runtime-install-ownership.json'
++    if ($RuntimeState.ownership_existed -and -not (Test-Path -LiteralPath $ownershipBackup -PathType Leaf)) {
++        throw 'Installer ownership preimage is missing.'
++    }
++    $state = Join-Path $runtime 'state'
++    if ($RuntimeState.state_existed -and -not (Test-Path -LiteralPath $state -PathType Container)) {
++        throw 'The original state directory is missing; retained state cannot be reconstructed from code backup.'
++    }
++    # Only remove an initial policy if it still equals the default this install
++    # supplied. A pre-existing or subsequently edited policy is always retained.
++    $policy = Join-Path $runtime 'policy.json'
++    $defaultPolicy = Join-Path $runtime 'policy.default.json'
++    $removeInitialPolicy = -not $RuntimeState.policy_existed -and
++        (Test-Path -LiteralPath $policy -PathType Leaf) -and
++        (Test-Path -LiteralPath $defaultPolicy -PathType Leaf) -and
++        ((Get-FileHash -LiteralPath $policy -Algorithm SHA256).Hash -eq
++         (Get-FileHash -LiteralPath $defaultPolicy -Algorithm SHA256).Hash)
++    Clear-CascadeurRuntimeCode $runtime
++    New-Item -ItemType Directory -Path $runtime -Force | Out-Null
++    foreach ($name in @($RuntimeState.code_entries)) {
++        Copy-Item -LiteralPath (Join-Path $codeBackup $name) -Destination $runtime -Recurse -Force
++    }
++    $ownership = Join-Path $state 'install-ownership.json'
++    if ($RuntimeState.ownership_existed) {
++        Copy-Item -LiteralPath $ownershipBackup -Destination $ownership -Force
++    } elseif (Test-Path -LiteralPath $ownership) {
++        Remove-Item -LiteralPath $ownership -Force
++    }
++    if ($RuntimeState.state_existed) {
++        $acl = Get-Acl -LiteralPath $state
++        $acl.SetSecurityDescriptorSddlForm([string]$RuntimeState.state_acl_sddl,
++            [Security.AccessControl.AccessControlSections]::Access)
++        Set-Acl -LiteralPath $state -AclObject $acl
++    } elseif ((Test-Path -LiteralPath $state -PathType Container) -and
++              @(Get-ChildItem -LiteralPath $state -Force).Count -eq 0) {
++        Remove-Item -LiteralPath $state
++    }
++    if ($removeInitialPolicy) { Remove-Item -LiteralPath $policy -Force }
++    # A fresh install may leave new evidence or user data behind. Remove only
++    # an empty root we created; never delete an existing authenticated root.
++    if (-not $RuntimeState.existed -and @(Get-ChildItem -LiteralPath $runtime -Force).Count -eq 0) {
++        Remove-Item -LiteralPath $runtime
++    }
+ }
+ 
+ function Copy-CascadeurPersistentState([string] $PreviousRuntime, [string] $NextRuntime) {
+diff --git a/packaging/backup-existing.ps1 b/packaging/backup-existing.ps1
+--- a/packaging/backup-existing.ps1
++++ b/packaging/backup-existing.ps1
+@@ -16,8 +16,8 @@
+ if ((Test-Path -LiteralPath $RuntimeRoot) -and -not (Test-Path -LiteralPath $runtimeOwnership)) {
+     throw 'An unmanaged Cascadeur MCP runtime already exists at the install target. Back it up and remove it before installing.'
+ }
+-$targets = [ordered]@{ runtime = $RuntimeRoot; bridge = $BridgeRoot; events = $EventsRoot }
+-$targetState = [ordered]@{}
++$targets = [ordered]@{ bridge = $BridgeRoot; events = $EventsRoot }
++$targetState = [ordered]@{ runtime = (Backup-CascadeurRuntimeCode $RuntimeRoot $backupRoot) }
+ foreach ($entry in $targets.GetEnumerator()) {
+     $source = [IO.Path]::GetFullPath([string]$entry.Value)
+     $exists = Test-Path -LiteralPath $source
+@@ -37,7 +37,8 @@
+     Copy-Item -LiteralPath $codexConfig -Destination (Join-Path $backupRoot 'codex-config.toml')
+ }
+ $manifest = [ordered]@{
+-    schema = 1
++    schema = 2
++    runtime_mode = 'code-in-place'
+     backup_root = $backupRoot
+     targets = $targetState
+     cascadeur_settings = [pscustomobject]@{ path = $settings; existed = $settingsExisted }
+diff --git a/packaging/restore-existing.ps1 b/packaging/restore-existing.ps1
+--- a/packaging/restore-existing.ps1
++++ b/packaging/restore-existing.ps1
+@@ -2,17 +2,23 @@
+ param([Parameter(Mandatory)] [string] $TransactionManifest)
+ 
+ $ErrorActionPreference = 'Stop'
++. (Join-Path $PSScriptRoot 'upgrade-state.ps1')
+ if (-not (Test-Path -LiteralPath $TransactionManifest)) {
+     throw "Installation transaction manifest is missing: $TransactionManifest"
+ }
+ $manifest = Get-Content -LiteralPath $TransactionManifest -Raw | ConvertFrom-Json
++if ($manifest.schema -ne 2 -or $manifest.runtime_mode -ne 'code-in-place') {
++    throw 'This restore requires a schema-2 code-in-place transaction; legacy whole-root backups must not replace authenticated state.'
++}
+ $backupRoot = [IO.Path]::GetFullPath([string]$manifest.backup_root)
+-$allowedRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'CascadeurMCP\backups'))
++$allowedRoot = [IO.Path]::GetFullPath((Join-Path (Get-CascadeurLocalAppData) 'CascadeurMCP\backups'))
+ if (-not $backupRoot.StartsWith($allowedRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+     throw "Refusing to restore from an unexpected backup root: $backupRoot"
+ }
+ 
+-foreach ($name in @('runtime', 'bridge', 'events')) {
++Restore-CascadeurRuntimeCode $manifest.targets.runtime $backupRoot
++
++foreach ($name in @('bridge', 'events')) {
+     $entry = $manifest.targets.$name
+     $target = [IO.Path]::GetFullPath([string]$entry.path)
+     if (Test-Path -LiteralPath $target) {
+diff --git a/packaging/install-hooks.ps1 b/packaging/install-hooks.ps1
+--- a/packaging/install-hooks.ps1
++++ b/packaging/install-hooks.ps1
+@@ -10,8 +10,8 @@
+ . (Join-Path $PSScriptRoot 'upgrade-state.ps1')
+ $InstallLocalAppData = Get-CascadeurLocalAppData
+ Assert-CascadeurUpgradeIdle $RuntimeRoot
+-# Source installation already migrated the final old runtime before activation.
+-# The frozen installer keeps persistent directories and policy in place. Never
++# Both installers keep the runtime root, persistent directories and policy in place.
++# Their schema-2 transaction restores code and installer ownership on failure. Never
+ # merge a historical backup here: it can resurrect deleted tokens/claims or
+ # conflict with newer state. Backups are for explicit transaction rollback only.
+ $BackupRoot = Join-Path $InstallLocalAppData ('CascadeurMCP\backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-installer')
+@@ -34,6 +34,9 @@
+     Get-Content -LiteralPath $TransactionManifest -Raw | ConvertFrom-Json
+ } else { $null }
+ $NeedsTransactionMigration = $ActiveOwnership -and $IncomingTransaction -and -not $ExistingOwnership.transaction_manifest
++$SettingsExisted = Test-Path -LiteralPath $SettingsPath
++$CodexConfigExisted = Test-Path -LiteralPath $CodexConfig
++$CodexConfigTouched = $false
+ $CurrentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+ & icacls.exe $StateRoot /inheritance:r /grant:r "${CurrentIdentity}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+ if ($LASTEXITCODE -ne 0) { throw 'Unable to restrict the MCP state directory ACL' }
+@@ -46,7 +49,9 @@
+     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $SettingsPath -Encoding utf8
+ }
+ if (Test-Path -LiteralPath $SettingsPath) {
+-    Copy-Item -LiteralPath $SettingsPath -Destination (Join-Path $BackupRoot 'cascadeur-settings.json')
++    if ($SettingsExisted) {
++        Copy-Item -LiteralPath $SettingsPath -Destination (Join-Path $BackupRoot 'cascadeur-settings.json')
++    }
+     $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+     if ($null -eq $settings.PSObject.Properties['Python']) {
+         $settings | Add-Member -NotePropertyName Python -NotePropertyValue ([pscustomobject]@{})
+@@ -108,7 +113,11 @@
+     } else {
+         $ExistingOwnership.installed = $true
+     }
+-    $ExistingOwnership.transaction_manifest = $IncomingTransaction
++    if ($null -eq $ExistingOwnership.PSObject.Properties['transaction_manifest']) {
++        $ExistingOwnership | Add-Member -NotePropertyName transaction_manifest -NotePropertyValue $IncomingTransaction
++    } else {
++        $ExistingOwnership.transaction_manifest = $IncomingTransaction
++    }
+     $ExistingOwnership | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $OwnershipPath -Encoding utf8
+ }
+ 
+@@ -134,6 +143,7 @@
+     if ($previousCodex -and -not $ActiveOwnership) {
+         throw 'A pre-existing Codex MCP named cascadeur-complete is already registered. Remove or rename it before installing.'
+     }
++    $CodexConfigTouched = $true
+     & codex mcp remove cascadeur-complete 2>$null | Out-Null
+     & codex mcp add cascadeur-complete -- $executable | Out-Null
+     if ($LASTEXITCODE -ne 0) { throw 'Codex MCP registration failed' }
+@@ -147,11 +157,17 @@
+     $ownership | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $OwnershipPath -Encoding utf8
+ }
+ } catch {
+-    if (Test-Path -LiteralPath (Join-Path $BackupRoot 'cascadeur-settings.json')) {
++    if ($SettingsExisted -and (Test-Path -LiteralPath (Join-Path $BackupRoot 'cascadeur-settings.json'))) {
+         Copy-Item -LiteralPath (Join-Path $BackupRoot 'cascadeur-settings.json') -Destination $SettingsPath -Force
++    } elseif (-not $SettingsExisted -and (Test-Path -LiteralPath $SettingsPath)) {
++        Remove-Item -LiteralPath $SettingsPath -Force
+     }
+-    if (Test-Path -LiteralPath (Join-Path $BackupRoot 'codex-config.toml')) {
+-        Copy-Item -LiteralPath (Join-Path $BackupRoot 'codex-config.toml') -Destination $CodexConfig -Force
++    if ($CodexConfigTouched) {
++        if ($CodexConfigExisted -and (Test-Path -LiteralPath (Join-Path $BackupRoot 'codex-config.toml'))) {
++            Copy-Item -LiteralPath (Join-Path $BackupRoot 'codex-config.toml') -Destination $CodexConfig -Force
++        } elseif (-not $CodexConfigExisted -and (Test-Path -LiteralPath $CodexConfig)) {
++            Remove-Item -LiteralPath $CodexConfig -Force
++        }
+     }
+     throw
+ }
+diff --git a/scripts/install.ps1 b/scripts/install.ps1
+--- a/scripts/install.ps1
++++ b/scripts/install.ps1
+@@ -29,6 +29,8 @@
+ $activatedTargets = [System.Collections.Generic.List[string]]::new()
+ $targetState = [ordered]@{}
+ $maintenanceLease = $null
++$runtimeState = $null
++$runtimeActivationStarted = $false
+ try {
+     New-Item -ItemType Directory -Path $StageRuntime, $StageBridge, $StageEvents, $BackupRoot -Force | Out-Null
+     foreach ($name in @('pyproject.toml', 'uv.lock', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'policy.default.json')) {
+@@ -39,9 +41,8 @@
+     }
+     Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete\*') -Destination $StageBridge -Recurse -Force
+     Copy-Item -Path (Join-Path $ProjectRoot 'cascadeur_side\cascadeur_complete_events\*') -Destination $StageEvents -Recurse -Force
+-    # Dependency preparation must not take an early snapshot of mutable state.
+-    # The authoritative state is copied from the final pre-activation backup below,
+-    # before any incoming runtime imports can create replacement authentication keys.
++    # Dependency preparation and both smoke calls use disposable state roots.
++    # Existing authenticated state stays at its original physical runtime root.
+ 
+     Push-Location $StageRuntime
+     try {
+@@ -68,42 +69,51 @@
+     # recreate the environment after the runtime directory reaches its final path.
+     Remove-Item -LiteralPath (Join-Path $StageRuntime '.venv') -Recurse -Force
+ 
+-    # Staging above uses a disposable root. From this final idle check through
+-    # activation, hooks and rollback, block new installed runtime readers and
+-    # competing installers at the stable sibling gate, not the moved runtime.
++    # Hold the existing sibling lease across code activation, hooks and rollback.
++    # Never move/delete the runtime root or its persistent directories.
+     $maintenanceLease = Enter-CascadeurMaintenanceLease $RuntimeRoot
+     Assert-CascadeurUpgradeIdle $RuntimeRoot
++    $runtimeState = Backup-CascadeurRuntimeCode $RuntimeRoot $BackupRoot
++    $targetState['runtime'] = $runtimeState
+     foreach ($pair in @(
+-        [pscustomobject]@{ Target = $RuntimeRoot; Stage = $StageRuntime; BackupName = 'runtime' },
+-        [pscustomobject]@{ Target = $BridgeRoot; Stage = $StageBridge; BackupName = 'bridge' },
+-        [pscustomobject]@{ Target = $EventsRoot; Stage = $StageEvents; BackupName = 'events' }
++        [pscustomobject]@{ Target = $BridgeRoot; BackupName = 'bridge' },
++        [pscustomobject]@{ Target = $EventsRoot; BackupName = 'events' }
+     )) {
+         $targetState[$pair.BackupName] = [pscustomobject]@{
+             path = [IO.Path]::GetFullPath($pair.Target)
+             existed = [bool](Test-Path -LiteralPath $pair.Target)
+         }
++    }
++    [ordered]@{
++        schema = 2
++        runtime_mode = 'code-in-place'
++        backup_root = $BackupRoot
++        targets = $targetState
++    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $TransactionManifest -Encoding utf8
++
++    $runtimeActivationStarted = $true
++    Clear-CascadeurRuntimeCode $RuntimeRoot
++    New-Item -ItemType Directory -Path $RuntimeRoot -Force | Out-Null
++    foreach ($entry in @(Get-CascadeurRuntimeCodeEntries $StageRuntime)) {
++        Move-Item -LiteralPath $entry.FullName -Destination $RuntimeRoot
++    }
++    if (-not (Test-Path -LiteralPath (Join-Path $RuntimeRoot 'policy.json'))) {
++        Copy-Item -LiteralPath (Join-Path $RuntimeRoot 'policy.default.json') -Destination (Join-Path $RuntimeRoot 'policy.json')
++    }
++    Assert-CascadeurUpgradeIdle $RuntimeRoot
++    foreach ($pair in @(
++        [pscustomobject]@{ Target = $BridgeRoot; Stage = $StageBridge; BackupName = 'bridge' },
++        [pscustomobject]@{ Target = $EventsRoot; Stage = $StageEvents; BackupName = 'events' }
++    )) {
+         New-Item -ItemType Directory -Path (Split-Path -Parent $pair.Target) -Force | Out-Null
+         if (Test-Path -LiteralPath $pair.Target) {
+             $backup = Join-Path $BackupRoot $pair.BackupName
+             Move-Item -LiteralPath $pair.Target -Destination $backup
+             $movedOld.Add([pscustomobject]@{ Target = $pair.Target; Backup = $backup })
+         }
+-        if ($pair.BackupName -eq 'runtime') {
+-            Copy-CascadeurPersistentState (Join-Path $BackupRoot 'runtime') $StageRuntime
+-            if (-not (Test-Path -LiteralPath (Join-Path $StageRuntime 'policy.json'))) {
+-                Copy-Item -LiteralPath (Join-Path $ProjectRoot 'policy.default.json') -Destination (Join-Path $StageRuntime 'policy.json')
+-            }
+-            Assert-CascadeurUpgradeIdle $RuntimeRoot
+-        }
+         Move-Item -LiteralPath $pair.Stage -Destination $pair.Target
+         $activatedTargets.Add($pair.Target)
+     }
+-
+-    [ordered]@{
+-        schema = 1
+-        backup_root = $BackupRoot
+-        targets = $targetState
+-    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $TransactionManifest -Encoding utf8
+ 
+     & uv sync --project $RuntimeRoot --frozen
+     if ($LASTEXITCODE -ne 0) { throw 'Final-path dependency installation failed' }
+@@ -123,13 +133,28 @@
+     & (Join-Path $ProjectRoot 'packaging\install-hooks.ps1') -RuntimeRoot $RuntimeRoot `
+         -TransactionManifest $TransactionManifest -SkipCodexRegistration:$SkipCodexRegistration
+ } catch {
++    $installFailure = $_
++    $rollbackFailures = [System.Collections.Generic.List[string]]::new()
+     foreach ($target in $activatedTargets) {
+-        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
++        try {
++            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
++        } catch { $rollbackFailures.Add($_.Exception.Message) }
+     }
+     foreach ($item in $movedOld) {
+-        if (Test-Path -LiteralPath $item.Backup) { Move-Item -LiteralPath $item.Backup -Destination $item.Target }
++        try {
++            if (Test-Path -LiteralPath $item.Target) { throw "Rollback target is still occupied: $($item.Target)" }
++            if (Test-Path -LiteralPath $item.Backup) { Move-Item -LiteralPath $item.Backup -Destination $item.Target }
++            else { throw "Rollback backup is missing: $($item.Backup)" }
++        } catch { $rollbackFailures.Add($_.Exception.Message) }
+     }
+-    throw
++    if ($runtimeActivationStarted) {
++        try { Restore-CascadeurRuntimeCode $runtimeState $BackupRoot }
++        catch { $rollbackFailures.Add($_.Exception.Message) }
++    }
++    if ($rollbackFailures.Count) {
++        throw "Installation failed: $($installFailure.Exception.Message). Rollback incomplete; retain ${BackupRoot}. $($rollbackFailures -join '; ')"
++    }
++    throw $installFailure
+ } finally {
+     try {
+         if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }

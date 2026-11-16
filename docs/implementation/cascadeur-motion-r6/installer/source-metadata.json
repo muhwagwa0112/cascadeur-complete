@@ -1,0 +1,105 @@
+{
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "base_commit": "7f1565a0ffad1595b9824cba25443bc581997fb6",
+  "artifact_kind": "unapplied-proposal",
+  "patch": "installer-runtime-identity.patch",
+  "patch_sha256": "384cce183e48840ba2a885212a92f34a8b5f87cb4df33e32fed973786b48248d",
+  "manifest_change": {
+    "schema": 2,
+    "runtime_mode": "code-in-place",
+    "status": "proposed approval required before product application"
+  },
+  "checks": "No installer, product script, tests, build or CI executed. Parent performs one combined static patch-context check. PowerShell parser and Windows physical identity remain unverified.",
+  "sources": [
+    {
+      "path": "scripts/install.ps1",
+      "git_blob_sha": "0c2afddce3d8a795e2f8b8363929434b51902103",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/scripts/install.ps1",
+      "sha256": "a730557919b4e82ad1a59125d8fe57dd1aca471901c0f281abd221cad5350523",
+      "bytes": 8031,
+      "modified_in_proposal": true,
+      "proposal_sha256": "77acc16612d805ad04773a72be875f833812b76a6dbf1a2cd700f4e660f064bc",
+      "proposal_path": "proposed_sources/scripts/install.ps1"
+    },
+    {
+      "path": "packaging/upgrade-state.ps1",
+      "git_blob_sha": "3fee13b757072069d02039a02cd7fd59fb188db7",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/packaging/upgrade-state.ps1",
+      "sha256": "9b54c2194d629012757ba6f238e8f3e30f1b744ef3d527f1b1c4bb6a04a58487",
+      "bytes": 6213,
+      "modified_in_proposal": true,
+      "proposal_sha256": "ffc71d6c1192d365388c5693063a1c3ef5e9109be6b542b633bef50cde80dde5",
+      "proposal_path": "proposed_sources/packaging/upgrade-state.ps1"
+    },
+    {
+      "path": "packaging/install-hooks.ps1",
+      "git_blob_sha": "3a2a4fb696aa8daaaee9375562f05f6d89dfb74d",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/packaging/install-hooks.ps1",
+      "sha256": "f7820eb4744a1484dd9d4e037d148106e86d66c53ba5afd4a9da61d77a0026a6",
+      "bytes": 8729,
+      "modified_in_proposal": true,
+      "proposal_sha256": "b50360cc4290828063e1f30de95088da5d0c8fbb72cfafba17662f41a901138e",
+      "proposal_path": "proposed_sources/packaging/install-hooks.ps1"
+    },
+    {
+      "path": "packaging/backup-existing.ps1",
+      "git_blob_sha": "a307966381c74da8c9b42ecdac9fa7d8f3ecbb2d",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/packaging/backup-existing.ps1",
+      "sha256": "e741ab70f3a2ae67eca3431eecba9619b45e2cc9ebf22cd09b887739fcf204b6",
+      "bytes": 2375,
+      "modified_in_proposal": true,
+      "proposal_sha256": "3d43e73e65c98a349bb998dba5b59046d82e091a18cf936984b90af379007e9c",
+      "proposal_path": "proposed_sources/packaging/backup-existing.ps1"
+    },
+    {
+      "path": "packaging/restore-existing.ps1",
+      "git_blob_sha": "06328342ab3b77cea35d7c3b0db04a0cbec54284",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/packaging/restore-existing.ps1",
+      "sha256": "c9f293ac2e0db63cd4b9b0a7628933b0f02c8a3f94c7a11a7afbedf4af8ef9ee",
+      "bytes": 1949,
+      "modified_in_proposal": true,
+      "proposal_sha256": "b3437785d1a717f6ae2f4ec8ef667aa7ece930e78cea573312cc3c3a5df38d93",
+      "proposal_path": "proposed_sources/packaging/restore-existing.ps1"
+    },
+    {
+      "path": "packaging/uninstall-hooks.ps1",
+      "git_blob_sha": "afc4286ef2aafef9825e0141aec95de11a1d553e",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/packaging/uninstall-hooks.ps1",
+      "sha256": "cb689d7d74b1e49432ccfb252834b871942fd230a51ddde683a3228fdac3e8b7",
+      "bytes": 2285,
+      "modified_in_proposal": false
+    },
+    {
+      "path": "packaging/post-uninstall-restore.ps1",
+      "git_blob_sha": "75593816a68709500d96516bf126c52b2f9e103e",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/packaging/post-uninstall-restore.ps1",
+      "sha256": "30d290ad8d1e6c7df4290c0d588fc88b55891ba1d616594b94591b76e9b9f548",
+      "bytes": 2774,
+      "modified_in_proposal": false
+    },
+    {
+      "path": "installer/cascadeur-mcp.iss",
+      "git_blob_sha": "da28f463dbd82c898ecef274cf36a39e98c2cee6",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/installer/cascadeur-mcp.iss",
+      "sha256": "4ec907d9a548c9855f6624a8a9f67ac47141895a910897135fa19fdfa5299ad3",
+      "bytes": 9666,
+      "modified_in_proposal": false
+    },
+    {
+      "path": "scripts/build-release.ps1",
+      "git_blob_sha": "5249a7169d142ed7849bba0a4310dd22dd97331f",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/scripts/build-release.ps1",
+      "sha256": "49066fbab1954c3375c2f8ecfc60d8c0de9fcacbdd32df160ced21ce82e275a6",
+      "bytes": 10893,
+      "modified_in_proposal": false
+    },
+    {
+      "path": "packaging/finalize_sbom.py",
+      "git_blob_sha": "edfae38d2cecf7b3f269c65154613615ff9011ca",
+      "source_url": "https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/packaging/finalize_sbom.py",
+      "sha256": "4cce74da445f1129985a9616f2862a0e8e0d818ad038fd3dd86f13a25b3008c7",
+      "bytes": 2540,
+      "modified_in_proposal": false
+    }
+  ]
+}

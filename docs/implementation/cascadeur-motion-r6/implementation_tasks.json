@@ -1,0 +1,77 @@
+{
+  "base_commit": "7f1565a0ffad1595b9824cba25443bc581997fb6",
+  "kind": "proposed_implementation_tasks",
+  "tasks": [
+    {
+      "id": "R6-01",
+      "title": "runtime identity를 유지하는 설치 및 rollback",
+      "artifact_directory": "installer",
+      "deliverable": "source install과 frozen rollback의 실제 unified diff 및 고정 기준 source 메타데이터",
+      "depends_on": [],
+      "result": "기존 runtime/state/snapshots 디렉터리, 원 key/marker/journal을 유지하면서 새 코드 교체 또는 이전 코드 복구",
+      "direct_validation_when_applied": ["enrolled root에서 정상 설치 전후 물리 ID와 원 incident 바이트 보존", "hook 실패 한 지점에서 code 및 installer ownership/ACL rollback", "첫 설치 경로"],
+      "execution_here": "preparation_only"
+    },
+    {
+      "id": "R6-02",
+      "title": "설치 SDK의 실제 선언 수집",
+      "artifact_directory": "tools",
+      "deliverable": "명시한 .pyi의 선언 원문, SHA256 및 행 번호만 추출하는 standalone Python",
+      "depends_on": [],
+      "result": "geometry/serialization/unbaking의 미확인 API leaf에 필요한 정확한 타입 근거",
+      "direct_validation_when_applied": ["명시한 설치 .pyi와 선택한 심볼의 출력 대조"],
+      "execution_here": "user_sdk_not_available"
+    },
+    {
+      "id": "R6-03",
+      "title": "원 unknown을 보존하는 대상별 legacy 재개",
+      "artifact_directory": "incident",
+      "deliverable": "두 legacy 건의 한정된 operator 수용 경로와 별도 독립 target 관측 경로의 발급/소비 참조 코드",
+      "depends_on": ["R6-01"],
+      "result": "원 사건을 미확정으로 유지하고 선택한 정책의 한정된 새 작업만 허용; 위험 수용을 격리 증명으로 표시하지 않음",
+      "direct_validation_when_applied": ["원 terminal/head 보존과 원 request 재실행 거절", "다른 target/epoch/baseline/channels로 증거 재사용 거절", "확인된 target의 승인된 새 요청 진행"],
+      "requires_design_decision": ["한정된 수동 위험 수용 또는 실제 독립 target 중 운영 정책 선택", "독립 target을 선택할 때 supervisor/환경의 실제 가용성", "정책/registry/evidence 형식 변경", "baseline과 파일 반입 범위"],
+      "execution_here": "os_backend_not_executed"
+    },
+    {
+      "id": "R6-04",
+      "title": "새 실행의 producer 및 종료 증거 생산",
+      "artifact_directory": "incident",
+      "deliverable": "launch/dispatch/완료 또는 종료 시점의 durable 기록과 재시작 관측 연결",
+      "depends_on": ["R6-03"],
+      "result": "관리되는 새 실행에서 원 process/domain/resource 사실을 실행 전 확보하고 미래 장애에 재사용",
+      "direct_validation_when_applied": ["실행 시작 기록과 operation/result 연결", "원 attempt 손실 시 중복 실행 없이 관측 재개", "새 프로세스의 성공을 원 결과에 대입하지 않음"],
+      "execution_here": "managed_native_launch_not_executed"
+    },
+    {
+      "id": "R6-05",
+      "title": "실제 finite geometry contract 발급 및 capture 연결",
+      "artifact_directory": "motion",
+      "deliverable": "소유 fixture의 실제 관측을 소비하는 contract initializer/registry/consumer 참조 코드와 source 연결 위치",
+      "depends_on": ["R6-02", "R6-03"],
+      "result": "지원하는 mesh 범위에서 원 mutation successor와 evaluation/capture를 결합; pair 품질 경로와 single-mesh 전제 관측을 구분",
+      "direct_validation_when_applied": ["한정된 실제 fixture의 좌표/transform/계산 완료", "source 또는 dependency 변경 시 기존 자격 재사용 거절", "원 mutation부터 capture까지 동일 상태 연결"],
+      "execution_here": "native_geometry_not_executed"
+    },
+    {
+      "id": "R6-06",
+      "title": "현재 graph 관측 기반 serialization policy 발급",
+      "artifact_directory": "motion",
+      "deliverable": "Update 관측→역할 분류→private policy 등록→불변 P0 비교 참조 코드 및 설치 SDK 연결 지점",
+      "depends_on": ["R6-02", "R6-03"],
+      "result": "authored/unclassified exact 보존, 확인된 derived 필드만 제한된 오차 허용, 각 사용 시 graph 현재성 확인",
+      "direct_validation_when_applied": ["실제 저장/로드 한 경로의 원 P0 비교", "graph-only 변경 또는 authored 값 변경 거절", "정확한 derived 차이만 제한 정책으로 처리"],
+      "execution_here": "native_field_roles_not_qualified"
+    },
+    {
+      "id": "R6-07",
+      "title": "세 unbaking 단계의 실제 native leaf 연결",
+      "artifact_directory": "motion",
+      "deliverable": "설치 binding/argument lowering/완료 관측의 정확한 입력과 구현 위치를 지정한 native work item",
+      "depends_on": ["R6-02", "R6-03"],
+      "result": "prepare_keys_by_fulcrums, adjust_keys_and_interpolation, adjust_autoposing_lock_state 각각의 실제 완료를 확인한 뒤 등록",
+      "direct_validation_when_applied": ["확인된 한 leaf의 승인 범위/키 상한 및 완료 관측", "미완료 action을 성공으로 기록하지 않음"],
+      "execution_here": "installed_callable_and_completion_evidence_missing"
+    }
+  ]
+}
