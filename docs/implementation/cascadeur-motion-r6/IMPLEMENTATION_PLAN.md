@@ -8,6 +8,21 @@ commit한 것과 제품에 패치를 적용한 것, 사용자 Windows에서 실�
 제품 코드 직접 적용, 앱 종료/설치/재시작, incident 상태 전환은 이번 배포에 포함하지 않는다.
 원 두 요청의 terminal과 키를 변경하지 않는다.
 
+## R6 후속 추가: 참조 구현에서 제품 호출부로
+
+`integration/`에 실제 host/native 호출부의 적용 제안과 통합 patch를 추가했다.
+적용 대상의 기준은 위 `7f1565a`이며, docs branch에 push된 자료를 자동으로 제품에
+적용한 상태는 아니다. `integration/README.md`에서 최종 통합 소스와 적용 순서를 확인한다.
+
+수동 재개의 metadata draft→로컬 승인→signed outbox→native admission, 소유 pair의
+setup/ownership과 현재 요청 runner, mutation terminal→evaluation→geometry capture,
+동일 P0 기반 serialization 호출을 연결하는 코드가 포함된다. 설치 SDK의 실제 graph/data
+추출과 unbaking binding·완료 경계는 검증되지 않은 SDK 함수를 만들어 채우지 않는다.
+해당 입력은 `tools/collect_native_evidence.py`의 단일 수집 명령으로 얻을 수 있도록 했다.
+
+최초 23개 파일의 참조 상태와 후속 통합 상태를 혼동하지 않도록, 아래 원 설계와
+`integration/`의 제품 대상 소스를 함께 보되 실제 적용에는 최종 통합 patch를 사용한다.
+
 ## 이번에 고치는 설계 공백
 
 R5에서 admission·보존·비교·거절 경로가 구현됐다. 현재 중단을 해결하려면 그 경로가

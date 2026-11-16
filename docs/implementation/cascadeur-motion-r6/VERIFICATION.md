@@ -47,3 +47,35 @@ PowerShell·Windows·SDK의 실동작이나 native completion을 대신하지 �
 제품 경로에 patch를 적용하거나 기존 원 request/receipt/key/incident를 변경한 commit이 아니다.
 실제 원격 commit·branch 및 파일 일치 확인은 푸시 완료 응답에 기록한다. 이 문서 작성 시점에
 아직 없는 commit SHA나 실앱 실행 결과를 미리 기입하지 않는다.
+
+## 후속 제품 호출부 통합 확인 — 2026-11-16
+
+앞 절은 최초 23개 준비물의 확인 기록이다. 이번 후속 확인은 추가·변경 파일과 새 통합
+patch만 대상으로 했다. 최초 설치 patch나 이미 통과한 변경 없는 Python 파일은 다시 검사하지 않았다.
+
+| 확인 | 명령·방법 | 결과 |
+|---|---|---|
+| 추가·변경 Python | `ast.parse(..., feature_version=(3, 11))` 후 `compile(tree, path, "exec", dont_inherit=True)` | **39개 파일 통과**. 동일 bytes는 한 번만 컴파일하여 실제 서로 다른 내용은 **28개**. 코드를 실행하거나 제품 모듈을 import하지 않음. |
+| 추가·변경 JSON | `json.loads(...)` | **5개 통과**. task 7개의 ID·의존 관계·추가 artifact 경로도 일치. |
+| 통합 patch 문맥 | `git apply --check /workspace/scratch/fc42dd265c37/cascadeur-r6-code-ready/integration/product-integration.patch` | pinned source 임시 사본에서 **exit 0**, 출력 없음. 실제 제품 적용은 하지 않음. |
+| 기준 source | 원 Git tree blob과 통합 대상 원본 bytes 비교 | 기존 제품 source **20개 일치**. 추가 제품 target 9개는 기준 tree에 없음. |
+| 최종 proposed source | `integration/source-metadata.json`의 SHA256/Git blob과 최종 bytes 비교 | **29개 target 일치**. recovery/motion 중복 4개는 3-way 병합. |
+| host/native mirror | 최종 target bytes 비교 | admission, effects, manual_setup, pair_continuation, policy, setup **6종 일치**. |
+
+위 Python 환경은 **3.12.14**, 구문 대상은 **3.11**이다. 통합 patch의 SHA256은 다음과 같다.
+
+```text
+3fcb36db838969fec171b69cc84a54c7a026b0064e58e4663a034584c8a25453
+```
+
+두 코드 영역의 연결 검토는 새 manual setup의 승인/잠금/원 요청 재사용과 새 finite
+continuation의 실제 선행 receipt·source·confirmation 전달, native activation과 mutation
+terminal 연결에 한정했다. 새 SDK leaf가 없을 때 setup dispatcher가 먼저 디렉터리를
+만들고 unknown을 남길 수 있는 호출 순서를 확인해, 인증된 setup의 정적 dependency
+거절을 claim/dispatch 이전으로 옮겼다. 이 검토는 실행 테스트 결과가 아니다.
+
+**미실행:** 제품 patch 적용, 제품 import, pytest, 전체 테스트·빌드·E2E·CI(**L4 미실행**),
+수집기의 실제 설치 SDK 실행, 로컬 승인 발급, Windows 설치/복구, native pair setup과
+10/12단계 continuation, serialization save/load, unbaking, 일반 rig 품질·consumer 납품.
+필수 `native_installed_update_facts.py`의 실제 구현은 이번 packet에 포함되지 않으며,
+구문/patch 통과가 그 native 동작을 대신하지 않는다.

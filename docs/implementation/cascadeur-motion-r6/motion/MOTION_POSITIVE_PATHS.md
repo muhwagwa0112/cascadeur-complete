@@ -28,7 +28,7 @@
 | [native_checkpoint_restore.py](https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/cascadeur_side/cascadeur_complete/native_checkpoint_restore.py#L326-L385) | `ce6d491e217fd1667a9bdf406415045a459485ac` | `_CHECKPOINTS`, `remember_checkpoint`, `_restore_native`, `_original_terminal` |
 | [native_project_io.py](https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/cascadeur_side/cascadeur_complete/native_project_io.py#L129-L245) | `633fd626dd08622150e4d4a9e31e86ccbb0a7225` | `load_project_copy`의 실제 return `(target, observation)` |
 
-설치 SDK의 `Update.root_group()` 및 dtype/producer graph가 Update callback에서만 보인다는 내용은 [현재 memo](https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/docs/KNOWN_ISSUES_2026-11-15.md#L22)의 설치 조사 보고다. 이번에는 설치를 열거나 SDK를 실행하지 않았다. `Scene.modify_update` → `updater.get_interpolator().reload()/interpolate()` 호출은 위 현재 source에서 직접 확인했다. dtype/graph edge getter 이름은 확인하지 못했으므로 코드에 만들어 넣지 않았다.
+dtype/producer graph가 Update callback에서만 보인다는 내용은 [현재 memo](https://github.com/muhwagwa0112/cascadeur-complete/blob/7f1565a0ffad1595b9824cba25443bc581997fb6/docs/KNOWN_ISSUES_2026-11-15.md)의 설치 조사 보고다. 과거 memo는 `Update.root_group()`을 적었지만 2026-11-16에 조회한 [공개 API 선언](https://cascadeur.com/python-api/_generate/csc.update.Update.html)은 `Update.root()`이다. 현재 설치 선언을 수집하여 이름·반환형을 결정하며 자동 fallback getter를 만들지 않는다. 이번에는 설치를 열거나 SDK를 실행하지 않았다. `Scene.modify_update` → `updater.get_interpolator().reload()/interpolate()` 호출은 위 현재 source에서 직접 확인했다. 공개 node/edge accessor의 존재만으로 설치 graph의 완전성·native storage dtype를 확정하지 않는다.
 
 ## 1. 두 mesh를 실제 pair 경로에 연결하기
 
@@ -136,7 +136,7 @@ setup와 capture의 request lifetime도 분리한다. `PairGeometryPositivePath.
 - authored storage 여부의 실제 의미. getter가 이 사실을 제공하지 않으면 `None`이며 exact 유지. 이름/Animation 모드만으로 `False`를 쓰지 않는다.
 - graph-only 변경이 같은 raw projection에 숨어도 digest가 바뀌어야 한다. 일회 graph 캐시/role-layout digest를 현재성 증거로 쓰지 않는다. transient pointer를 임의로 제거해 동일 graph라고 만드는 canonicalization도 금지한다.
 
-root의 host-only declaration collector에 줄 우선 파일은 설치 `resources/scripts/stubs/csc/domain/__init__.pyi`, `.../csc/tools/__init__.pyi`다. `.../csc/model/__init__.pyi`, `.../csc/app/__init__.pyi`는 경로 존재를 확인할 후보다. 필요한 class는 Scene/SceneUpdater/Update/Data 및 `Update.root_group` 반환 타입과 그 도달 가능한 typed graph/port 타입이다. dtype/edge 메서드 이름을 알지 못하므로 해당 class 선언을 수집하고 반환 타입을 따라간다. graph getter/dtype getter의 정확한 이름을 이 문서가 가정하지 않는다.
+root의 host-only declaration collector에 줄 우선 파일은 설치 `resources/scripts/stubs/csc/domain/__init__.pyi`, `.../csc/tools/__init__.pyi`다. `.../csc/update/__init__.pyi`, `.../csc/model/__init__.pyi`, `.../csc/app/__init__.pyi`도 경로 존재를 확인할 후보다. 필요한 class는 Scene/SceneUpdater/Update/Data와 Update 반환 타입 및 그 도달 가능한 typed graph/port 타입이다. `../tools/collect_native_evidence.py`는 이 다섯 후보와 관련 class 선언을 한 번에 모으며, 없는 후보를 별도로 기록한다. 공개 문서의 함수명을 설치 코드에 추정 적용하지 않고 실제 선언과 반환형을 따라간다.
 
 ### Issuer와 consumer
 
