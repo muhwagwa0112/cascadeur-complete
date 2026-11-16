@@ -385,10 +385,10 @@ def dispatch_setup(request, sidecar):
     validate_helper_bytes(plan)
     # The exact fresh plan directory is an approved effect. Each helper owns
     # one finite child, so its fixture paths remain under runtime snapshots.
-    assert_request_admission()
-    from .producer_observation import assert_native_first_effect
-    current = _LOCAL.request
-    assert_native_first_effect(current[0], current[1])
+    # This mkdir is the first setup effect, before any helper/SDK callback.
+    # Use the normal write boundary so a later exception cannot report
+    # not_started after leaving a workspace, retained tabs or fixture files.
+    guards.before_write()
     plan_workspace = Path(plan["workspace"])
     plan_workspace.mkdir()
     plan_workspace_identity = store.physical_identity(plan_workspace)
@@ -420,6 +420,7 @@ def dispatch_setup(request, sidecar):
             else:
                 raise p.PolicyError("UNKNOWN_SETUP_HELPER")
             results.append({"operation": setup_id, "result": result})
+        guards.finish_write()
         return results
     finally:
         _LOCAL.setup = None

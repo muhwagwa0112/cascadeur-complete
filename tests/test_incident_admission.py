@@ -189,6 +189,11 @@ def test_exact_setup_dispatch_owns_parent_and_step_directory(tmp_path, monkeypat
             assert not result["ok"] and result["outcome"] == "outcome_unknown"
             assert "SETUP_PLAN_WORKSPACE_IDENTITY_CHANGED" in result["error_message"]
             assert not (workspace / "0").exists()
+            # The approved workspace was already created. A retained failure
+            # must not claim that writes never started, or certify completion.
+            assert result["write_phase"] == "started"
         else:
             assert result["ok"] and result["outcome"] == "succeeded"
+            assert result["write_phase"] == "completed"
+        assert queue.ledger.read_receipt(request.request_id).terminal_result == result
         assert runtime.execute_request(None, payload) == result and len(calls) == 1
