@@ -1,0 +1,770 @@
+{
+  "packet_version": "r5-code-ready",
+  "prepared_at": "2026-11-16",
+  "repository": "muhwagwa0112/cascadeur-complete",
+  "base_branch": "feat/cascadeur-motion-r3",
+  "base_commit": "fc0e98eaa30e819f98880a32dce30c6767a5cc64",
+  "scope": "이번 반복 중단 개선안의 코드 수준 준비",
+  "product_applied": false,
+  "pushed": false,
+  "dependency_changes": [],
+  "protocol_strategy": "기존 signed request + 별 authenticated admission sidecar; blanket protocol bump 미제안",
+  "validation_policy": {
+    "preparation": "작성물 Python 문법 및 exact patch 문맥 L1",
+    "future": "직접 변경 지점 L1/L2; 공개 공유 계약이면 필요한 모듈 L3",
+    "l4": "미실행; 자동 gate/CI 추가 없음"
+  },
+  "tasks": [
+    {
+      "id": "R5-01",
+      "priority": "P0",
+      "title": "원 terminal을 보존하는 incident journal와 read-only inspection",
+      "depends_on": [],
+      "targets": [
+        {
+          "path": "src/cascadeur_complete/incident_store.py",
+          "kind": "proposed_new",
+          "symbols": [
+            "read_verified_domain",
+            "append_event",
+            "project_incidents"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/request_ledger.py",
+          "kind": "reuse_unchanged",
+          "symbols": [
+            "RequestLedger.read_request",
+            "RequestLedger.read_receipt",
+            "RequestLedger.unresolved_effects"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/paths.py",
+          "kind": "reuse_unchanged",
+          "symbols": [
+            "RuntimePaths.state"
+          ]
+        }
+      ],
+      "spec": "incident/INTEGRATION.md",
+      "reference": "incident/reference_incident_policy.py",
+      "implementation": [
+        "원 request/terminal canonical+raw digest와 원 domain key/instance를 결합한 별 journal를 추가한다.",
+        "raw unresolved_effects는 과거 사실을 계속 반환한다. incident disposition이 raw ledger를 제거/수정하지 않는다.",
+        "append writer lock, seq/previous hash/MAC, 임시 기록의 flush/fsync와 원자 publish, crash 후 complete verified prefix 처리를 구현한다.",
+        "원 global/isolated domain을 각각 검증하고 aggregate registry head에 두 참여 domain을 명시한다. 키를 병합하지 않는다."
+      ],
+      "acceptance": [
+        "원 request/receipt/token/budget 바이트 불변",
+        "잘못된 MAC/domain/sequence/head 및 원 terminal 불일치 시 실행 허용 없음",
+        "진단 경로에서 SourceBinding/token/qualification 발급 없음"
+      ],
+      "evidence_blockers": [
+        "원 로컬 request/receipt/인증키는 이 환경에서 미조회"
+      ],
+      "approval_surface": [
+        "신규 incident journal/control 저장 schema"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "incident/CASE_SPEC.md"
+    },
+    {
+      "id": "R5-02",
+      "priority": "P0",
+      "title": "authoritative observation과 scoped retirement control",
+      "depends_on": [
+        "R5-01"
+      ],
+      "targets": [
+        {
+          "path": "src/cascadeur_complete/incident_control.py",
+          "kind": "proposed_new",
+          "symbols": [
+            "incident_inspect",
+            "incident_observe",
+            "incident_retirement_prepare",
+            "incident_retirement_commit"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/server.py",
+          "kind": "proposed_additive_api",
+          "symbols": [
+            "incident_inspect",
+            "incident_observe",
+            "incident_retirement_prepare",
+            "incident_retirement_commit"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/service.py",
+          "kind": "modify",
+          "symbols": [
+            "CascadeurService.__init__",
+            "proposed thin incident control methods"
+          ]
+        }
+      ],
+      "spec": "incident/INTEGRATION.md",
+      "reference": "incident/reference_incident_policy.py",
+      "implementation": [
+        "원 attempt/epoch/build/source에 결합된 권위 있는 native evidence만 후속 observation으로 기록한다.",
+        "retirement prepare에 원 terminal/head, producer 생성 identity, affected resources, retained outputs, baseline, 새 workspace, expiry와 plan digest를 고정한다.",
+        "operator 승인과 실제 producer 종료/자원 분리 근거를 함께 검사한 뒤 append-only retirement를 commit한다.",
+        "retirement 도중 crash/동시 요청은 보류 상태로 남기고 idempotent 동일 plan 관찰만 허용한다."
+      ],
+      "acceptance": [
+        "원 outcome_unknown 그대로 보존",
+        "사용자 승인 또는 현재 장면만으로 원 완료 증명 불가",
+        "범위 불명/alias/살아 있는 producer/미종결 외부 효과면 retirement 또는 새 작업 허용 없음",
+        "원 run 재개·원 효과 replay·예산 환급 없음"
+      ],
+      "evidence_blockers": [
+        "실제 process 종료와 파일 identity/원 baseline은 local verifier가 확인해야 함"
+      ],
+      "approval_surface": [
+        "새 공개 control API",
+        "실제 retirement 자원·baseline 선택에 대한 구체적 승인"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "incident/CASE_SPEC.md"
+    },
+    {
+      "id": "R5-03",
+      "priority": "P0",
+      "title": "기존 signed request에 결합한 양쪽 admission과 setup lane",
+      "depends_on": [
+        "R5-01",
+        "R5-02"
+      ],
+      "targets": [
+        {
+          "path": "src/cascadeur_complete/bridge_client.py",
+          "kind": "modify",
+          "symbols": [
+            "BridgeClient.execute",
+            "BridgeClient._execute_once"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/bridge_client.py",
+          "kind": "reuse_unchanged",
+          "symbols": [
+            "BridgeClient.reconcile_request",
+            "BridgeClient.request_status"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/atomic_queue.py",
+          "kind": "modify",
+          "symbols": [
+            "AtomicQueue.submit"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/incident_admission.py",
+          "kind": "proposed_new",
+          "symbols": [
+            "reserve_admission",
+            "issue_for_signed_request",
+            "prepare_setup_invocation"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/incident_admission.py",
+          "kind": "proposed_new",
+          "symbols": [
+            "verify_admission",
+            "claim_admission",
+            "assert_current_admission",
+            "claim_setup_invocation",
+            "assert_setup_admission"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/runtime.py",
+          "kind": "modify",
+          "symbols": [
+            "_drain_once",
+            "execute_request",
+            "_run_operation_legacy"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/guarded_runtime.py",
+          "kind": "modify",
+          "symbols": [
+            "capabilities",
+            "begin_request",
+            "before_write"
+          ]
+        }
+      ],
+      "spec": "incident/INTEGRATION.md",
+      "reference": "incident/reference_incident_policy.py",
+      "implementation": [
+        "BridgeRequest/RequestReceipt 원 wire 형식은 유지하고 exact signed request digest·epoch·operation·resource manifest·incident heads에 묶인 sidecar를 발급한다.",
+        "outbox 고정→sidecar durable→queue publish 순서 및 native dispatch/first-effect 재검사를 연결한다.",
+        "새 runtime capability/loaded fingerprint가 없는 bridge에는 새 host가 dispatch하지 않는다. ticket 없는 old host effect는 새 native가 거절한다.",
+        "메뉴 qualifier direct 호출도 authenticated setup invocation과 같은 admission으로 제한한다. setup은 일반 source/permit을 발급하는 우회가 아니다.",
+        "새 unknown 또는 domain head 변경 시 준비된 ticket을 다시 확인한다. 의도·자원·epoch가 바뀐 request에 ticket 재사용 불가."
+      ],
+      "acceptance": [
+        "열린 unknown의 진단은 bounded diagnostic만 허용; setup은 원 완료 closure 또는 retirement+분리 후 authenticated invocation으로 시작",
+        "old request replay와 old run continuation 불가",
+        "sidecar 단독으로 token/source/recipe authority를 대체하지 않음",
+        "새 root만으로 known incident 제외 불가"
+      ],
+      "evidence_blockers": [
+        "OS 자원/producer verifier와 원 auth-domain registry 통합 필요"
+      ],
+      "approval_surface": [
+        "새 admission sidecar/registry schema",
+        "additive capability/control 계약"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "incident/CASE_SPEC.md"
+    },
+    {
+      "id": "R5-04",
+      "priority": "P0",
+      "title": "완료 실패 관찰 유지와 오류 payload 보존",
+      "depends_on": [],
+      "targets": [
+        {
+          "path": "cascadeur_side/cascadeur_complete/guarded_runtime.py",
+          "kind": "modify",
+          "symbols": [
+            "begin_request",
+            "proposed begin_adapter_attempt",
+            "proposed lookup_failure_observation",
+            "proposed selected_effect_for_request"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/runtime.py",
+          "kind": "modify",
+          "symbols": [
+            "_run_operation",
+            "execute_request",
+            "_execute_request_impl",
+            "_error"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_independent_position.py",
+          "kind": "modify",
+          "symbols": [
+            "_observe_failed_write",
+            "prepare_recovery_binding",
+            "proposed shared private validator"
+          ]
+        }
+      ],
+      "spec": "completion/COMPLETION_IMPLEMENTATION.md",
+      "reference": "completion/reference_completion_policy.py",
+      "patch": "patches/01-runtime-error-observation-payload.patch",
+      "implementation": [
+        "현재 request/adapter/source/epoch에 결합된 private 실패 관찰을 검증해 wrapper fallback이 덮어쓰지 않게 한다.",
+        "오류 result=None을 effectful dispatched 실패에서만 dict로 정규화하여 원 오류+post_source+관찰을 보존한다.",
+        "terminal 직전에 callback generation/live trace/revocation을 확인한다. 효과 phase만으로 completed/no_effect를 만들지 않는다.",
+        "원 error와 capture error를 분리하고 terminal 자기 digest 순환 없이 candidate→receipt→private finalization을 연결한다."
+      ],
+      "acceptance": [
+        "completed private failure 뒤 추가 unknown 관찰 0",
+        "동일 요청 private proof 없는 실패는 unknown",
+        "result=None 때문에 실제 after·관찰 소실 없음",
+        "recovery eligibility는 별 판정"
+      ],
+      "evidence_blockers": [
+        "실제 native 증거는 코드 모델로 대체 불가"
+      ],
+      "approval_surface": [
+        "native 내부 record/관찰 계약 및 오류 반환 필드 추가"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "completion/COMPLETION_IMPLEMENTATION.md"
+    },
+    {
+      "id": "R5-05",
+      "priority": "P0",
+      "title": "삽입 실패 actual after·consumed source·복구 연결",
+      "depends_on": [
+        "R5-04"
+      ],
+      "targets": [
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_key_insertion.py",
+          "kind": "modify",
+          "symbols": [
+            "insert_positions",
+            "_SOURCES failure state"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_key_insertion_adapter.py",
+          "kind": "modify",
+          "symbols": [
+            "NativeKeyInsertionAdapter._state",
+            "NativeKeyInsertionAdapter.execute",
+            "proposed validate_failure_observation",
+            "proposed capture_known_failed_after"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_key_insertion_evidence.py",
+          "kind": "preserve_success_only",
+          "symbols": [
+            "finalize_insertion",
+            "verify_key_topology"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_checkpoint_restore.py",
+          "kind": "reuse_guarded_boundary",
+          "symbols": [
+            "prepare_recovery_binding"
+          ]
+        }
+      ],
+      "spec": "completion/COMPLETION_IMPLEMENTATION.md",
+      "implementation": [
+        "core의 actual trace/after/전체 closure를 봉인하고 qualified completed-failure와 unknown을 분리한다.",
+        "known failure source는 read/capture와 재dispatch 권한을 분리하며 원 삽입은 consumed로 유지한다.",
+        "원 scope 밖 변경은 ordinary post_source나 복구 권한으로 승격하지 않고 별 failure observation을 보존한다.",
+        "같은 원 request/scope/working identity의 insertion-specific failure attestation이 있는 경우에만 상속된 recovery binding을 연결한다."
+      ],
+      "acceptance": [
+        "LINEAR→STEP에 position-prefix 증거 재사용 금지",
+        "known failure도 성공 topology evidence 발급 없음",
+        "실패 workspace의 자동 continuation/publish 불가",
+        "old unknown 소급 변환 없음"
+      ],
+      "evidence_blockers": [
+        "삽입 실패별 synchronous closure와 복원 가능한 scope에 대한 실제 SDK 근거"
+      ],
+      "approval_surface": [
+        "native private 실패 관찰 계약"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "completion/COMPLETION_IMPLEMENTATION.md"
+    },
+    {
+      "id": "R5-06",
+      "priority": "P1",
+      "title": "exact 설치 profile과 native 지원 보고 분리",
+      "depends_on": [],
+      "targets": [
+        {
+          "path": "scripts/verify-install.ps1",
+          "kind": "modify",
+          "symbols": [
+            "param InstallationProfile",
+            "catalog/build check",
+            "NativeQualification report"
+          ]
+        }
+      ],
+      "spec": "lifecycle/README.md",
+      "patch": "lifecycle/patches/01_exact_installation_profile.proposed.patch",
+      "implementation": [
+        "기존 catalog-2026.1 기본값 유지, explicit independent-2026.2는 정확히 2026.2.3.0.16863만 선택한다.",
+        "disk/registration/stdio와 running epoch/native operations를 별도 보고한다.",
+        "기존 host narrow build/feature gate와 installer transaction/state migration은 유지한다."
+      ],
+      "acceptance": [
+        "all 2026.2 또는 모든 rig 지원 선언 없음",
+        "SkipCascadeurVersion이 native capability를 열지 않음",
+        "새 installer flag 발명 없음"
+      ],
+      "evidence_blockers": [
+        "이 환경에는 PowerShell/Cascadeur 설치 실행이 없음"
+      ],
+      "approval_surface": [
+        "verify-install 신규 InstallationProfile 공개 인수와 JSON 출력 필드"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "lifecycle/README.md"
+    },
+    {
+      "id": "R5-07",
+      "priority": "P1",
+      "title": "실제 사용하는 잔여 qualifier의 retained lifecycle",
+      "depends_on": [
+        "R5-03"
+      ],
+      "targets": [
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_probe_retention.py",
+          "kind": "proposed_new",
+          "symbols": [
+            "RetainedProbe",
+            "retained_probe_result"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_adapters.py",
+          "kind": "modify",
+          "symbols": [
+            "qualify_disposable"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_interpolation_qualification.py",
+          "kind": "modify",
+          "symbols": [
+            "qualify_independent_models",
+            "ensure_independent_models"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_independent_position.py",
+          "kind": "modify",
+          "symbols": [
+            "qualify_independent_position_writer"
+          ]
+        }
+      ],
+      "spec": "lifecycle/README.md",
+      "patch": "lifecycle/patches/02_retain_qualification_fixtures.proposed.patch",
+      "implementation": [
+        "현재 finite 사용 경로의 자동 tab 제거를 retained ownership/identity 기록으로 바꾼다.",
+        "원 탭 inventory/활성 projection을 보존하고 실패 시 새 native save/close로 primary error를 덮지 않는다.",
+        "재사용할 때 현재 private proof를 재검증하고 원 관측을 자동 반복하지 않는다.",
+        "setup admission을 첫 directory/create/save/effect 이전에 연결한다. 기존 broad include_scene_adapter=True 경로는 이 finite 실행 절차의 대상이 아니다."
+      ],
+      "acceptance": [
+        "원 탭/파일 자동 삭제 없음",
+        "retained 탭/파일과 실패 이유 식별 가능",
+        "새 effect 전에 setup grant/resource budget 확인",
+        "Qt/native crash 해결 완료 주장 없음"
+      ],
+      "evidence_blockers": [
+        "실제 탭 lifetime 및 native memory/crash 원인은 미검증"
+      ],
+      "approval_surface": [
+        "qualifier 동작·precondition·retention 저장 형식 변경"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "lifecycle/README.md"
+    },
+    {
+      "id": "R5-08",
+      "priority": "P1",
+      "title": "source·평가·완료와 연결한 actual mesh capture",
+      "depends_on": [
+        "R5-03",
+        "R5-04",
+        "R5-07"
+      ],
+      "targets": [
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_geometry_capture.py",
+          "kind": "proposed_new",
+          "symbols": [
+            "NativeGeometryCaptureAdapter.required_scope",
+            "NativeGeometryCaptureAdapter.capture",
+            "NativeGeometryCaptureAdapter.execute",
+            "stage_geometry_capture",
+            "finalize_geometry_capture",
+            "get_geometry_capture",
+            "verify_geometry",
+            "validate_geometry_arguments"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/handlers/mesh.py",
+          "kind": "extract_existing_array_logic_without_changing_public_return",
+          "symbols": [
+            "mesh_sample",
+            "proposed _read_mesh_arrays",
+            "proposed _sample_mesh_positions"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_adapters.py",
+          "kind": "modify",
+          "symbols": [
+            "verify_observation(kind=geometry_capture)"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/runtime.py",
+          "kind": "modify",
+          "symbols": [
+            "_run_operation",
+            "_run_operation_legacy: get only, no observe fallback",
+            "_request_effect",
+            "execute_request terminal finalization"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/effects.py",
+          "kind": "modify",
+          "symbols": [
+            "classify_effect"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/recipe_native_service.py",
+          "kind": "proposed_additive_methods",
+          "symbols": [
+            "geometry prepare/commit",
+            "get_geometry_capture",
+            "recipe_verify_geometry"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/motion_geometry.py",
+          "kind": "modify",
+          "symbols": [
+            "WindowedSurfaceTrack._load"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/motion_quality.py",
+          "kind": "connect_existing_contract",
+          "symbols": [
+            "actual_mesh_metrics",
+            "evaluate_actual_quality"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/native_geometry_contract.py",
+          "kind": "proposed_new",
+          "symbols": [
+            "GeometryCaptureArguments"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/product_catalog.py",
+          "kind": "guarded_operation_routing_without_baseline_version_change",
+          "symbols": [
+            "new guarded geometry operation mapping"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/feature_registry.py",
+          "kind": "modify",
+          "symbols": [
+            "build_registry"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/recipe_planning.py",
+          "kind": "add_approved_geometry_stage_lowering",
+          "symbols": [
+            "proposed geometry capture stage; exact operation/args/resource reservation"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/recipe_runner.py",
+          "kind": "add_approved_geometry_stage_execution",
+          "symbols": [
+            "proposed prepare/commit -> original request reconcile -> get/verify continuation"
+          ]
+        }
+      ],
+      "spec": "motion/MOTION_IMPLEMENTATION.md",
+      "reference": "motion/geometry_policy.py",
+      "implementation": [
+        "observe는 명시 file effect로 양쪽 분류하고 NativeGeometryCaptureAdapter 경로에서만 실행한다. 최상위 geometry operation source와 arguments.motion_source_binding을 구별한다. 첫 mkdir/write 이전 admission/source guard를 함께 확인한다.",
+        "정확한 installed calc_skinned_mesh 호출·원 배열을 유지하며 known-transform fixture의 좌표계/단위/신선도 관측을 private contract로 결합한다.",
+        "read→compute/copy→read에서 source/epoch/topology/skin/transform/schedule을 비교하고 bounded windows/call budget을 예약한다.",
+        "candidate/window와 geometry 전용 completion sidecar는 원 file effect 안에서 durable 완료한다. terminal 후 memory-only private 봉인→별 get/verify로 연결하며 새 최종 파일 출력은 별 file effect다.",
+        "원 source/successor/capture/evaluation/receipt와 raw/canonical/topology/skin/window hash를 actual_mesh_metrics 입력에 매핑한다."
+      ],
+      "acceptance": [
+        "NPZ hash만으로 native_actual 발급 없음",
+        "public frame grid 정렬 계약 유지",
+        "receipt self-hash 순환 없음",
+        "필수 collision/mesh coverage 부족은 품질 pass 아님",
+        "admission sidecar와 geometry completion evidence의 purpose/권한 혼용 없음"
+      ],
+      "evidence_blockers": [
+        "실제 coordinate/freshness/calculation completion calibration"
+      ],
+      "approval_surface": [
+        "새 geometry 관측/봉인/조회 API·schema"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "motion/VALIDATION_PLAN.md"
+    },
+    {
+      "id": "R5-09",
+      "priority": "P1",
+      "title": "fixed-anchor typed serialization equivalence",
+      "depends_on": [
+        "R5-03",
+        "R5-04",
+        "R5-07"
+      ],
+      "targets": [
+        {
+          "path": "cascadeur_side/cascadeur_complete/serialization_equivalence.py",
+          "kind": "proposed_new_pure_logic",
+          "symbols": [
+            "compare_projections",
+            "DerivedPolicy",
+            "DerivedRule"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_serialization.py",
+          "kind": "proposed_new_private_authority_boundary",
+          "symbols": [
+            "compare_with_private_policy",
+            "private serialization policy lookup/observation issuance"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_adapters.py",
+          "kind": "modify",
+          "symbols": [
+            "checkpoint"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_checkpoint_restore.py",
+          "kind": "modify",
+          "symbols": [
+            "remember_checkpoint",
+            "_anchor",
+            "_restore_native",
+            "qualify_restore",
+            "NativeCheckpointRestoreAdapter.execute",
+            "NativeCheckpointRestoreAdapter.approve_successor"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/qualify_checkpoint_restore_adapter.py",
+          "kind": "preserve_exact_final_observation",
+          "symbols": [
+            "_observe"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_scene_reader.py",
+          "kind": "reuse_raw_projection_unchanged",
+          "symbols": [
+            "read_scene; role metadata is a separate private descriptor"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/guarded_runtime.py",
+          "kind": "reuse_unchanged_identity_semantics",
+          "symbols": [
+            "digest",
+            "capture_source",
+            "assert_source"
+          ]
+        }
+      ],
+      "spec": "motion/MOTION_IMPLEMENTATION.md",
+      "reference": "motion/serialization_equivalence.py",
+      "implementation": [
+        "authored/구조/설정/미분류 값은 exact로 유지하고 실제 owner/behaviour/property/producer가 확인된 derived 값만 비교한다.",
+        "사전 고정한 dtype/ULP/physical/rotation 기준과 shape/finite/budget 조건을 적용한다.",
+        "모든 save/reload를 원 immutable P0 anchor와 직접 비교하고 tolerance chain으로 drift를 허용하지 않는다.",
+        "새 복원 tab raw digest를 source에 쓰고 원 anchor와 equivalence를 별 record로 연결한다. checkpoint/remember/restore/successor/active/idle 모든 경계를 함께 바꾼다."
+      ],
+      "acceptance": [
+        "allclose 한 줄 완화 없음",
+        "field 이름·DataMode만으로 derived 판정 없음",
+        "원 file/source hash rounding 없음",
+        "동등성이 native completion/품질 pass를 대신하지 않음"
+      ],
+      "evidence_blockers": [
+        "exact installed field-role/producer 근거와 실제 저장 왕복"
+      ],
+      "approval_surface": [
+        "serialization evidence schema·source/restore 연결 계약"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "motion/VALIDATION_PLAN.md"
+    },
+    {
+      "id": "R5-10",
+      "priority": "P2",
+      "title": "unbaking 미지원 조기 반환과 실제 완료 adapter 계약",
+      "depends_on": [
+        "R5-03"
+      ],
+      "targets": [
+        {
+          "path": "src/cascadeur_complete/server.py",
+          "kind": "modify",
+          "symbols": [
+            "animation_unbaking_prepare before _prepare"
+          ]
+        },
+        {
+          "path": "src/cascadeur_complete/recipe_native_service.py",
+          "kind": "modify",
+          "symbols": [
+            "recipe_preflight",
+            "proposed RecipeNativeServiceMixin.require_native_unbaking_step"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/handlers/generation.py",
+          "kind": "modify",
+          "symbols": [
+            "unbaking: native capability check before selection modification"
+          ]
+        },
+        {
+          "path": "cascadeur_side/cascadeur_complete/native_unbaking.py",
+          "kind": "add_private_capability_check_preserve_bounds",
+          "symbols": [
+            "proposed require_step_contract",
+            "reuse validate_arguments",
+            "reuse compare_projections"
+          ]
+        }
+      ],
+      "spec": "motion/MOTION_IMPLEMENTATION.md",
+      "reference": "motion/unbaking_requirements.py",
+      "implementation": [
+        "server.animation_unbaking_prepare의 _prepare 호출 전, recipe_preflight에서 예약 전, generation.unbaking의 selection 변경 전 같은 qualified-step 조건을 확인한다.",
+        "정확한 installed action binding/실제 sync leaf 또는 correlated terminal signal 없으면 prepare/예약/첫 effect 전에 원인을 반환한다.",
+        "수동 dialog/late callback/opaque deferral 경로는 observed completion으로 승격하지 않는다.",
+        "요구된 stage를 자동 생략하거나 sparse fitting으로 바꿔 성공 처리하지 않는다."
+      ],
+      "acceptance": [
+        "return None/idle/quiet snapshot으로 완료 판정 없음",
+        "unsupported 이유가 effect 전에 전달",
+        "기존 topology 권한/finite key budget 유지"
+      ],
+      "evidence_blockers": [
+        "세 action의 실제 installed binding과 completion semantics"
+      ],
+      "approval_surface": [
+        "실제 native 완료 adapter 활성화 계약"
+      ],
+      "preparation_status": "code_contract_and_cases_prepared",
+      "implementation_status": "not_applied",
+      "native_validation": "not_run",
+      "minimum_verification_spec": "motion/VALIDATION_PLAN.md"
+    }
+  ]
+}
