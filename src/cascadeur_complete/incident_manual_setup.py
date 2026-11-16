@@ -36,18 +36,28 @@ def _active(root, stores):
     return next(value for value in stores if value.root == Path(root).resolve())
 
 
-def _legacy_locked(registry, stores, *, request=None, active=None, projections=None):
+def _legacy_locked(registry, stores, *, request=None, active=None, projections=None,
+                   reviewed_incident_ids=None):
     from .incident_admission import collect_snapshot_locked, projection_heads
     if projections is None:
         _, projections, _ = collect_snapshot_locked(registry, stores, request, active)
     incidents = [item for projection in projections for item in projection.incidents]
     if any(projection.unsealed_effect_request_ids for projection in projections):
         raise p.EvidenceUnavailable("MANUAL_SETUP_OTHER_UNSEALED_EFFECTS_REMAIN")
-    if (len(incidents) != 2
-            or {item.original.request_id for item in incidents} != LEGACY_IDS
+    expected = LEGACY_IDS
+    if reviewed_incident_ids is not None:
+        if (not isinstance(reviewed_incident_ids, list) or not reviewed_incident_ids
+                or len(set(reviewed_incident_ids)) != len(reviewed_incident_ids)
+                or any(not isinstance(value, str) or str(uuid.UUID(value)) != value
+                       for value in reviewed_incident_ids)):
+            raise p.PolicyError("MANUAL_SETUP_EXPLICIT_INCIDENT_IDS_REQUIRED")
+        expected = frozenset(reviewed_incident_ids)
+    if (len(incidents) != len(expected)
+            or {item.original.request_id for item in incidents} != expected
             or any(item.observation is not None or item.retirement_plan is not None
                    or item.retirement is not None for item in incidents)):
-        raise p.EvidenceUnavailable("MANUAL_SETUP_REQUIRES_EXACT_TWO_OPEN_LEGACY_INCIDENTS")
+        raise p.EvidenceUnavailable("MANUAL_SETUP_REVIEWED_OPEN_INCIDENT_SET_DIFFERS"
+            if reviewed_incident_ids is not None else "MANUAL_SETUP_REQUIRES_EXACT_TWO_OPEN_LEGACY_INCIDENTS")
     originals = tuple(sorted((item.original for item in incidents),
                              key=lambda item: (item.domain, item.request_id)))
     return originals, projection_heads(projections)
@@ -67,11 +77,14 @@ def _stored_plan(active, plan_digest):
     p._digest_string(plan_digest, "manual setup plan digest")
     plan = store.read(active.directory / "manual-setup-plans" / (plan_digest + ".json"))
     store.verify(plan, active.secret, PLAN_PURPOSE)
-    store.exact(plan, {"schema_version", "purpose", "domain", "registry_digest", "heads",
+    fields = {"schema_version", "purpose", "domain", "registry_digest", "heads",
         "originals", "setup_plan_digest", "setup_plan", "request_id", "operation_plan",
         "runtime_epoch", "loaded_fingerprint", "run_id", "workspace_generation_id",
-        "baseline", "residuals", "created_at", "expires_at", "mac"})
-    if (p.digest(plan) != plan_digest or plan["schema_version"] != 1
+        "baseline", "residuals", "created_at", "expires_at", "mac"}
+    if plan.get("schema_version") == 2:
+        fields.add("reviewed_incident_ids")
+    store.exact(plan, fields)
+    if (p.digest(plan) != plan_digest or plan["schema_version"] not in (1, 2)
             or plan["purpose"] != ROUTE or plan["domain"] != asdict(active.domain)
             or plan["residuals"] != list(RESIDUALS)):
         raise p.PolicyError("MANUAL_SETUP_STORED_PLAN_CHANGED")
@@ -86,7 +99,7 @@ def _plan_locked(active, registry, stores, plan_digest, *, request=None, project
     if plan["registry_digest"] != p.digest(registry) or time.time() >= plan["expires_at"]:
         raise p.PolicyError("MANUAL_SETUP_PLAN_EXPIRED_OR_CHANGED")
     original_refs, heads = _legacy_locked(registry, stores, request=request, active=active,
-                                          projections=projections)
+        projections=projections, reviewed_incident_ids=plan.get("reviewed_incident_ids"))
     if plan["originals"] != [asdict(item) for item in original_refs] or plan["heads"] != heads:
         raise p.PolicyError("MANUAL_SETUP_LEGACY_HEADS_CHANGED")
     native_plan = _read_setup(active, plan["setup_plan_digest"])
@@ -107,7 +120,7 @@ def _plan_locked(active, registry, stores, plan_digest, *, request=None, project
         raise p.PolicyError("MANUAL_SETUP_BASELINE_CHANGED")
     if (plan["runtime_epoch"] in {item.original_runtime_epoch for item in original_refs}
             or plan["run_id"] in {item.original_run_id for item in original_refs}
-            or plan["request_id"] in LEGACY_IDS):
+            or plan["request_id"] in {item.request_id for item in original_refs}):
         raise p.PolicyError("MANUAL_SETUP_REQUIRES_NEW_RUNTIME_AND_RUN")
     parent = Path(native_plan["workspace"]).parent
     if (parent != active.root / "snapshots"
@@ -168,7 +181,7 @@ def _match_request(plan, plan_digest, approval, request):
         raise p.PolicyError("MANUAL_SETUP_EXACT_NEW_REQUEST_DIFFERS")
 
 
-def prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace):
+def prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace, *, reviewed_incident_ids=None):
     """Persist a reviewable draft only; no setup authority or app mutation."""
     # Native source capture is unnecessary: all new fixture contents are the
     # exact installed helper program, and every helper keeps its existing guard.
@@ -176,7 +189,7 @@ def prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace):
                                           loaded_fingerprint, workspace)
     with store.locked_registry(root) as (registry, stores):
         active = _active(root, stores)
-        originals, heads = _legacy_locked(registry, stores)
+        originals, heads = _legacy_locked(registry, stores, reviewed_incident_ids=reviewed_incident_ids)
         native_plan = _read_setup(active, draft["plan_digest"])
         if (heads != native_plan["heads"] or native_plan["registry_digest"] != p.digest(registry)
                 or runtime_epoch in {item.original_runtime_epoch for item in originals}):
@@ -195,6 +208,8 @@ def prepare(root, steps, runtime_epoch, loaded_fingerprint, workspace):
                 "setup_plan_digest": draft["plan_digest"],
                 "helper_files_digest": p.digest(native_plan["helper_files"])},
             "residuals": list(RESIDUALS), "created_at": now, "expires_at": native_plan["expires_at"]}
+        if reviewed_incident_ids is not None:
+            body.update(schema_version=2, reviewed_incident_ids=sorted(reviewed_incident_ids))
         sealed = store.seal(body, active.secret, PLAN_PURPOSE)
         plan_digest = p.digest(sealed)
         store.publish_new(active.directory / "manual-setup-plans" / (plan_digest + ".json"), sealed)
@@ -210,7 +225,7 @@ def approve_local(root, plan_digest):
         active = _active(root, stores)
         reviewed, _ = _plan_locked(active, registry, stores, plan_digest)
     print(json.dumps(reviewed, ensure_ascii=False, indent=2))
-    print("기존 두 작업의 결과·종료·간섭 여부는 미증명입니다. 표시된 새 fixture setup 1회만 승인합니다.", file=sys.stderr)
+    print(f"기존 {len(reviewed['originals'])}건의 결과·종료·간섭 여부는 미증명입니다. 표시된 새 fixture setup 1회만 승인합니다.", file=sys.stderr)
     if input("승인할 plan SHA-256 전체를 입력: ").strip() != plan_digest:
         raise p.PolicyError("MANUAL_SETUP_NOT_APPROVED")
     with store.locked_registry(root) as (registry, stores):
@@ -286,11 +301,12 @@ def _runtime_client(root):
     return client
 
 
-def prepare_with_runtime(root, steps, workspace):
+def prepare_with_runtime(root, steps, workspace, *, reviewed_incident_ids=None):
     """Read only the existing signed runtime diagnostic, then create a draft."""
     client = _runtime_client(root)
     return prepare(root, steps, client.runtime_status["runtime_epoch"],
-        client.runtime_status["adapter_fingerprint"], workspace)
+        client.runtime_status["adapter_fingerprint"], workspace,
+        reviewed_incident_ids=reviewed_incident_ids)
 
 
 def dispatch(root, plan_digest):

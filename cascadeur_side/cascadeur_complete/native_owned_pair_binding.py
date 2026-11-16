@@ -535,13 +535,18 @@ class _PairPositionAdapter:
         data_id, frame = fixture["position_data_ids"]["local"], arguments["frame"]
         value = np.asarray(arguments["position"], dtype=np.float32).reshape(3, 1)
         expected_values = []
-        def mutate(model, _update, _updater, projection, facts):
+        def mutate(model, _update, updater, projection, facts):
             assert_callback_source(scene, source, projection, facts)
             self.binding.assert_current(scene, projection, {"mesh_ids": list(self.binding.contract.mesh_ids)})
             if guards.digest(facts.material()) != self.binding.contract.graph_dtype_digest:
                 raise ValueError("PAIR_CURRENT_GRAPH_CHANGED")
             expected_values.append(expected_pair_position(projection, fixture, frame, value))
             model.data_editor().set_data_value(csc.model.DataId(data_id), frame, value)
+            # Match the installed SDK's existing transform writer: propagate
+            # this driver's dependent channels inside this same callback.
+            # Deferring it until modify_update returns makes the inner after
+            # snapshot stale; the runner must keep its exact outer readback.
+            updater.run_update({csc.model.DataId(data_id)}, frame)
         before, after, _ = runner.transition(mutate)
         if len(expected_values) != 1 or after.projection != expected_values[0]:
             raise ValueError("PAIR_POSITION_COMPLETE_NATIVE_CLOSURE_DIFFERS")

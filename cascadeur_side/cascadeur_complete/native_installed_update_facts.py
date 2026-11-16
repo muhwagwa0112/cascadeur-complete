@@ -63,20 +63,26 @@ def _node_key(node):
     kind = type(identifier).__name__
     if kind == "InterfaceId":
         return (kind, _guid(identifier.group_id), _direction(identifier.direction))
+    if kind in ("ConstantDatasId", "ConstantSettingsId", "ExternalPropertiesId"):
+        # These SDK wrappers have no string getter. Their documented identity
+        # is the containing group's ID, with the node kind as discriminator.
+        return (kind, _guid(node.parent_group().id()))
     return (kind, _guid(identifier))
 
 
 def _port_key(attribute):
     identifier = attribute.id()
     kind = type(identifier).__name__
-    if kind in ("GroupAttributeId", "ConstantDataAttributeId", "ConstantSettingAttributeId"):
+    if kind == "GroupAttributeId":
         details = (_guid(identifier.group_id), _guid(identifier.attribute_id))
+    elif kind in ("ConstantDataAttributeId", "ConstantSettingAttributeId"):
+        details = (_guid(attribute.node().parent_group().id()), _guid(identifier.attribute_id))
     elif kind == "RegularFunctionAttributeId":
         details = (_guid(identifier.function_id), str(identifier.attribute_id))
     elif kind == "SettingFunctionAttributeId":
         details = (_guid(identifier.function_id), int(identifier.attribute_index), int(identifier.attribute_sub_index))
     elif kind == "ExternalPropertyAttributeId":
-        details = (_guid(identifier.node_id), int(identifier.property))
+        details = (_guid(attribute.node().parent_group().id()), int(identifier.property))
     elif kind in ("RegularDataAttributeId", "ActualityAttributeId", "DataId", "SettingId", "HyperedgeId"):
         # The first two IDs intentionally expose no string/getter. Their one
         # input/output/actuality ports are identified by the owning typed node,
@@ -99,7 +105,11 @@ def _implementation_identity():
         raise ValueError("UPDATE_NATIVE_IMPLEMENTATION_IMAGE_UNAVAILABLE")
     image = Path(path.value)
     stat = image.stat()
-    identity = (str(image.resolve()), stat.st_size, stat.st_mtime_ns)
+    def identity_of(value):
+        # Reading the image may update atime. Pin its file identity and content
+        # metadata instead of comparing the entire stat_result (incl. atime).
+        return (str(image.resolve()), value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+    identity = identity_of(stat)
     if _IMAGE is not None:
         if _IMAGE[0] != identity:
             raise ValueError("UPDATE_NATIVE_IMPLEMENTATION_IMAGE_CHANGED")
@@ -108,7 +118,7 @@ def _implementation_identity():
         raise ValueError("UPDATE_NATIVE_IMAGE_BUDGET")
     with image.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    if image.stat() != stat:
+    if identity_of(image.stat()) != identity:
         raise ValueError("UPDATE_NATIVE_IMPLEMENTATION_IMAGE_CHANGED")
     _IMAGE = (identity, {"image_sha256": digest, "image_bytes": stat.st_size})
     return _IMAGE[1]
@@ -187,13 +197,22 @@ def extract_installed_update_facts(model, update, updater):
             pending.extend(node.groups()); pending.extend(node.regular_datas())
             pending.extend(node.regular_functions()); pending.extend(node.settings_datas())
             pending.extend(node.setting_functions()); pending.append(node.external_properties())
-        inputs, outputs = list(node.inputs()), list(node.outputs())
-        if len(inputs) + len(outputs) > _MAX_PORTS - len(ports):
+        # Static RegularData exposes outputs only; inputs() itself throws.
+        inputs = [] if isinstance(node, csc.update.RegularData) and node.mode().name == "Static" else list(node.inputs())
+        outputs = list(node.outputs())
+        if len(inputs) + len(outputs) > _MAX_PORTS:
             raise ValueError("UPDATE_PORT_BUDGET")
         row.update(inputs=[_port_key(a) for a in inputs], outputs=[_port_key(a) for a in outputs])
         reserve(row)
         for attribute in inputs + outputs:
             pk = _port_key(attribute)
+            if not attribute.node().equal_to(node):
+                # Object forwards its root UpdateGroup's interface attributes.
+                # Keep those references on the Object row, but collect each
+                # physical port only when visiting its actual owning node.
+                if not isinstance(node, csc.update.Object) or not attribute.node().equal_to(node.root_group()):
+                    raise ValueError("UPDATE_PORT_OWNER_DIFFERS")
+                continue
             if pk in ports or len(ports) >= _MAX_PORTS:
                 raise ValueError("UPDATE_PORT_COLLISION_OR_BUDGET")
             ports[pk] = {"id": pk, "kind": type(attribute).__name__, "active": bool(attribute.is_active())}
@@ -204,9 +223,12 @@ def extract_installed_update_facts(model, update, updater):
                 constants[_guid(aid.attribute_id)] = attribute
             if isinstance(attribute, csc.update.ConstantSettingAttribute):
                 constant_settings[_guid(aid.attribute_id)] = attribute
-            if isinstance(attribute, csc.update.SettingFunctionAttribute):
+            if (isinstance(attribute, csc.update.SettingFunctionAttribute)
+                    and attribute.direction().value() == csc.DirectionValue.Out):
                 ports[pk].update(output_id=_guid(attribute.output_id()), out_true=bool(attribute.is_out_true()))
 
+    if any(pk not in ports for row in nodes.values() for pk in row["inputs"] + row["outputs"]):
+        raise ValueError("UPDATE_NODE_PORT_UNOBSERVED")
     edges, external = set(), set()
     for pk, attribute in native_ports.items():
         connections = attribute.connected_attributes()
@@ -297,7 +319,7 @@ def extract_installed_update_facts(model, update, updater):
             # animation values deliberately remain in the raw projection only.
             ports[_port_key(constants[text])].update(value=encoded, native_dtype=dtype, sample_shape=shape)
         else:
-            producers = [a.node() for a in node.input().connected_leaves(False)]
+            producers = [] if node.mode().name == "Static" else [a.node() for a in node.input().connected_leaves(False)]
             producers = {_node_key(n): n for n in producers if isinstance(n, csc.update.RegularFunction)}
             producer = next(iter(producers.values())) if len(producers) == 1 else None
             consumers = tuple(sorted({_guid(n.func_id()) for a in node.output().connected_leaves(False)

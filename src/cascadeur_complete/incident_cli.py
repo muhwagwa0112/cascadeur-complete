@@ -22,6 +22,8 @@ def main():
     manual = commands.add_parser("prepare-manual-setup", help="Draft one fresh bounded setup with explicit legacy residuals")
     manual.add_argument("--step", action="append", required=True)
     manual.add_argument("--workspace", type=Path, required=True)
+    manual.add_argument("--review-open-incident", action="append", default=None,
+        help="Explicitly name EVERY current open incident for a new local reviewed plan; repeat per UUID")
     for name in ("approve-manual-setup", "dispatch-manual-setup"):
         command = commands.add_parser(name, help="Review locally or submit the exact approved manual setup once")
         command.add_argument("--plan-digest", required=True)
@@ -40,7 +42,8 @@ def main():
         result = control.inspect(root)
     elif args.command == "prepare-manual-setup":
         from .incident_manual_setup import prepare_with_runtime
-        result = prepare_with_runtime(root, args.step, args.workspace)
+        result = prepare_with_runtime(root, args.step, args.workspace,
+            reviewed_incident_ids=args.review_open_incident)
     elif args.command == "approve-manual-setup":
         from .incident_manual_setup import approve_local
         result = approve_local(root, args.plan_digest)

@@ -21,7 +21,7 @@ from . import incident_store as store
 from . import incident_manual_setup as manual
 
 ROUTE = "manual_legacy_pair_continuation_v1"
-PROFILE = "owned_two_self_bound_dense_translation_meshes_v2"
+PROFILE = "owned_two_identity_bind_dense_translation_joint_meshes_v5"
 PLAN_PURPOSE = b"cascadeur-complete/owned-pair-continuation-plan/v1\0"
 APPROVAL_PURPOSE = b"cascadeur-complete/owned-pair-continuation-approval/v1\0"
 CLAIM_PURPOSE = b"cascadeur-complete/owned-pair-continuation-claim/v1\0"
@@ -126,7 +126,8 @@ def _setup_anchor_locked(active, registry, stores, setup_plan_digest):
         raise p.PolicyError("PAIR_RETAINED_FIXTURE_OBSERVATION_REQUIRED")
     for field in ("fixture_projection_digest", "geometry_evidence_digest"):
         p._digest_string(pair[field], field)
-    originals, heads = manual._legacy_locked(registry, stores)
+    originals, heads = manual._legacy_locked(registry, stores,
+        reviewed_incident_ids=setup_plan.get("reviewed_incident_ids"))
     if (setup_plan["originals"] != [asdict(value) for value in originals]
             or setup_plan["heads"] != heads or setup_plan["registry_digest"] != p.digest(registry)):
         raise p.PolicyError("PAIR_LEGACY_STATE_CHANGED_SINCE_SETUP")
@@ -135,6 +136,8 @@ def _setup_anchor_locked(active, registry, stores, setup_plan_digest):
         "setup_terminal_bytes_digest": success["terminal_bytes_digest"],
         "runtime_epoch": setup_plan["runtime_epoch"], "loaded_fingerprint": setup_plan["loaded_fingerprint"],
         "workspace_generation_id": setup_plan["workspace_generation_id"], "pair": pair}
+    if setup_plan.get("schema_version") == 2:
+        anchor["reviewed_incident_ids"] = setup_plan["reviewed_incident_ids"]
     return anchor, originals, heads
 
 
@@ -223,7 +226,7 @@ def _stored_plan(active, plan_digest):
 def _plan_locked(active, registry, stores, plan_digest, *, request=None, projections=None):
     plan = _stored_plan(active, plan_digest)
     originals, heads = manual._legacy_locked(registry, stores, request=request, active=active,
-                                             projections=projections)
+        projections=projections, reviewed_incident_ids=plan["setup"].get("reviewed_incident_ids"))
     if (p.digest(registry) != plan["registry_digest"] or heads != plan["heads"]
             or [asdict(value) for value in originals] != plan["originals"]
             or time.time() >= plan["expires_at"]

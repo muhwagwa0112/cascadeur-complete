@@ -93,6 +93,13 @@ R6 adds these concrete entry points:
   `incident_cli approve-manual-setup --plan-digest ...` command reviews its
   residual risks; `manual_setup_commit(plan_digest)` submits only that approved
   request and observes an existing request without replay.
+  For an explicitly requested local test after another unknown, the CLI draft
+  accepts repeated `--review-open-incident UUID` arguments. Name every current
+  open incident: schema 2 binds the complete authenticated originals, heads,
+  helper bytes and fresh workspace to the reviewed plan. A missing or newly
+  added incident invalidates it at approval, dispatch and every effect. Omitting
+  the option preserves the original exact-two restriction. This is reviewed
+  local risk acceptance, not Hyper-V isolation or historical completion.
 - `pair_continuation_prepare(setup_plan_digest, context, mutation)` requires an
   actual succeeded, retained owned-pair setup. The local interactive
   `incident_cli approve-pair-continuation --plan-digest ...` command reviews the
@@ -105,15 +112,28 @@ R6 adds these concrete entry points:
   descendant, consumer or resource closure. They cannot repair old unknowns.
 
 The owned-pair helper now uses the versioned
-`owned_two_self_bound_dense_translation_meshes_v2` profile: two self-bound meshes,
+`owned_two_identity_bind_dense_translation_joint_meshes_v5` profile: two self-bound
+meshes whose Joint behaviours reference their own Transform matrices and whose
+bind shapes are exact identity matrices at every owned frame,
 three dense keys at frames 0/1/2, and exact STEP sections. Cascadeur normalizes
 adjacent keys to STEP; requiring LINEAR on that grid made the first actual setup
 fail. Authoring, whole-position prediction and continuation all require the new
 profile. This does not qualify sparse LINEAR or fractional-frame interpolation.
-The failed v1 request is retained as `outcome_unknown`; its actual fixture and
-readback were preserved. The exact-two-legacy route therefore refuses another
-setup while that additional incident is open. No native v2 setup or continuation
-success is claimed. See the [current issue memo](docs/KNOWN_ISSUES_2026-11-15.md).
+The failed requests remain `outcome_unknown` with their actual fixtures and
+readback preserved. The exact-two-legacy route refuses another setup while
+additional incidents are open; the explicit complete-open-set CLI route above
+supports the user-requested local test. On installed Cascadeur 2026.2.3.0.16863,
+the v5 setup completed its ten mesh calculations, perturbation, two evaluations
+and two graph captures and retained both scene files. This qualifies only the
+owned two-mesh, three-frame profile; general rigs remain unsupported.
+After adding same-callback `SceneUpdater.run_update` to the position writer,
+the 12-step continuation also completed: activation, position mutation,
+evaluation, motion sampling, six actual mesh calculations, geometry manifest
+readback and return to the original tab. FPS, unit and basis conversion remain
+explicit fixture policy. Native checkpoint reload, unbaking and the complete
+recipe/FBX consumer path are not qualified by this run.
+See the [current issue memo](docs/KNOWN_ISSUES_2026-11-15.md) for continuation
+results and remaining limits.
 
 Observing an authenticated terminal through `BridgeClient.reconcile_request`
 also resumes an interrupted prospective archive from its exact retained prefix.

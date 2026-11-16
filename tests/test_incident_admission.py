@@ -197,3 +197,38 @@ def test_exact_setup_dispatch_owns_parent_and_step_directory(tmp_path, monkeypat
             assert result["write_phase"] == "completed"
         assert queue.ledger.read_receipt(request.request_id).terminal_result == result
         assert runtime.execute_request(None, payload) == result and len(calls) == 1
+
+
+def test_reviewed_setup_binds_all_open_incidents_and_rejects_new_unknown(tmp_path, monkeypatch):
+    from cascadeur_complete import incident_manual_setup as manual, incident_setup as setup
+    root, other = _fixture(tmp_path, monkeypatch)
+    AtomicQueue(RuntimePaths.discover(root))
+    retained = [_unknown(other), _unknown(root), _unknown(root)]
+    ids = [request["request_id"] for request, _, _ in retained]
+    epoch = str(uuid.uuid4())
+    fingerprint = admission.p.digest(setup.helper_bytes())
+    workspace = root / "snapshots" / "reviewed-new-fixture"
+    with pytest.raises(ValueError, match="EXACT_TWO_OPEN_LEGACY"):
+        manual.prepare(root, ["setup.qualify_owned_pair_geometry"], epoch, fingerprint, workspace)
+    with pytest.raises(ValueError, match="REVIEWED_OPEN_INCIDENT_SET_DIFFERS"):
+        manual.prepare(root, ["setup.qualify_owned_pair_geometry"], epoch, fingerprint, workspace,
+                       reviewed_incident_ids=ids[:-1])
+    draft = manual.prepare(root, ["setup.qualify_owned_pair_geometry"], epoch, fingerprint, workspace,
+                           reviewed_incident_ids=ids)
+    assert draft["plan"]["schema_version"] == 2
+    assert draft["plan"]["reviewed_incident_ids"] == sorted(ids)
+    assert not draft["admission_issued"] and not workspace.exists()
+    with loaded_bridge("_reviewed_setup_bridge"):
+        native = importlib.import_module("_reviewed_setup_bridge.incident_manual_setup")
+        for module in (manual, native):
+            with persistence.locked_registry(root) as (registry, stores):
+                active = module._active(root, stores)
+                plan, originals = module._plan_locked(active, registry, stores, draft["plan_digest"])
+                assert {value.request_id for value in originals} == set(ids)
+                assert plan["reviewed_incident_ids"] == sorted(ids)
+        _unknown(other)
+        for module in (manual, native):
+            with persistence.locked_registry(root) as (registry, stores):
+                with pytest.raises(ValueError, match="REVIEWED_OPEN_INCIDENT_SET_DIFFERS"):
+                    module._plan_locked(module._active(root, stores), registry, stores, draft["plan_digest"])
+    assert all(path.read_bytes() == raw for _, path, raw in retained)

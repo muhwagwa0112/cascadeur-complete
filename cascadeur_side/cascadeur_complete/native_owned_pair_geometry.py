@@ -1,8 +1,9 @@
 """Finite two-mesh native implementation; explicit setup only.
 
-Actual SDK calls below are copied/lowered from pinned current source. The new
-two-object composition, calc inside Update callback, graph extractor and effect
-contract have NOT been run/qualified. Importing this file performs no SDK work.
+Actual SDK calls below are lowered from the installed source. The two-object
+composition, calculation in Update and typed graph must complete the explicit
+setup before a contract is issued for that epoch and scene. Importing this file
+performs no SDK work.
 The reference registry is not the production _CONTRACTS or guards._ADAPTERS.
 """
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Any, Callable
 from .serialization_equivalence import canonical_digest
 from .native_update_capture import UpdateCaptureRunner, UpdateSnapshot, frozen_json
 
-PROFILE = "owned_two_self_bound_dense_translation_meshes_v2"
+PROFILE = "owned_two_identity_bind_dense_translation_joint_meshes_v5"
 # Cascadeur canonicalizes adjacent keys to STEP (there is no in-between
 # frame). This fixture owns every frame, so author and model that exact mode;
 # it does not qualify LINEAR interpolation or fractional-frame sampling.
@@ -44,6 +45,7 @@ def native_create_owned_pair(scene, retained) -> tuple[dict[str, Any], ...]:
     import csc
     import numpy as np
     from commands.add.add_transform import add_transform_mod
+    from add_function.topology_add import add_joint_behaviour
     from common.mesh import set_mesh_object_data
     from cascadeur_complete import runtime as rt
     from cascadeur_complete.native_fixture import _owned, _modify
@@ -55,6 +57,11 @@ def native_create_owned_pair(scene, retained) -> tuple[dict[str, Any], ...]:
         for index in range(2):
             retained.before_effect()
             obj = add_transform_mod(model, update, callback_scene, session, True)
+            # calc_skinned_mesh resolves each linked object's Joint matrix.
+            # The official helper binds Joint.global_matrix to the existing
+            # Transform matrix without adding another object or animation.
+            retained.before_effect()
+            add_joint_behaviour(model, update.get_object_by_id(obj))
             model.set_object_name(obj, "MCPOwnedGeometryPair" + str(index))
             created.append(str(obj))
     _modify(domain.modify_with_session, "Create two owned geometry Transforms", create)
@@ -109,8 +116,21 @@ def native_create_owned_pair(scene, retained) -> tuple[dict[str, Any], ...]:
             obj = actual[fixture["object_id"]]
             mesh = csc.domain.assets.AssetsManager.get_cube_mesh(2.0)
             dependency = csc.domain.assets.MeshDependency(mesh)
-            set_mesh_object_data(callback_scene, model, update, update.get_object_by_id(obj),
+            node = update.get_object_by_id(obj)
+            mesh_behaviour = set_mesh_object_data(callback_scene, model, update, node,
                                  mesh, dependency, [obj], create_default_material=False)
+            # The vendor convenience helper reuses the animated Global Matrix
+            # as bindShapeMatrix. With a self-linked Joint this applies the
+            # translation twice. This fixture has an explicit identity bind
+            # shape, while the Joint supplies the animated object transform.
+            retained.before_effect()
+            bind_shape = node.root_group().create_regular_data(
+                "Owned Pair Bind Shape", np.eye(4, dtype=np.float32), csc.model.DataMode.Animation)
+            for frame in range(3):
+                retained.before_effect()
+                model.data_editor().set_data_value(bind_shape.data_id(), frame, np.eye(4, dtype=np.float32))
+            model.behaviour_editor().set_behaviour_data(
+                mesh_behaviour, "bindShapeMatrix", bind_shape.data_id())
     _modify(domain.modify, "Author and attach the owned geometry pair", author)
     if int(domain.layers_viewer().frames_count()) != 3:
         raise ValueError("PAIR_FIXTURE_TIMELINE_DIFFERS")
@@ -146,7 +166,7 @@ def native_read_pair_inputs(scene, fixtures) -> dict[str, Any]:
         identifier = fixture["object_id"]
         obj = objects[identifier]
         names = [str(bv.get_behaviour_name(b)) for b in bv.get_behaviours(obj)]
-        if len(names) != len(set(names)) or set(names) != {"Basic", "Node3d", "Transform", "FbxExport", "MeshObject"}:
+        if len(names) != len(set(names)) or set(names) != {"Basic", "Node3d", "Transform", "FbxExport", "MeshObject", "Joint"}:
             raise ValueError("PAIR_BEHAVIOUR_PROFILE_UNSUPPORTED")
         basic = bv.get_behaviour_by_name(obj, "Basic")
         if not bv.get_behaviour_object(basic, "parent").is_null():
@@ -157,9 +177,20 @@ def native_read_pair_inputs(scene, fixtures) -> dict[str, Any]:
                 or dv.get_data(matrix_id).mode.name != "Animation"):
             raise ValueError("PAIR_GLOBAL_MATRIX_OWNERSHIP_UNSUPPORTED")
         mesh_b = bv.get_behaviour_by_name(obj, "MeshObject")
-        if (list(bv.get_behaviour_objects_range(mesh_b, "linked_objects")) != [obj]
-                or bv.get_behaviour_data(mesh_b, "bindShapeMatrix") != matrix_id):
+        joint = bv.get_behaviour_by_name(obj, "Joint")
+        bind_shape_id = bv.get_behaviour_data(mesh_b, "bindShapeMatrix")
+        if (bv.get_behaviour_data(joint, "global_matrix") != matrix_id
+                or list(bv.get_behaviour_objects_range(mesh_b, "linked_objects")) != [obj]
+                or bind_shape_id.is_null() or bind_shape_id == matrix_id
+                or dv.get_data(bind_shape_id).object_id != obj
+                or dv.get_data(bind_shape_id).mode.name != "Animation"):
             raise ValueError("PAIR_SELF_BINDING_PROFILE_UNSUPPORTED")
+        # calc_skinned_mesh requires Animation mode even for an invariant bind.
+        # Read every owned frame and require exact identity at each one.
+        bind_shape = np.asarray([dv.get_data_value(bind_shape_id, frame) for frame in range(3)])
+        if (bind_shape.dtype != np.dtype("float32") or bind_shape.shape != (3, 4, 4)
+                or any(not np.array_equal(value, np.eye(4)) for value in bind_shape)):
+            raise ValueError("PAIR_IDENTITY_BIND_SHAPE_REQUIRED")
         mesh_id, dependency_id = (bv.get_behaviour_asset(mesh_b, key) for key in ("mesh", "mesh_dependency"))
         manager = domain.assets_manager()
         mesh, dependency = manager.at(mesh_id), manager.at(dependency_id)
@@ -188,6 +219,7 @@ def native_read_pair_inputs(scene, fixtures) -> dict[str, Any]:
             matrices.append(matrix.copy())
         result[identifier] = {"object_id": identifier, "mesh_behaviour_id": str(mesh_b),
             "mesh_asset_id": str(mesh_id), "dependency_asset_id": str(dependency_id),
+            "bind_shape_data_id": str(bind_shape_id), "bind_shape": native_value(bind_shape),
             "global_matrix_data_id": str(matrix_id), "positions": native_value(positions[:, :3].copy()),
             "matrices": native_value(matrices), "inverse_bind_matrices": native_value(inverse),
             "weights": [[[int(w.index), float(w.weight)] for w in row] for row in weights]}
